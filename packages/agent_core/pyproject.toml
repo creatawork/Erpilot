@@ -1,0 +1,16 @@
+[project]
+name = "agent-core"
+version = "0.1.0"
+description = "手写 agent loop：流式、工具调用、结构化输出（不依赖任何业务包）"
+requires-python = ">=3.12"
+dependencies = [
+    "openai>=1.40",
+    "pydantic>=2.7",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_core"]

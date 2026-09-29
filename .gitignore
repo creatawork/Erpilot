@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+
+# 环境与密钥
+.env
+
+# 本地数据（SQLite / trace 落盘 / 种子数据快照）
+*.db
+*.sqlite3
+data/
+
+# Node（apps/web）
+node_modules/
+
+# 日志与系统文件
+*.log
+.DS_Store
