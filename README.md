@@ -37,6 +37,7 @@ Python 3.12 · FastAPI · 手写 agent loop → LangGraph · FastMCP · PostgreS
 uv sync --all-packages       # 创建虚拟环境并安装全部工作区依赖
 cp .env.example .env         # 填入 ZHIPU_API_KEY
 uv run pytest                # 单元测试（mock，不消耗 token）
+uv run --package agent-core python -m agent_core "你好"   # M1 第 1 周验收：流式对话 + token/成本
 uv run --package erpilot-api uvicorn erpilot_api.main:app --reload
 # 验证：http://127.0.0.1:8000/healthz
 ```
@@ -53,5 +54,5 @@ uv run --package erpilot-api uvicorn erpilot_api.main:app --reload
 
 ## 文章与决策
 
-- 所有架构决策记录在 `docs/adr/`，范围冻结与启动计划见 VIE 仓库 `docs/agent-project-plan.md`
+- 所有架构决策记录在 `docs/adr/`，范围冻结与启动计划见 [`docs/agent-project-plan.md`](docs/agent-project-plan.md)
 - 系列文章《手写 Agent Loop》《给 ERP 写一个 MCP Server》《Agent 的评测怎么做》等发布于个人站点 [Vie](https://vie-vibe.cn)
