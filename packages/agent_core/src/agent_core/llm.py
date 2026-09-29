@@ -1,18 +1,21 @@
-"""M1 第 1 周产出：最小 LLM client——AsyncOpenAI 流式补全 + usage 统计。
+"""M1 第 1–2 周产出：最小 LLM client——AsyncOpenAI 流式补全 + usage 统计 + 工具调用 + 结构化输出。
 
 与 loop.py 的分工：本模块只封装"一次对话补全"的流式调用与计量；
-多轮工具调用循环、错误回填是第 2–3 周进入 loop.py 的内容。
+多轮工具调用循环、防护策略是 loop.py 的内容。
 
-事件模型：stream_chat 产出 StreamEvent（TextDelta | StreamEnd），
+事件模型：stream_chat 产出 StreamEvent（TextDelta | ToolCall | StreamEnd），
 保证恰好以一个 StreamEnd 结束——第 4 周 FastAPI SSE 只需把事件逐个转发。
 """
 
+import json
 import os
 from collections.abc import AsyncIterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
+from pydantic import BaseModel
 
 DEFAULT_BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"
 DEFAULT_MODEL = "glm-5.3-flash"
@@ -33,20 +36,41 @@ class TextDelta:
 
 
 @dataclass(frozen=True, slots=True)
+class ToolCall:
+    """一次完整的工具调用请求（流式增量归并后的结果）。
+
+    arguments 是协议原样的 JSON 字符串，由调用方解析校验。
+    """
+
+    id: str
+    name: str
+    arguments: str
+
+
+@dataclass(frozen=True, slots=True)
 class StreamEnd:
     """流的终止事件；端点未回 usage 时为 None。"""
 
     usage: Usage | None = None
 
 
-StreamEvent = TextDelta | StreamEnd
+StreamEvent = TextDelta | ToolCall | StreamEnd
 
 
 @dataclass(frozen=True, slots=True)
 class StreamResult:
-    """chat() 的一次性结果：完整回复 + 计量。"""
+    """chat() 的一次性结果：完整回复 + 工具调用 + 计量。"""
 
     text: str
+    usage: Usage | None = None
+    tool_calls: list[ToolCall] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class StructuredResult[ModelT: BaseModel]:
+    """structured() 的结果：强约束解析后的数据 + 计量。"""
+
+    data: ModelT
     usage: Usage | None = None
 
 
@@ -68,17 +92,42 @@ class LLMConfig:
         )
 
 
+def _accumulate_tool_calls(pending: dict[int, dict[str, Any]], deltas: Sequence[Any]) -> None:
+    """把流式 tool_calls 增量按 index 归并：id/name 在首包，arguments 分段拼接。"""
+    for delta in deltas:
+        slot = pending.setdefault(delta.index, {"id": None, "name": None, "arguments": []})
+        if delta.id:
+            slot["id"] = delta.id
+        if delta.function:
+            if delta.function.name:
+                slot["name"] = delta.function.name
+            if delta.function.arguments:
+                slot["arguments"].append(delta.function.arguments)
+
+
+def _strip_json_fence(text: str) -> str:
+    """剥掉模型常见的 ```json 围栏；裸 JSON 原样返回。"""
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    body = stripped.split("\n", 1)[1] if "\n" in stripped else ""
+    return body.rstrip().removesuffix("```").strip()
+
+
 class LLMClient:
-    """对 AsyncOpenAI 的最小封装：流式补全 + usage 计量。"""
+    """对 AsyncOpenAI 的最小封装：流式补全 + usage 计量 + 工具调用 + 结构化输出。"""
 
     def __init__(self, config: LLMConfig, client: AsyncOpenAI | None = None) -> None:
         self._config = config
         self._client = client or AsyncOpenAI(api_key=config.api_key, base_url=config.base_url)
 
     async def stream_chat(
-        self, messages: Sequence[ChatCompletionMessageParam]
+        self,
+        messages: Sequence[ChatCompletionMessageParam],
+        tools: Sequence[dict[str, Any]] | None = None,
     ) -> AsyncIterator[StreamEvent]:
-        """流式补全：逐段产出 TextDelta，最后恰好产出一个 StreamEnd。"""
+        """流式补全：逐段产出 TextDelta / ToolCall，最后恰好产出一个 StreamEnd。"""
+        extra = {"tools": list(tools)} if tools else {}
         stream = await self._client.chat.completions.create(
             model=self._config.model,
             messages=list(messages),
@@ -86,33 +135,63 @@ class LLMClient:
             # OpenAI 官方端点需要 include_usage 才在流末尾回传 usage；智谱兼容端点默认
             # 就带。若换用的兼容端点拒绝该参数，删掉本行即可。
             stream_options={"include_usage": True},
+            **extra,
         )
-        ended = False
+        pending: dict[int, dict[str, Any]] = {}
+        usage: Usage | None = None
         async with stream:
             async for chunk in stream:
-                if chunk.choices and (delta := chunk.choices[0].delta.content):
-                    yield TextDelta(delta)
+                choice = chunk.choices[0] if chunk.choices else None
+                if choice and choice.delta.content:
+                    yield TextDelta(choice.delta.content)
+                if choice and choice.delta.tool_calls:
+                    _accumulate_tool_calls(pending, choice.delta.tool_calls)
                 if chunk.usage is not None:
-                    ended = True
-                    yield StreamEnd(
-                        usage=Usage(
-                            prompt_tokens=chunk.usage.prompt_tokens,
-                            completion_tokens=chunk.usage.completion_tokens,
-                            total_tokens=chunk.usage.total_tokens,
-                        )
+                    usage = Usage(
+                        prompt_tokens=chunk.usage.prompt_tokens,
+                        completion_tokens=chunk.usage.completion_tokens,
+                        total_tokens=chunk.usage.total_tokens,
                     )
-                    break
-        if not ended:
-            yield StreamEnd(usage=None)
+                    break  # usage 包即收口（test_stream_stops_right_after_usage_chunk）
+        for index in sorted(pending):
+            slot = pending[index]
+            yield ToolCall(
+                id=slot["id"] or f"call_{index}",
+                name=slot["name"] or "",
+                arguments="".join(slot["arguments"]),
+            )
+        yield StreamEnd(usage=usage)
 
     async def chat(self, messages: Sequence[ChatCompletionMessageParam]) -> StreamResult:
-        """收完整个流，返回完整文本与 usage（CLI / 不需要逐 token 的场景用）。"""
+        """收完整个流，返回完整文本、工具调用与 usage（CLI / 不需要逐 token 的场景用）。"""
         parts: list[str] = []
+        calls: list[ToolCall] = []
         usage: Usage | None = None
         async for event in self.stream_chat(messages):
             match event:
                 case TextDelta(text=text):
                     parts.append(text)
+                case ToolCall() as call:
+                    calls.append(call)
                 case StreamEnd(usage=final_usage):
                     usage = final_usage
-        return StreamResult(text="".join(parts), usage=usage)
+        return StreamResult(text="".join(parts), usage=usage, tool_calls=calls)
+
+    async def structured[ModelT: BaseModel](
+        self,
+        messages: Sequence[ChatCompletionMessageParam],
+        response_model: type[ModelT],
+    ) -> StructuredResult[ModelT]:
+        """结构化输出：schema 注入提示词 + Pydantic 强约束解析，解析失败直接抛错。
+
+        走提示词约定而非 response_format 参数——对各类 OpenAI 兼容端点最稳；
+        schema 注入部分若 endpoint 原生支持 json_schema 再升级。
+        """
+        schema = json.dumps(response_model.model_json_schema(), ensure_ascii=False)
+        instruction = (
+            "只输出一个 JSON 对象，不要 markdown 代码块、不要解释文字。"
+            f"它必须符合下面的 JSON Schema：\n{schema}"
+        )
+        result = await self.chat([*messages, {"role": "system", "content": instruction}])
+        data = response_model.model_validate_json(_strip_json_fence(result.text))
+        return StructuredResult(data=data, usage=result.usage)

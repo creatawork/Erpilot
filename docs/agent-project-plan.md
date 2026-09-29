@@ -99,11 +99,12 @@ Python 侧用 uv workspace 管理四个包；依赖方向：`apps` → `packages
       同为传输层 mock 且 SDK 的 SSE 解析也留在测试路径内
 - 产出：`agent_core` 能流式对话并打印 token / 成本（`uv run --package agent-core python -m agent_core`）
 
-### 第 2 周 — 工具调用协议
-- [ ] Pydantic 定义工具签名 → 自动生成 JSON Schema → 注入请求 → 解析 tool_calls → asyncio 执行 → 结果回填 → 循环
-- [ ] max steps 防死循环、单工具执行超时（asyncio.wait_for）
-- [ ] 结构化输出（Pydantic 强约束解析）
-- 产出：能完成"查订单 123 状态"这类单工具任务
+### 第 2 周 — 工具调用协议（已完成 2026-09-29）
+- [x] Pydantic 定义工具签名 → 自动生成 JSON Schema → 注入请求 → 解析 tool_calls → asyncio 执行 → 结果回填 → 循环
+- [x] max steps 防死循环、单工具执行超时（asyncio.wait_for）
+- [x] 结构化输出（Pydantic 强约束解析）——走提示词注入 schema + `model_validate_json` 强校验，
+      对各类 OpenAI 兼容端点最稳；端点原生 json_schema 支持后再升级
+- 产出：能完成"查订单 123 状态"这类单工具任务（demo 真实链路验收通过，2 步正常结束）
 
 ### 第 3 周 — 多步任务与错误处理
 - [ ] 连续多工具任务（查库存 → 比价 → 给建议）
@@ -140,6 +141,7 @@ Python 侧用 uv workspace 管理四个包；依赖方向：`apps` → `packages
 - [x] 模型主力：GLM-5.3 Flash（智谱，OpenAI 兼容端点起步；评测阶段横向对比 DeepSeek / Qwen）
 - [x] 仓库已初始化：`E:\workspace\erpilot`（uv workspace + 四包骨架 + ADR-0001 + CI），pytest / ruff / API 冒烟全部通过
 - [x] M1 第 1 周完成：LLM client（流式 + usage + 成本估算）+ demo 入口 + 10 项单测通过 + 真实链路冒烟通过（2026-09-29，经 flashcoding.ai 中转端点，单次成本 ≈¥0.00015，按现价目表折算）
+- [x] M1 第 2 周完成：AgentLoop 工具循环（tools 协议 + max_steps/超时防护 + structured 输出）+ 26 项单测 + 真实链路验收（2026-09-29，单工具任务 2 步正常结束）
 - [ ] assistant-ui 还是 CopilotKit（M6 前端成型时定；M1–M5 先手写最小 React UI，理解协议层）
 
 ## 9. 参考资料

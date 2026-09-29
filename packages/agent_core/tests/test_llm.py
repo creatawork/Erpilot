@@ -1,88 +1,60 @@
-"""LLM client 单测：httpx2.MockTransport 伪 OpenAI 兼容端点的 SSE 流（不烧真实 token）。
-
-注：计划里的 respx 针对 httpx；openai SDK 3.x 底层已换 httpx2，respx 拦截不到，
-故改用 httpx2.AsyncClient(transport=MockTransport) 注入 LLMClient——同样是传输层
-mock，且 SDK 的 SSE 解析也留在测试路径内。
-"""
+"""LLM client 单测：流式事件、工具调用归并、结构化输出（全 mock，不烧真实 token）。"""
 
 import json
 
 import httpx2
 import pytest
-from agent_core.llm import LLMClient, LLMConfig, StreamEnd, StreamResult, TextDelta, Usage
-from openai import AsyncOpenAI
-
-BASE_URL = "https://llm.test/api/v1/"
-SSE_HEADERS = {"content-type": "text/event-stream"}
-USAGE = {"prompt_tokens": 13, "completion_tokens": 7, "total_tokens": 20}
-
-
-def _sse_response(chunks: list[dict]) -> httpx2.Response:
-    body = "".join(f"data: {json.dumps(c, ensure_ascii=False)}\n\n" for c in chunks)
-    body += "data: [DONE]\n\n"
-    return httpx2.Response(200, content=body.encode(), headers=SSE_HEADERS)
+from _mock_openai import USAGE, chunk, make_client, sse_response, tool_call_chunks
+from agent_core.llm import (
+    StreamEnd,
+    StreamResult,
+    StructuredResult,
+    TextDelta,
+    ToolCall,
+    Usage,
+)
+from pydantic import BaseModel, ValidationError
 
 
-def _chunk(*, delta: dict | None = None, usage: dict | None = None) -> dict:
-    chunk: dict = {
-        "id": "chatcmpl-test",
-        "object": "chat.completion.chunk",
-        "created": 1700000000,
-        "model": "glm-5.3-flash",
-        "choices": [],
-    }
-    if delta is not None:
-        chunk["choices"] = [{"index": 0, "delta": delta, "finish_reason": None}]
-    if usage is not None:
-        chunk["usage"] = usage
-    return chunk
+async def _collect(client, *args, **kwargs) -> list:
+    return [e async for e in client.stream_chat(*args, **kwargs)]
 
 
-def _client(handler) -> LLMClient:
-    """LLMClient + 注入 MockTransport 的 AsyncOpenAI，请求落到 handler。"""
-    config = LLMConfig(api_key="test-key", base_url=BASE_URL, model="glm-5.3-flash")
-    http = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
-    oai = AsyncOpenAI(api_key="test-key", base_url=BASE_URL, http_client=http)
-    return LLMClient(config, client=oai)
-
-
-# 典型流：role 首包（content 为空）→ 两段正文 → 末包带 usage、choices 为空
-STREAM_CHUNKS = [
-    _chunk(delta={"role": "assistant", "content": ""}),
-    _chunk(delta={"content": "你好"}),
-    _chunk(delta={"content": "，世界"}),
-    _chunk(usage=USAGE),
-]
-
-
-async def _collect(client: LLMClient) -> list:
-    return [e async for e in client.stream_chat([{"role": "user", "content": "hi"}])]
+# ---- 第 1 周：流式 + usage ----
 
 
 @pytest.mark.asyncio
 async def test_stream_yields_deltas_then_single_end() -> None:
-    requests: list[httpx2.Request] = []
+    # 典型流：role 首包（content 为空）→ 两段正文 → 末包带 usage、choices 为空
+    chunks = [
+        chunk(delta={"role": "assistant", "content": ""}),
+        chunk(delta={"content": "你好"}),
+        chunk(delta={"content": "，世界"}),
+        chunk(usage=USAGE),
+    ]
 
     def handler(request: httpx2.Request) -> httpx2.Response:
-        requests.append(request)
-        return _sse_response(STREAM_CHUNKS)
+        return sse_response(chunks)
 
-    events = await _collect(_client(handler))
+    events = await _collect(make_client(handler), [{"role": "user", "content": "hi"}])
 
     assert events == [
         TextDelta(text="你好"),
         TextDelta(text="，世界"),
         StreamEnd(usage=Usage(prompt_tokens=13, completion_tokens=7, total_tokens=20)),
     ]
-    assert len(requests) == 1
 
 
 @pytest.mark.asyncio
 async def test_chat_returns_full_text_and_usage() -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
-        return _sse_response(STREAM_CHUNKS)
+        return sse_response([
+            chunk(delta={"content": "你好"}),
+            chunk(delta={"content": "，世界"}),
+            chunk(usage=USAGE),
+        ])
 
-    result = await _client(handler).chat([{"role": "user", "content": "hi"}])
+    result = await make_client(handler).chat([{"role": "user", "content": "hi"}])
 
     assert result == StreamResult(
         text="你好，世界", usage=Usage(prompt_tokens=13, completion_tokens=7, total_tokens=20)
@@ -95,15 +67,16 @@ async def test_request_uses_configured_model_and_include_usage() -> None:
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return _sse_response(STREAM_CHUNKS)
+        return sse_response([chunk(delta={"content": "ok"}), chunk(usage=USAGE)])
 
-    await _client(handler).chat([{"role": "user", "content": "hi"}])
+    await make_client(handler).chat([{"role": "user", "content": "hi"}])
 
     body = json.loads(requests[0].content)
     assert body["model"] == "glm-5.3-flash"
     assert body["stream"] is True
     assert body["stream_options"] == {"include_usage": True}
     assert body["messages"] == [{"role": "user", "content": "hi"}]
+    assert "tools" not in body  # 未传工具时不注入 tools 字段
 
 
 @pytest.mark.asyncio
@@ -111,9 +84,9 @@ async def test_stream_without_usage_still_ends_once() -> None:
     """端点不回 usage 时，也要保证恰好一个 StreamEnd(None) 收尾。"""
 
     def handler(request: httpx2.Request) -> httpx2.Response:
-        return _sse_response([_chunk(delta={"content": "ok"})])
+        return sse_response([chunk(delta={"content": "ok"})])
 
-    events = await _collect(_client(handler))
+    events = await _collect(make_client(handler), [{"role": "user", "content": "hi"}])
 
     assert events == [TextDelta(text="ok"), StreamEnd(usage=None)]
 
@@ -124,15 +97,111 @@ async def test_stream_stops_right_after_usage_chunk() -> None:
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         chunks = [
-            _chunk(delta={"content": "前"}),
-            _chunk(usage=USAGE),
-            _chunk(delta={"content": "后"}),
+            chunk(delta={"content": "前"}),
+            chunk(usage=USAGE),
+            chunk(delta={"content": "后"}),
         ]
-        return _sse_response(chunks)
+        return sse_response(chunks)
 
-    events = await _collect(_client(handler))
+    events = await _collect(make_client(handler), [{"role": "user", "content": "hi"}])
 
     assert events == [
         TextDelta(text="前"),
         StreamEnd(usage=Usage(prompt_tokens=13, completion_tokens=7, total_tokens=20)),
     ]
+
+
+# ---- 第 2 周：工具调用归并 ----
+
+
+@pytest.mark.asyncio
+async def test_stream_merges_tool_call_deltas() -> None:
+    """分段的 arguments 增量按 index 归并成一个 ToolCall 事件，且先于 StreamEnd。"""
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return sse_response([
+            chunk(delta={"content": "我查一下"}),
+            *tool_call_chunks("call_1", "get_order_status", '{"order_id": "123"}'),
+        ])
+
+    events = await _collect(make_client(handler), [{"role": "user", "content": "hi"}])
+
+    assert events == [
+        TextDelta(text="我查一下"),
+        ToolCall(id="call_1", name="get_order_status", arguments='{"order_id": "123"}'),
+        StreamEnd(usage=Usage(prompt_tokens=13, completion_tokens=7, total_tokens=20)),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_chat_collects_tool_calls() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return sse_response(tool_call_chunks("call_1", "get_order_status", "{}"))
+
+    result = await make_client(handler).chat([{"role": "user", "content": "hi"}])
+
+    assert result.tool_calls == [ToolCall(id="call_1", name="get_order_status", arguments="{}")]
+
+
+@pytest.mark.asyncio
+async def test_request_injects_openai_tool_schemas() -> None:
+    requests: list[httpx2.Request] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
+        return sse_response(tool_call_chunks("call_1", "get_order_status", "{}"))
+
+    tools = [{"type": "function", "function": {"name": "get_order_status"}}]
+    events = await _collect(
+        make_client(handler), [{"role": "user", "content": "hi"}], tools=tools
+    )
+    assert events  # 消费事件流确保请求真实发生
+
+    body = json.loads(requests[0].content)
+    assert body["tools"] == tools
+
+
+# ---- 第 2 周：结构化输出 ----
+
+
+class Person(BaseModel):
+    name: str
+    age: int
+
+
+@pytest.mark.asyncio
+async def test_structured_parses_json_and_appends_instruction() -> None:
+    requests: list[httpx2.Request] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
+        return sse_response([chunk(delta={"content": '{"name": "李四", "age": 30}'})])
+
+    result = await make_client(handler).structured([{"role": "user", "content": "hi"}], Person)
+
+    assert result == StructuredResult(
+        data=Person(name="李四", age=30),
+        usage=None,
+    )
+    last_message = json.loads(requests[0].content)["messages"][-1]
+    assert last_message["role"] == "system"
+    assert "JSON Schema" in last_message["content"]
+
+
+@pytest.mark.asyncio
+async def test_structured_strips_markdown_fence() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return sse_response([chunk(delta={"content": '```json\n{"name": "张三", "age": 20}\n```'})])
+
+    result = await make_client(handler).structured([{"role": "user", "content": "hi"}], Person)
+
+    assert result.data == Person(name="张三", age=20)
+
+
+@pytest.mark.asyncio
+async def test_structured_invalid_output_raises() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return sse_response([chunk(delta={"content": "这不是 JSON"})])
+
+    with pytest.raises(ValidationError):
+        await make_client(handler).structured([{"role": "user", "content": "hi"}], Person)
