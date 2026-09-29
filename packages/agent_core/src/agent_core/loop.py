@@ -1,4 +1,4 @@
-"""M1 第 2 周产出：手写 agent loop——工具调用循环 + 防护。
+"""M1 第 2–3 周产出：手写 agent loop——工具调用循环 + 防护 + 并行 + 错误策略。
 
 第 2 周范围（计划 §6）：
 1. 工具循环：tools schema 注入请求 → 解析 tool_calls → Pydantic 校验入参 → asyncio 执行
@@ -6,19 +6,45 @@
 2. 防护：max_steps 防死循环；单工具执行超时 asyncio.wait_for
 3. 事件流：TextDelta / ToolCallStarted / ToolCallFinished / LoopEnd，供第 4 周 SSE 转发
 
-刻意留到第 3 周：并行工具调用（asyncio.gather）、错误回填策略精修（错误信息格式、
-何时重试、何时让模型改道）、上下文超长的截断/压缩。
+第 3 周增强（计划 §6）：
+- 并行工具调用：同一轮多个 tool_calls 用 asyncio.as_completed 并发执行，完成一个转发一个
+- 错误回填策略 v1：结构化错误格式 {"error": {"type", "message"}}；validation/unknown_tool
+  是确定性错误直接回填让模型修正或改道，timeout/execution 视为瞬态按重试策略重试
+- 上下文压缩：每步请求前按 ContextPolicy 截断/压缩历史（见 context.py）
+
+刻意留到第 4 周：本地 trace JSONL 落盘、FastAPI SSE 链路、CLI 美化。
 """
 
 import asyncio
 import json
 from collections.abc import AsyncIterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from openai.types.chat import ChatCompletionMessageParam
 
+from agent_core.context import ContextPolicy, compress_messages
 from agent_core.llm import LLMClient, StreamEnd, TextDelta, ToolCall, Usage
 from agent_core.tools import Tool
+
+
+@dataclass(frozen=True, slots=True)
+class ToolRetryPolicy:
+    """工具瞬态错误（timeout/execution）的自动重试策略。
+
+    validation / unknown_tool 是确定性错误，重试无意义——直接回填让模型
+    修正参数或改道，不受本策略影响。
+    """
+
+    retries: int = 1
+    backoff: float = 0.5  # 第 n 次重试前等待 backoff * n 秒
+    retry_on: frozenset[str] = frozenset({"timeout", "execution"})
+
+
+def _error_payload(kind: str, message: str) -> str:
+    """回填给模型的错误信息格式 v1：结构化 JSON，模型可稳定解析。"""
+    return json.dumps(
+        {"error": {"type": kind, "message": message}}, ensure_ascii=False
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +79,8 @@ AgentEvent = TextDelta | ToolCallStarted | ToolCallFinished | LoopEnd
 class LoopConfig:
     max_steps: int = 8
     tool_timeout: float = 30.0  # 秒；单工具执行上限（asyncio.wait_for）
+    retry: ToolRetryPolicy = field(default_factory=ToolRetryPolicy)
+    context: ContextPolicy = field(default_factory=ContextPolicy)
 
 
 def _merge_usage(a: Usage | None, b: Usage | None) -> Usage | None:
@@ -105,12 +133,14 @@ class AgentLoop:
     ) -> AsyncIterator[AgentEvent]:
         """跑一轮 agent 循环，逐个产出 AgentEvent。
 
-        中间产生的 assistant / tool 消息会**就地追加**进传入的 messages，
-        调用方（第 4 周的会话管理）持有完整对话历史。
+        中间产生的 assistant / tool 消息会**就地追加**进传入的 messages；
+        历史超过 ContextPolicy 预算时也会**就地裁剪**——需要完整历史做展示/
+        追溯的场景，调用方自行留存副本。
         """
         schemas = [t.openai_schema() for t in self._tools.values()] or None
         total_usage: Usage | None = None
         for step in range(1, self._config.max_steps + 1):
+            compress_messages(messages, self._config.context)
             parts: list[str] = []
             calls: list[ToolCall] = []
             step_usage: Usage | None = None
@@ -131,33 +161,64 @@ class AgentLoop:
                 return
 
             messages.append(_assistant_toolcall_message("".join(parts), calls))
+            # 本轮所有工具调用并行执行：Started 按调用顺序产出，Finished 按**完成
+            # 顺序**产出（asyncio.as_completed），结果消息按调用顺序回填历史
             for call in calls:
                 yield ToolCallStarted(call=call)
-                content, ok = await self._execute(call)
-                yield ToolCallFinished(name=call.name, content=content, ok=ok)
+            outcomes: list[tuple[str, bool]] = [("", True)] * len(calls)
+            pending = [self._execute_indexed(i, c) for i, c in enumerate(calls)]
+            for done in asyncio.as_completed(pending):
+                index, content, ok = await done
+                outcomes[index] = (content, ok)
+                yield ToolCallFinished(name=calls[index].name, content=content, ok=ok)
+            for call, (content, _ok) in zip(calls, outcomes, strict=True):
                 messages.append(
                     {"role": "tool", "tool_call_id": call.id, "content": content}
                 )
         yield LoopEnd(steps=self._config.max_steps, usage=total_usage, completed=False)
 
-    async def _execute(self, call: ToolCall) -> tuple[str, bool]:
-        """执行一次工具调用，永不抛出：异常转成回填给模型的错误信息。
+    async def _execute_indexed(
+        self, index: int, call: ToolCall
+    ) -> tuple[int, str, bool]:
+        content, ok = await self._execute(call)
+        return index, content, ok
 
-        这是错误回填策略 v0（格式化文本 + ok 标记）；重试/改道策略第 3 周精修。
+    async def _execute(self, call: ToolCall) -> tuple[str, bool]:
+        """执行一次工具调用，永不抛出：异常按策略重试，最终转成结构化错误回填。
+
+        错误格式 v1：{"error": {"type": "validation|unknown_tool|timeout|execution",
+        "message": ...}}。validation / unknown_tool 是确定性错误，立即回填让模型
+        修正参数或改道；timeout / execution 视为瞬态，按 ToolRetryPolicy 重试。
         """
         tool = self._tools.get(call.name)
         if tool is None:
-            return f"未知工具：{call.name}", False
+            return _error_payload("unknown_tool", f"未注册的工具：{call.name}"), False
         try:
             args = tool.params_model.model_validate_json(call.arguments)
         except Exception as exc:
-            return f"参数校验失败：{exc}", False
-        try:
-            result = await asyncio.wait_for(tool.handler(args), self._config.tool_timeout)
-        except TimeoutError:
-            return f"工具执行超时（>{self._config.tool_timeout}s）", False
-        except Exception as exc:
-            return f"工具执行出错：{exc}", False
-        if isinstance(result, str):
-            return result, True
-        return json.dumps(result, ensure_ascii=False, default=str), True
+            return _error_payload("validation", f"参数校验失败，请修正参数后重试：{exc}"), False
+
+        policy = self._config.retry
+        last_error = ""
+        for attempt in range(policy.retries + 1):
+            if attempt:
+                await asyncio.sleep(policy.backoff * attempt)
+            kind = ""
+            try:
+                result = await asyncio.wait_for(tool.handler(args), self._config.tool_timeout)
+            except TimeoutError:
+                kind = "timeout"
+                retried = f"已重试 {attempt} 次" if attempt else "未重试"
+                last_error = _error_payload(
+                    "timeout", f"工具执行超时（>{self._config.tool_timeout}s，{retried}）"
+                )
+            except Exception as exc:
+                kind = "execution"
+                last_error = _error_payload("execution", f"工具执行出错：{exc}")
+            else:
+                if isinstance(result, str):
+                    return result, True
+                return json.dumps(result, ensure_ascii=False, default=str), True
+            if kind not in policy.retry_on:  # 该类错误重试无意义，直接回填让模型改道
+                break
+        return last_error, False

@@ -37,15 +37,28 @@ def tool_call_chunks(
     call_id: str, name: str, arguments: str, *, usage: dict | None = USAGE
 ) -> list[dict]:
     """把一次工具调用拆成典型流：id/name 首包 → arguments 分两段 → 末包 usage。"""
-    return [
+    return multi_tool_chunks([(call_id, name, arguments)], usage=usage)
+
+
+def multi_tool_chunks(
+    calls: list[tuple[str, str, str]], *, usage: dict | None = USAGE
+) -> list[dict]:
+    """一轮多个工具调用：首包同时给出全部 id/name，随后各 arguments 一包，末包 usage。"""
+    chunks = [
         chunk(delta={"tool_calls": [
-            {"index": 0, "id": call_id, "type": "function",
-             "function": {"name": name, "arguments": ""}},
-        ]}),
-        chunk(delta={"tool_calls": [{"index": 0, "function": {"arguments": arguments[:2]}}]}),
-        chunk(delta={"tool_calls": [{"index": 0, "function": {"arguments": arguments[2:]}}]}),
-        chunk(usage=usage),
+            {"index": i, "id": cid, "type": "function",
+             "function": {"name": name, "arguments": ""}}
+            for i, (cid, name, _) in enumerate(calls)
+        ]})
     ]
+    for i, (_, _, arguments) in enumerate(calls):
+        mid = max(1, len(arguments) // 2)  # arguments 拆两段，覆盖流式增量归并
+        first = {"index": i, "function": {"arguments": arguments[:mid]}}
+        second = {"index": i, "function": {"arguments": arguments[mid:]}}
+        chunks.append(chunk(delta={"tool_calls": [first]}))
+        chunks.append(chunk(delta={"tool_calls": [second]}))
+    chunks.append(chunk(usage=usage))
+    return chunks
 
 
 def make_client(handler: Callable[[httpx2.Request], httpx2.Response]) -> LLMClient:

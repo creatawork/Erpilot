@@ -106,11 +106,16 @@ Python 侧用 uv workspace 管理四个包；依赖方向：`apps` → `packages
       对各类 OpenAI 兼容端点最稳；端点原生 json_schema 支持后再升级
 - 产出：能完成"查订单 123 状态"这类单工具任务（demo 真实链路验收通过，2 步正常结束）
 
-### 第 3 周 — 多步任务与错误处理
-- [ ] 连续多工具任务（查库存 → 比价 → 给建议）
-- [ ] 工具报错的回填策略：错误信息格式、何时重试、何时让模型改道
-- [ ] asyncio.gather 并行工具调用；上下文超长的截断/压缩策略 v1
-- 产出：3 步以上任务的稳定 demo，错误场景有单测
+### 第 3 周 — 多步任务与错误处理（已完成 2026-09-29）
+- [x] 连续多工具任务（查订单 → 查库存/报价 → 给建议）
+- [x] 工具报错的回填策略：结构化错误格式 {"error": {"type", "message"}}；
+      validation/unknown_tool 确定性错误立即回填让模型修正或改道，
+      timeout/execution 瞬态错误按 ToolRetryPolicy 自动重试后再回填
+- [x] 并行工具调用（asyncio.as_completed：完成一个转发一个，比 gather 更利于
+      时间线流式展示）；上下文截断/压缩 v1（context.py：工具结果截断 + 整轮丢弃，
+      保证 tool 消息与父调用成对裁剪）
+- 产出：3 步以上任务的稳定 demo，错误场景有单测（真实链路 3 步验收：第 2 步
+  模型自发并行调用 check_stock + get_price）
 
 ### 第 4 周 — 可观测与收口
 - [ ] 本地 trace：JSONL 落盘，含每轮消息、工具调用、耗时、token、成本
@@ -142,6 +147,7 @@ Python 侧用 uv workspace 管理四个包；依赖方向：`apps` → `packages
 - [x] 仓库已初始化：`E:\workspace\erpilot`（uv workspace + 四包骨架 + ADR-0001 + CI），pytest / ruff / API 冒烟全部通过
 - [x] M1 第 1 周完成：LLM client（流式 + usage + 成本估算）+ demo 入口 + 10 项单测通过 + 真实链路冒烟通过（2026-09-29，经 flashcoding.ai 中转端点，单次成本 ≈¥0.00015，按现价目表折算）
 - [x] M1 第 2 周完成：AgentLoop 工具循环（tools 协议 + max_steps/超时防护 + structured 输出）+ 26 项单测 + 真实链路验收（2026-09-29，单工具任务 2 步正常结束）
+- [x] M1 第 3 周完成：多步任务 + 并行工具调用 + 错误回填策略 v1（结构化错误 + 瞬态重试）+ 上下文压缩 v1 + 34 项单测 + 真实链路验收（2026-09-29，3 步任务 ≈¥0.0003，第 2 步模型自发并行调用两工具）
 - [ ] assistant-ui 还是 CopilotKit（M6 前端成型时定；M1–M5 先手写最小 React UI，理解协议层）
 
 ## 9. 参考资料

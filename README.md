@@ -37,7 +37,7 @@ Python 3.12 · FastAPI · 手写 agent loop → LangGraph · FastMCP · PostgreS
 uv sync --all-packages       # 创建虚拟环境并安装全部工作区依赖
 cp .env.example .env         # 填入 ZHIPU_API_KEY
 uv run pytest                # 单元测试（mock，不消耗 token）
-uv run --package agent-core python -m agent_core "查一下订单 123 的状态"   # M1 第 2 周验收：工具调用 loop + token/成本
+uv run --package agent-core python -m agent_core   # M1 第 3 周验收：多步任务（订单→库存/报价→建议）+ 并行工具
 uv run --package erpilot-api uvicorn erpilot_api.main:app --reload
 # 验证：http://127.0.0.1:8000/healthz
 ```
