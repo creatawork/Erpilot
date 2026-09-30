@@ -29,6 +29,7 @@ _TYPE_MAP: dict[str, type] = {
     "integer": int,
     "number": float,
     "boolean": bool,
+    "array": list,
 }
 
 

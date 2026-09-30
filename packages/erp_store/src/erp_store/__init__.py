@@ -12,6 +12,7 @@
 
 from erp_store.models import (
     CategoryStat,
+    DailySalesPoint,
     LowStockItem,
     Order,
     OrderItem,
@@ -22,11 +23,13 @@ from erp_store.models import (
     Quote,
     SalesSummary,
     StockItem,
+    StockValuationLine,
 )
 from erp_store.repository import ErpRepository
 
 __all__ = [
     "CategoryStat",
+    "DailySalesPoint",
     "ErpRepository",
     "LowStockItem",
     "Order",
@@ -38,4 +41,5 @@ __all__ = [
     "Quote",
     "SalesSummary",
     "StockItem",
+    "StockValuationLine",
 ]

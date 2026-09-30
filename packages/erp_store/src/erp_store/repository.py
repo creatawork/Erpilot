@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, selectinload
 from erp_store.db import OrderItemRow, OrderRow, ProductRow, StockRow
 from erp_store.models import (
     CategoryStat,
+    DailySalesPoint,
     LowStockItem,
     Order,
     OrderItem,
@@ -25,6 +26,7 @@ from erp_store.models import (
     Quote,
     SalesSummary,
     StockItem,
+    StockValuationLine,
 )
 
 # 数量门槛 → 折扣，从高到低取第一个命中的档
@@ -59,18 +61,111 @@ class ErpRepository:
         kw = keyword.strip()
         if not kw:
             return []
-        stmt = _product_search(kw).limit(limit)
+        stmt = _product_query(keyword=kw).limit(limit)
         with self._session() as s:
             return [_product(r) for r in s.scalars(stmt)]
 
-    def count_products(self, keyword: str) -> int:
-        """与 search_products 同口径的计数（供分页判断）。"""
-        kw = keyword.strip()
-        if not kw:
-            return 0
-        stmt = select(func.count()).select_from(_product_search(kw).subquery())
+    def count_products(
+        self,
+        keyword: str | None = None,
+        *,
+        status: ProductStatus | None = None,
+        category: str | None = None,
+    ) -> int:
+        """与 list_products 同口径的计数（供分页判断）。"""
+        stmt = select(func.count()).select_from(
+            _product_query(keyword=keyword, status=status, category=category).subquery()
+        )
         with self._session() as s:
             return s.scalar(stmt) or 0
+
+    def list_products(
+        self,
+        keyword: str | None = None,
+        *,
+        status: ProductStatus | None = None,
+        category: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[Product]:
+        """商品列表：可按关键词/状态/品类组合过滤，按 SKU 排序。"""
+        stmt = (
+            _product_query(keyword=keyword, status=status, category=category)
+            .limit(limit)
+            .offset(offset)
+        )
+        with self._session() as s:
+            return [_product(r) for r in s.scalars(stmt)]
+
+    def get_orders_by_sku(self, sku: str, *, limit: int = 20) -> list[Order]:
+        """反查：某 SKU 出现在哪些订单里（含全部状态），按下单时间倒序。"""
+        stmt = (
+            select(OrderRow)
+            .join(OrderItemRow, OrderItemRow.order_id == OrderRow.order_id)
+            .where(OrderItemRow.sku == sku)
+            .order_by(OrderRow.created_at.desc(), OrderRow.order_id)
+            .limit(limit)
+        )
+        with self._session() as s:
+            return [
+                _order(r)
+                for r in s.scalars(stmt.options(selectinload(OrderRow.items)))
+            ]
+
+    def count_orders_by_sku(self, sku: str) -> int:
+        stmt = (
+            select(func.count(func.distinct(OrderItemRow.order_id)))
+            .where(OrderItemRow.sku == sku)
+        )
+        with self._session() as s:
+            return s.scalar(stmt) or 0
+
+    def stock_valuation(self) -> list[StockValuationLine]:
+        """库存估值：按品类聚合 Σ数量 × 现价——掌柜算家底。"""
+        stmt = (
+            select(
+                ProductRow.category,
+                func.count(func.distinct(ProductRow.sku)).label("sku_count"),
+                func.sum(StockRow.quantity).label("total_quantity"),
+                func.sum(StockRow.quantity * ProductRow.price).label("total_value"),
+            )
+            .join(StockRow, StockRow.sku == ProductRow.sku)
+            .group_by(ProductRow.category)
+            .order_by(ProductRow.category)
+        )
+        with self._session() as s:
+            return [
+                StockValuationLine(
+                    category=category,
+                    sku_count=sku_count,
+                    total_quantity=total_quantity,
+                    total_value=round(total_value or 0.0, 2),
+                )
+                for category, sku_count, total_quantity, total_value in s.execute(stmt)
+            ]
+
+    def daily_sales(self, *, days: int = 14) -> list[DailySalesPoint]:
+        """近 days 天逐日销量（有效口径），按日期升序。"""
+        cutoff = datetime.now() - timedelta(days=days)
+        stmt = (
+            select(
+                func.date(OrderRow.created_at).label("d"),
+                func.count(func.distinct(OrderRow.order_id)),
+                func.sum(OrderItemRow.quantity * OrderItemRow.unit_price),
+            )
+            .join(OrderItemRow, OrderItemRow.order_id == OrderRow.order_id)
+            .where(OrderRow.created_at >= cutoff,
+                   OrderRow.status.in_([s.value for s in VALID_SALES_STATUSES]))
+            .group_by("d")
+            .order_by("d")
+        )
+        with self._session() as s:
+            return [
+                DailySalesPoint(
+                    date=d, order_count=cnt, total_amount=round(amount or 0.0, 2)
+                )
+                for d, cnt, amount in s.execute(stmt)
+            ]
 
     def get_stock(self, sku: str) -> StockItem | None:
         with self._session() as s:
@@ -228,13 +323,22 @@ class ErpRepository:
             return [CategoryStat(category=c, product_count=n) for c, n in s.execute(stmt)]
 
 
-def _product_search(keyword: str) -> Select:
-    like = f"%{keyword}%"
-    return (
-        select(ProductRow)
-        .where(or_(ProductRow.name.like(like), ProductRow.category.like(like)))
-        .order_by(ProductRow.sku)
-    )
+def _product_query(
+    keyword: str | None = None,
+    *,
+    status: ProductStatus | None = None,
+    category: str | None = None,
+) -> Select:
+    """商品查询的统一过滤器（search / list / count 共用）。"""
+    stmt = select(ProductRow).order_by(ProductRow.sku)
+    if keyword and keyword.strip():
+        like = f"%{keyword.strip()}%"
+        stmt = stmt.where(or_(ProductRow.name.like(like), ProductRow.category.like(like)))
+    if status is not None:
+        stmt = stmt.where(ProductRow.status == status.value)
+    if category is not None:
+        stmt = stmt.where(ProductRow.category == category)
+    return stmt
 
 
 def _orders_query(

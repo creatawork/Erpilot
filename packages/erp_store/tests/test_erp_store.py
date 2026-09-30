@@ -184,5 +184,54 @@ def test_compute_quote_rejects_invalid(seeded) -> None:
     assert repo.compute_quote(_first_off_sale_sku(repo), 1) is None  # 已下架不可报价
 
 
+# ---- 运营视图（M3 第 3 周新增查询） ----
+
+
+def test_list_products_filters_and_pagination(seeded) -> None:
+    repo, _ = seeded
+    off_sale = repo.list_products(status=ProductStatus.OFF_SALE, limit=100)
+    assert off_sale and all(p.status is ProductStatus.OFF_SALE for p in off_sale)
+    tea = repo.list_products(category="茶具", limit=100)
+    assert tea and all(p.category == "茶具" for p in tea)
+
+    total = repo.count_products(status=ProductStatus.OFF_SALE, category="茶具")
+    both = repo.list_products(status=ProductStatus.OFF_SALE, category="茶具", limit=100)
+    assert len(both) == total  # 组合过滤的计数与列表一致
+
+    page1 = repo.list_products(limit=5, offset=0)
+    page2 = repo.list_products(limit=5, offset=5)
+    assert {p.sku for p in page1}.isdisjoint({p.sku for p in page2})
+
+
+def test_get_orders_by_sku(seeded) -> None:
+    repo, _ = seeded
+    product = repo.search_products("茶具", limit=1)[0]
+    orders = repo.get_orders_by_sku(product.sku, limit=10)
+    assert repo.count_orders_by_sku(product.sku) >= len(orders)
+    if orders:  # 明细成对加载，且每单确实含该 SKU
+        assert all(any(i.sku == product.sku for i in o.items) for o in orders)
+
+
+def test_stock_valuation_matches_manual_sum(seeded) -> None:
+    repo, _ = seeded
+    lines = repo.stock_valuation()
+    assert lines
+    line = lines[0]  # 抽验一个品类：估值 = Σ(库存数量 × 现价)
+    manual = sum(
+        (repo.get_stock(p.sku).quantity if repo.get_stock(p.sku) else 0) * p.price
+        for p in repo.list_products(category=line.category, limit=1000)
+    )
+    assert line.total_value == pytest.approx(manual, abs=0.5)
+
+
+def test_daily_sales_within_window(seeded) -> None:
+    repo, _ = seeded
+    points = repo.daily_sales(days=30)
+    assert points  # 近 6 个月流水，30 天窗口必有成交
+    dates = [p.date for p in points]
+    assert dates == sorted(dates)
+    assert (datetime.now() - datetime.fromisoformat(dates[0])).days <= 30
+
+
 def test_default_seed_is_pinned() -> None:
     assert DEFAULT_SEED == 20260930  # 换种子 = 换数据集，必须显式改这里

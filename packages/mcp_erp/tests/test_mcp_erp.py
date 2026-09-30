@@ -30,26 +30,34 @@ def repo(seeded_db) -> ErpRepository:
 
 # ---- MCP server 工具面 ----
 
+EXPECTED_TOOLS = {
+    "get_order", "list_orders", "get_orders_by_sku",
+    "get_product", "search_products", "list_products",
+    "get_stock", "compute_quote", "compare_quotes", "list_low_stock",
+    "sales_summary", "top_products", "daily_sales", "stock_valuation",
+    "list_categories",
+}
 
-async def test_server_exposes_ten_readonly_tools(seeded_db) -> None:
+
+async def test_server_exposes_all_readonly_tools(seeded_db) -> None:
     from fastmcp import Client
 
     async with Client(create_server(seeded_db)) as client:
         tools = {t.name for t in await client.list_tools()}
-    assert tools == {
-        "get_order", "list_orders", "get_product", "search_products",
-        "get_stock", "compute_quote", "list_low_stock", "sales_summary",
-        "top_products", "list_categories",
-    }
+    assert tools == EXPECTED_TOOLS
+    assert len(EXPECTED_TOOLS) == 15  # §4 冻结线 15~20 的下限
 
 
-async def test_get_order_returns_error_dict_when_missing(seeded_db) -> None:
-    """查不到返回结构化错误（给模型看的信息），永不返回 None。"""
+async def test_get_order_error_contract_v1(seeded_db) -> None:
+    """查不到返回 {"error": {code, message, hint}}——hint 指出下一步。"""
     from fastmcp import Client
 
     async with Client(create_server(seeded_db)) as client:
         result = await client.call_tool("get_order", {"order_id": "SO20990101-9999"})
-    assert result.data == {"error": "订单不存在：SO20990101-9999"}
+    err = result.data["error"]
+    assert err["code"] == "not_found"
+    assert "SO20990101-9999" in err["message"]
+    assert "list_orders" in err["hint"]
 
 
 async def test_list_orders_payload_has_total_and_filters(seeded_db) -> None:
@@ -62,7 +70,8 @@ async def test_list_orders_payload_has_total_and_filters(seeded_db) -> None:
     assert len(ok.data["items"]) == 5 and ok.data["total"] >= 5
     assert cancelled.data["total"] > 0
     assert all(o["status"] == "已取消" for o in cancelled.data["items"])
-    assert "无效的订单状态" in bad.data["error"]
+    assert bad.data["error"]["code"] == "invalid_argument"
+    assert "可选" in bad.data["error"]["hint"]
 
 
 # ---- bridge：MCP 工具 → agent_core Tool ----
@@ -71,7 +80,7 @@ async def test_list_orders_payload_has_total_and_filters(seeded_db) -> None:
 def test_bridge_builds_agent_tools(seeded_db) -> None:
     tools = build_agent_tools(seeded_db)
 
-    assert len(tools) == 10
+    assert len(tools) == 15  # M3 第 3 周：15 个只读工具
     by_name = {t.name: t for t in tools}
     # 描述来自工具 docstring（模型选择工具的依据）
     assert "订单" in by_name["get_order"].description
@@ -95,6 +104,57 @@ def test_bridge_handler_calls_through_mcp(seeded_db, repo) -> None:
     assert result["total_amount"] == round(
         sum(i["quantity"] * i["unit_price"] for i in result["items"]), 2
     )
+
+
+def test_bridge_handles_array_params_and_error_contract(seeded_db, repo) -> None:
+    """compare_quotes 的 list[str] 参数走 schema→create_model→MCP 全程；
+    不可报价的 SKU 进 unavailable 而不是报错。"""
+    tools = {t.name: t for t in build_agent_tools(seeded_db)}
+    skus = [p.sku for p in repo.search_products("茶具", limit=2)]
+    off_sale = _first_off_sale_sku(repo)
+    args = tools["compare_quotes"].params_model.model_validate_json(
+        json.dumps({"skus": [*skus, off_sale], "quantity": 10})
+    )
+    result = _run(tools["compare_quotes"].handler(args))
+
+    assert result["quantity"] == 10
+    assert {q["sku"] for q in result["quotes"]} == set(skus)  # 不可报价的进 unavailable
+    totals = [q["total"] for q in result["quotes"]]
+    assert totals == sorted(totals)  # 按总价升序
+    assert result["unavailable"] == [off_sale]
+
+
+def test_error_contract_survives_bridge(seeded_db) -> None:
+    """业务错误经桥回到 agent 侧仍是 {"error": {code, message, hint}} 结构。"""
+    tools = {t.name: t for t in build_agent_tools(seeded_db)}
+    args = tools["compute_quote"].params_model.model_validate_json(
+        json.dumps({"sku": "NO-SUCH-SKU", "quantity": 1})
+    )
+    result = _run(tools["compute_quote"].handler(args))
+    assert result["error"]["code"] == "not_found"
+
+
+def _first_off_sale_sku(repo: ErpRepository) -> str:
+    for category in ["茶具", "文房", "香道", "瓷器", "丝绸"]:
+        for p in repo.search_products(category, limit=100):
+            if p.status == "已下架":
+                return p.sku
+    raise AssertionError("种子数据中没有已下架商品")
+
+
+def test_tool_cards_doc_matches_server_tools() -> None:
+    """工具卡文档与 server 工具集同步——文档过期的唯一方式是先改代码再跑测试。"""
+    doc = _REPO_ROOT / "docs" / "tool-cards.md"
+    assert doc.is_file(), "docs/tool-cards.md 不存在"
+    documented = {
+        line.removeprefix("### ").strip()
+        for line in doc.read_text(encoding="utf-8").splitlines()
+        if line.startswith("### ")
+    }
+    assert documented == EXPECTED_TOOLS
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _run(coro):

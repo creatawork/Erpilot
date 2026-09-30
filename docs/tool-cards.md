@@ -1,0 +1,120 @@
+# MCP 工具卡（erpilot-erp · 15 个只读工具）
+
+> M3 第 3 周 · 工具设计精研（上）。每个工具一张卡：用途 / 参数 / 返回 / 错误。
+> 本文档与 server 工具集有同步测试把关（`test_tool_cards_doc_matches_server_tools`）——
+> 新增或删除工具必须同步改这里，否则测试失败。
+
+## 错误契约 v1
+
+所有业务错误统一为：
+
+```json
+{"error": {"code": "not_found", "message": "订单不存在：SO-xxx", "hint": "可用 list_orders 浏览现有订单"}}
+```
+
+- `code`：`not_found`（查无此物）/ `invalid_argument`（参数不合法）——模型据此分类处理
+- `message`：发生了什么，含收到的原始值
+- `hint`：**可操作的下一步**——用哪个工具、传什么参数，或向用户要什么信息
+- 业务校验在工具体内做并返回此结构，而不是靠 schema 约束抛协议异常——
+  协议异常到模型手里只剩一句 pydantic 报错，没有自愈线索
+- 空**列表**结果不是错误（`{"total": 0, "items": []}`），模型自行向用户说明
+
+## 订单
+
+### get_order
+- 用途：按订单号查询订单（状态、客户、明细与金额）
+- 参数：`order_id`（必填，格式 SO+日期+序号，如 SO20260301-0001）
+- 返回：订单对象；`items[].unit_price` 是**下单快照价**（可能与现价不同），`total_amount` 按快照价汇总
+- 错误：`not_found` → hint 建议用 `list_orders` 浏览或请用户提供完整单号
+
+### list_orders
+- 用途：按时间倒序列订单
+- 参数：`status`（可选，待付款/待发货/已发货/已签收/已取消/已退款）、`customer`（可选，精确匹配）、`limit`（1~100，默认 20）、`offset`
+- 返回：`{"total", "items"}`——total 是过滤后的总数，判断有无下一页
+- 错误：`invalid_argument`（状态取值非法时 hint 列出全部可选值）
+
+### get_orders_by_sku
+- 用途：反查某 SKU 进了哪些订单（含全部状态）——"这个商品都卖给谁了"
+- 参数：`sku`（必填）、`limit`（1~100，默认 20）
+- 返回：`{"total", "items"}`（订单对象同 get_order）
+- 错误：total 为 0 表示该 SKU 无订单（合法结果，非错误）
+
+## 商品
+
+### get_product
+- 用途：按 SKU 查商品（名称、品类、现价、在售状态）
+- 参数：`sku`（必填）
+- 返回：商品对象；`status` 为"已下架"时报价类工具会拒绝
+- 错误：`not_found` → hint 建议用 `search_products` 找 SKU
+
+### search_products
+- 用途：按名称/品类关键词搜商品
+- 参数：`keyword`（必填，非空）、`limit`（1~100，默认 20）
+- 返回：`{"total", "items"}`（商品对象）
+- 错误：`invalid_argument`（关键词为空，hint 给示例词）
+
+### list_products
+- 用途：不带关键词的商品浏览入口，按状态/品类组合过滤
+- 参数：`status`（可选，在售/已下架）、`category`（可选，精确匹配，可先调 `list_categories`）、`limit`、`offset`
+- 返回：`{"total", "items"}`
+- 错误：`invalid_argument`（状态取值非法）
+
+## 库存与报价
+
+### get_stock
+- 用途：按 SKU 查当前库存数量与仓库
+- 参数：`sku`（必填）
+- 返回：`{"sku", "quantity", "warehouse"}`；quantity 为 0 表示缺货（合法状态）
+- 错误：`not_found`（SKU 不存在 → hint 用 search_products 确认）
+
+### compute_quote
+- 用途：按现价 × 数量梯度折扣报价（≥10 件 98 折 / ≥50 件 95 折 / ≥200 件 9 折）
+- 参数：`sku`（必填）、`quantity`（必填，≥1）
+- 返回：`{"sku", "name", "unit_price", "quantity", "discount", "total", "stock_quantity"}`——
+  `stock_quantity` 为 0 时报价仅参考（工具层应向用户说明缺货）
+- 错误：`invalid_argument`（数量 < 1）；`not_found`（商品不存在或**已下架**，hint 建议换在售商品）
+
+### compare_quotes
+- 用途：多商品同数量批量比价，结果按总价升序
+- 参数：`skus`（必填，2~10 个，自动去重保序）、`quantity`（必填，≥1）
+- 返回：`{"quantity", "quotes": [...], "unavailable": [...]}`——不可报价（不存在/已下架）的 SKU
+  进 `unavailable` 而不是整体报错
+- 错误：`invalid_argument`（skus 数量不在 2~10、quantity < 1）
+
+### list_low_stock
+- 用途：低库存商品清单（按库存升序）——盘库存、补货建议
+- 参数：`threshold`（默认 10）、`limit`（1~100，默认 20）
+- 返回：`[{"sku", "name", "category", "price", "quantity", "warehouse"}]`
+- 错误：`invalid_argument`（threshold 不在 0~10000 等）
+
+## 运营视图
+
+### sales_summary
+- 用途：近 N 天销量汇总——**有效口径**：待发货 / 已发货 / 已签收（取消、退款、待付款不计）
+- 参数：`days`（1~365，默认 30）
+- 返回：`{"days", "order_count", "total_amount"}`（金额按快照价）
+- 错误：`invalid_argument`（days 越界）
+
+### top_products
+- 用途：近 N 天畅销榜（按销量件数降序），只统计有效订单
+- 参数：`days`（1~365，默认 30）、`limit`（1~50，默认 10）
+- 返回：`[{"sku", "name", "category", "total_quantity", "order_count", "total_amount"}]`
+- 错误：`invalid_argument`（days/limit 越界）
+
+### daily_sales
+- 用途：近 N 天逐日销量点——看趋势、找异常日
+- 参数：`days`（1~90，默认 14）
+- 返回：`[{"date", "order_count", "total_amount"}]` 按日期升序
+- 错误：`invalid_argument`（days 越界）
+
+### stock_valuation
+- 用途：库存估值——按品类的库存数量与金额（现价口径），掌柜算家底
+- 参数：无
+- 返回：`{"grand_total_value", "categories": [{"category", "sku_count", "total_quantity", "total_value"}]}`
+- 错误：无（空库返回 total 0）
+
+### list_categories
+- 用途：列出全部品类与在售商品数——探索库存时的第一步
+- 参数：无
+- 返回：`{"total", "items": [{"category", "product_count"}]}`
+- 错误：无

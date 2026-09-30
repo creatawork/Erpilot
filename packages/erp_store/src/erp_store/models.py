@@ -110,3 +110,20 @@ class CategoryStat(BaseModel):
 
     category: str
     product_count: int
+
+
+class StockValuationLine(BaseModel):
+    """库存估值行：按品类聚合（数量 × 现价）。"""
+
+    category: str
+    sku_count: int
+    total_quantity: int
+    total_value: float
+
+
+class DailySalesPoint(BaseModel):
+    """单日销量点（有效口径，见 repository.VALID_SALES_STATUSES）。"""
+
+    date: str
+    order_count: int
+    total_amount: float
