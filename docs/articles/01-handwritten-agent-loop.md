@@ -11,7 +11,7 @@
 
 ## 一、先让流式跑起来
 
-直接调 `chat.completions.create` 拿完整回复当然可以，但 agent 的体验生死线是**首字延迟**——用户必须看到字在往外蹦，才相信程序没死。所以第一件事是流式：
+直接调 `chat.completions.create` 拿完整回复当然可以，但一次任务要经历多轮生成，不把字往外吐，用户就只能对着空白界面猜程序是不是死了。所以第一件事是流式：
 
 ```python
 stream = await client.chat.completions.create(
@@ -38,7 +38,7 @@ class StreamEnd:   usage: Usage | None
 
 `stream_chat()` 产出 `TextDelta | ToolCall | StreamEnd`，并且保证**恰好以一个 StreamEnd 结束**。有了这层边界，下游就只需要认识三种事件：CLI 等一个终止信号来收口统计，SSE 把事件逐个转发，trace 逐行落盘——SDK 的流式细节被封在 `stream_chat` 里面，谁都不用再碰。
 
-顺带处理一个容易忽略的脏活：流式模式下工具调用是**分片到达**的——第一个包只有 `id` 和函数名，参数 JSON 分成好几段。要按 `index` 把碎片归并回完整的 ToolCall：
+顺带处理一个容易忽略的细节：流式模式下工具调用是**分片到达**的——第一个包只有 `id` 和函数名，参数 JSON 分成好几段。要按 `index` 把碎片归并回完整的 ToolCall：
 
 ```python
 slot = pending.setdefault(delta.index, {"id": None, "name": None, "arguments": []})
@@ -108,7 +108,7 @@ LLM(流式) ──▶ AgentLoop.run() ──▶ AgentEvent 流 ──┬─▶ t
 
 ## 三、防护：循环的第一课是刹车
 
-无限循环不是假设，是常态。模型会在同一处反复调用同一个工具、或者每次都发明一个新参数。三道闸：
+无限循环并不罕见：模型会在同一处反复调用同一个工具、或者每次都发明一个新参数。三道闸：
 
 **max_steps 防死循环**——到步数上限就停，事件里带 `completed=False`，上层可以提示用户而不是无声失败。
 
@@ -141,7 +141,7 @@ for done in asyncio.as_completed(pending):
 
 ## 五、上下文压缩：把历史塞回预算里
 
-工具结果是很肥的——一个订单 JSON 几百 token，聊十几轮上下文就爆了。压缩策略 v1 是两层防线：
+工具结果往往比对话文本肥——本项目演示数据里一次订单查询就有几十 token，真实 ERP 的记录只会更大，多轮历史会逐渐吃满预算（ContextPolicy 默认 24k）。压缩策略 v1 是两层防线：
 
 1. **单条截断**：超长的 tool 结果保留头尾（头 2/3 尾 1/3），中间换成省略标记——JSON 的结构信息通常在头尾
 2. **整轮丢弃**：总体超预算时，从最老的轮次开始一整轮一整轮地丢（一条 user 消息连同它引发的 assistant/tool 消息）。丢弃的边界**绝不能落在工具交换中间**，否则就违反了第二节说的成对约束
@@ -150,7 +150,7 @@ system 消息和最近几条永远保留；发生过丢弃就插入一条 system
 
 ## 六、可观测：没有 trace 的 agent 不可调试
 
-agent 的行为是非确定的：同一个问题，今天两步明天三步，工具调用顺序每次都可能不同。**出了错，你需要的不是堆栈，是完整的过程回放**。
+agent 的行为是非确定的：同一个问题，可能这次两步、下次三步，工具调用顺序也可能不同。**出了错，你需要的不是堆栈，是完整的过程回放**。
 
 trace 模块在设计上只做一件事：旁观事件流，原样落盘。
 
@@ -164,7 +164,7 @@ async for event in recorder.run(agent, messages):   # 事件原样透传
 
 为什么不是直接上 Langfuse？不是它不好，是 M1 用不上：自托管一套要 Docker + Postgres + ClickHouse + 对象存储，而现在的场景是单机、单进程、低频调用。逐行 flush 的 JSONL 意味着**进程崩了已写的行还在**（观测管道最需要工作的时刻恰恰是故障时刻）；裸文本意味着 `grep`/`jq`/`tail -f` 全都能用；格式是自定义的，将来映射到 OTel GenAI 语义约定或者 Langfuse 只是换个 sink。取舍全文写进了 [ADR-0003](https://github.com/creatawork/Erpilot/blob/main/docs/adr/0003-local-jsonl-trace-first.md)。
 
-`erpilot replay` 把流水还原成可读对话。下面是本文写作当天的一段**真实 trace**——那会儿上游端点正在抽风，一轮请求慢到 266 秒，我在第 2 轮等不到结果时手动中止了它：
+`erpilot replay` 把流水还原成可读对话。下面是本文写作当天的一段**真实 trace**——当时上游端点不稳定，一轮请求慢到 266 秒，我在等待第 2 轮结果时手动中止了它：
 
 ```
 == run b3f76f57cf40 · glm-5.3-flash · 2026-09-30T10:13:38 ==
@@ -182,12 +182,12 @@ async for event in recorder.run(agent, messages):   # 事件原样透传
 
 同一套 loop + 同一批工具，三种消费方式：**CLI**（`erpilot chat`，rich 渲染流式输出与工具时间线，trace 自动落盘）；**FastAPI**（`POST /api/chat/stream`，loop 事件逐个转成 SSE 帧转发）；**React 页**（fetch + ReadableStream 手解 SSE——`EventSource` 不支持 POST——增量文本、工具时间线、token/成本全都在）。
 
-前后端协议就是 loop 的事件模型加两个信封事件（`start` / `done`），字段表在 `erpilot_api/events.py` 的 docstring 里，TypeScript 侧的镜像类型在 `apps/web/src/protocol.ts`——两侧必须同步改，这是目前协议唯一的"文档"。
+前后端协议就是 loop 的事件模型加三个信封事件（`start` / `done` / `error`），字段表在 `erpilot_api/events.py` 的 docstring 里，TypeScript 侧的镜像类型在 `apps/web/src/protocol.ts`——两侧必须同步改，这是目前协议唯一的"文档"。
 
 ## 写在最后：什么时候轮到框架
 
-手写这上千行之后，我很清楚框架在替你做什么：流式事件归并、工具执行的并发调度、错误回填——这些手写过一遍就不再是魔法。但也同样清楚**手写解决不了什么**：会话持久化、断点恢复、人工审批的 interrupt/恢复，这些是 LangGraph 的 checkpointer 和 interrupt 真正在行的东西，恰好是 Erpilot 的核心卖点（分级 HITL 审批）在 M6 才需要的。
+手写这上千行，收获是知道框架在替你做什么：流式事件归并、工具执行的并发调度、错误回填——各自的实现位置和取舍都过了一遍。同时也确认了**手写解决不了什么**：会话持久化、断点恢复、人工审批的 interrupt/恢复，这些是 LangGraph 的 checkpointer 和 interrupt 所覆盖的，恰好是 Erpilot 的核心设计（分级 HITL 审批）到 M6 才需要的。
 
-所以计划是：M6 把 loop 内核换成 LangGraph，事件协议、trace 格式、前端、评测**全部不动**——这层协议自主权就是手写这几个星期买下的东西。迁移完成后我会再写一篇对比，验证这个判断对不对。
+所以计划是：M6 把 loop 内核换成 LangGraph，事件协议、trace 格式、前端、评测**全部不动**——这层协议的稳定，是手写阶段换来的。迁移完成后我会再写一篇对比，验证这个判断。
 
 下一篇：《给 ERP 写一个 MCP Server》。

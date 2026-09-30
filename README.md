@@ -66,3 +66,4 @@ M1 各周验收入口：第 1–3 周为 `python -m agent_core`（最简演示�
 - 所有架构决策记录在 `docs/adr/`（当前：0001 技术栈、0002 手写 loop 优先、0003 本地 JSONL trace 先行），范围冻结与启动计划见 [`docs/agent-project-plan.md`](docs/agent-project-plan.md)
 - 系列文章发布于个人站点 [Vie](https://vie-vibe.cn)，文稿随仓库维护：
   1. 《手写 Agent Loop：从一次 API 调用到多步任务》—— [`docs/articles/01-handwritten-agent-loop.md`](docs/articles/01-handwritten-agent-loop.md)
+- 撰写规则见 [`docs/articles/writing-rules.md`](docs/articles/writing-rules.md)（禁虚构、客观口吻、技术正确性、发布前核对清单）
