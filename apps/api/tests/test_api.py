@@ -110,6 +110,36 @@ async def test_llm_error_becomes_error_event(tmp_path) -> None:
     assert "400" in error["message"]
 
 
+async def test_chat_stream_uses_injected_tools(tmp_path) -> None:
+    """ChatService 的工具集来自注入（M3 第 2 周），api 本体不硬编码工具来源。"""
+    from agent_core.testing import tool_call_chunks as _tcc
+    from agent_core.tools import tool
+    from pydantic import BaseModel
+
+    class Ping(BaseModel):
+        word: str
+
+    @tool(name="echo_ping", description="回声测试", params=Ping)
+    async def echo_ping(params: Ping) -> dict[str, str]:
+        return {"echo": params.word}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        body = json.loads(request.content)
+        if any(m["role"] == "tool" for m in body["messages"]):
+            return sse_response([chunk(delta={"content": "done"}), chunk(usage=USAGE)])
+        return sse_response(_tcc("call_9", "echo_ping", '{"word": "hi"}'))
+
+    app = create_app(
+        client_factory=lambda: make_client(handler), trace_dir=tmp_path, tools=[echo_ping]
+    )
+    events = await _post_sse(app, {"message": "测试工具注入"})
+
+    started = next(data for name, data in events if name == "tool_started")
+    assert started["name"] == "echo_ping"
+    finished = next(data for name, data in events if name == "tool_finished")
+    assert json.loads(finished["content"]) == {"echo": "hi"}
+
+
 async def test_trace_written_to_configured_dir(tmp_path) -> None:
     requests: list[httpx2.Request] = []
     await _post_sse(_app(requests, tmp_path), {"message": "查订单 123 的状态"})

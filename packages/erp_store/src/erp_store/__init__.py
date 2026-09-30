@@ -11,23 +11,31 @@
 """
 
 from erp_store.models import (
+    CategoryStat,
+    LowStockItem,
     Order,
     OrderItem,
     OrderStatus,
     Product,
+    ProductSales,
     ProductStatus,
     Quote,
+    SalesSummary,
     StockItem,
 )
 from erp_store.repository import ErpRepository
 
 __all__ = [
+    "CategoryStat",
     "ErpRepository",
+    "LowStockItem",
     "Order",
     "OrderItem",
     "OrderStatus",
     "Product",
+    "ProductSales",
     "ProductStatus",
     "Quote",
+    "SalesSummary",
     "StockItem",
 ]

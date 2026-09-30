@@ -12,6 +12,7 @@ members = [
     "erp-store",
     "erpilot",
     "erpilot-api",
+    "erpilot-cli",
     "evals",
     "mcp-erp",
 ]
@@ -23,16 +24,12 @@ source = { editable = "packages/agent_core" }
 dependencies = [
     { name = "openai" },
     { name = "pydantic" },
-    { name = "rich" },
-    { name = "typer" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "openai", specifier = ">=1.40" },
     { name = "pydantic", specifier = ">=2.7" },
-    { name = "rich", specifier = ">=13" },
-    { name = "typer", specifier = ">=0.12" },
 ]
 
 [[package]]
@@ -401,8 +398,8 @@ version = "0.1.0"
 source = { editable = "apps/api" }
 dependencies = [
     { name = "agent-core" },
-    { name = "erp-store" },
     { name = "fastapi" },
+    { name = "mcp-erp" },
     { name = "sse-starlette" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -410,10 +407,31 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "agent-core", editable = "packages/agent_core" },
-    { name = "erp-store", editable = "packages/erp_store" },
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "mcp-erp", editable = "packages/mcp_erp" },
     { name = "sse-starlette", specifier = ">=2" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
+]
+
+[[package]]
+name = "erpilot-cli"
+version = "0.1.0"
+source = { editable = "apps/cli" }
+dependencies = [
+    { name = "agent-core" },
+    { name = "erp-store" },
+    { name = "mcp-erp" },
+    { name = "rich" },
+    { name = "typer" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "agent-core", editable = "packages/agent_core" },
+    { name = "erp-store", editable = "packages/erp_store" },
+    { name = "mcp-erp", editable = "packages/mcp_erp" },
+    { name = "rich", specifier = ">=13" },
+    { name = "typer", specifier = ">=0.12" },
 ]
 
 [[package]]
@@ -893,12 +911,14 @@ name = "mcp-erp"
 version = "0.1.0"
 source = { editable = "packages/mcp_erp" }
 dependencies = [
+    { name = "agent-core" },
     { name = "erp-store" },
     { name = "fastmcp" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "agent-core", editable = "packages/agent_core" },
     { name = "erp-store", editable = "packages/erp_store" },
     { name = "fastmcp", specifier = ">=2" },
 ]

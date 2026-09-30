@@ -5,10 +5,12 @@ description = "FastMCP Server：把 mini-ERP（商品/库存/订单）暴露为 
 requires-python = ">=3.12"
 dependencies = [
     "fastmcp>=2",
+    "agent-core",
     "erp-store",
 ]
 
 [tool.uv.sources]
+agent-core = { workspace = true }
 erp-store = { workspace = true }
 
 [build-system]

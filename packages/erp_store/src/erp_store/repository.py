@@ -6,24 +6,36 @@
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, selectinload
 
-from erp_store.db import OrderRow, ProductRow, StockRow
+from erp_store.db import OrderItemRow, OrderRow, ProductRow, StockRow
 from erp_store.models import (
+    CategoryStat,
+    LowStockItem,
     Order,
     OrderItem,
     OrderStatus,
     Product,
+    ProductSales,
     ProductStatus,
     Quote,
+    SalesSummary,
     StockItem,
 )
 
 # 数量门槛 → 折扣，从高到低取第一个命中的档
 QUOTE_TIERS: list[tuple[int, float]] = [(200, 0.90), (50, 0.95), (10, 0.98)]
+
+# 销量统计的有效口径：已成交未流失的订单（取消 / 退款 / 待付款不计入）
+VALID_SALES_STATUSES = (
+    OrderStatus.PENDING_SHIPMENT,
+    OrderStatus.SHIPPED,
+    OrderStatus.DELIVERED,
+)
 
 
 class ErpRepository:
@@ -47,15 +59,18 @@ class ErpRepository:
         kw = keyword.strip()
         if not kw:
             return []
-        like = f"%{kw}%"
-        stmt = (
-            select(ProductRow)
-            .where(or_(ProductRow.name.like(like), ProductRow.category.like(like)))
-            .order_by(ProductRow.sku)
-            .limit(limit)
-        )
+        stmt = _product_search(kw).limit(limit)
         with self._session() as s:
             return [_product(r) for r in s.scalars(stmt)]
+
+    def count_products(self, keyword: str) -> int:
+        """与 search_products 同口径的计数（供分页判断）。"""
+        kw = keyword.strip()
+        if not kw:
+            return 0
+        stmt = select(func.count()).select_from(_product_search(kw).subquery())
+        with self._session() as s:
+            return s.scalar(stmt) or 0
 
     def get_stock(self, sku: str) -> StockItem | None:
         with self._session() as s:
@@ -124,6 +139,102 @@ class ErpRepository:
             total=round(unit * quantity, 2),
             stock_quantity=stock.quantity if stock else 0,
         )
+
+
+    # ---- 运营视图（掌柜的日常：盘库存、看销量） ----
+
+    def list_low_stock(self, *, threshold: int = 10, limit: int = 20) -> list[LowStockItem]:
+        """库存 ≤ threshold 的商品，按库存升序——盘库存场景。"""
+        stmt = (
+            select(StockRow, ProductRow)
+            .join(ProductRow, ProductRow.sku == StockRow.sku)
+            .where(StockRow.quantity <= threshold)
+            .order_by(StockRow.quantity.asc(), StockRow.sku)
+            .limit(limit)
+        )
+        with self._session() as s:
+            return [
+                LowStockItem(
+                    sku=p.sku,
+                    name=p.name,
+                    category=p.category,
+                    price=p.price,
+                    quantity=st.quantity,
+                    warehouse=st.warehouse,
+                )
+                for st, p in s.execute(stmt)
+            ]
+
+    def sales_summary(self, *, days: int = 30) -> SalesSummary:
+        """近 days 天有效订单（VALID_SALES_STATUSES）数与金额（快照价口径）。"""
+        cutoff = datetime.now() - timedelta(days=days)
+        stmt = (
+            select(func.count(func.distinct(OrderRow.order_id)),
+                   func.sum(OrderItemRow.quantity * OrderItemRow.unit_price))
+            .join(OrderItemRow, OrderItemRow.order_id == OrderRow.order_id)
+            .where(OrderRow.created_at >= cutoff,
+                   OrderRow.status.in_([s.value for s in VALID_SALES_STATUSES]))
+        )
+        with self._session() as s:
+            order_count, total = s.execute(stmt).one()
+        return SalesSummary(
+            days=days,
+            order_count=order_count or 0,
+            total_amount=round(total or 0.0, 2),
+        )
+
+    def top_products(self, *, days: int = 30, limit: int = 10) -> list[ProductSales]:
+        """近 days 天畅销榜，按销量（件数）降序；只统计有效订单。"""
+        cutoff = datetime.now() - timedelta(days=days)
+        stmt = (
+            select(
+                OrderItemRow.sku,
+                OrderItemRow.name,
+                ProductRow.category,
+                func.sum(OrderItemRow.quantity).label("total_quantity"),
+                func.count(func.distinct(OrderItemRow.order_id)).label("order_count"),
+                func.sum(OrderItemRow.quantity * OrderItemRow.unit_price).label("amount"),
+            )
+            .join(OrderRow, OrderRow.order_id == OrderItemRow.order_id)
+            .outerjoin(ProductRow, ProductRow.sku == OrderItemRow.sku)
+            .where(OrderRow.created_at >= cutoff,
+                   OrderRow.status.in_([s.value for s in VALID_SALES_STATUSES]))
+            .group_by(OrderItemRow.sku, OrderItemRow.name, ProductRow.category)
+            .order_by(func.sum(OrderItemRow.quantity).desc())
+            .limit(limit)
+        )
+        with self._session() as s:
+            return [
+                ProductSales(
+                    sku=sku,
+                    name=name,
+                    category=category or "（已下架或已删除）",
+                    total_quantity=qty,
+                    order_count=cnt,
+                    total_amount=round(amount or 0.0, 2),
+                )
+                for sku, name, category, qty, cnt, amount in s.execute(stmt)
+            ]
+
+    def list_categories(self) -> list[CategoryStat]:
+        """品类列表与在售商品数——模型探索库时的第一步。"""
+        stmt = (
+            select(ProductRow.category, func.count())
+            .where(ProductRow.status == ProductStatus.ON_SALE.value)
+            .group_by(ProductRow.category)
+            .order_by(ProductRow.category)
+        )
+        with self._session() as s:
+            return [CategoryStat(category=c, product_count=n) for c, n in s.execute(stmt)]
+
+
+def _product_search(keyword: str) -> Select:
+    like = f"%{keyword}%"
+    return (
+        select(ProductRow)
+        .where(or_(ProductRow.name.like(like), ProductRow.category.like(like)))
+        .order_by(ProductRow.sku)
+    )
 
 
 def _orders_query(

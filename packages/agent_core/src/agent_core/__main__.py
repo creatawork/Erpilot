@@ -2,7 +2,7 @@
 - 第 1 周：流式对话 + token/成本
 - 第 2 周：工具调用 loop——"查订单 123 的状态"
 - 第 3 周：多步任务——订单 → 库存 → 报价 → 给顾客回复建议（含并行工具调用）
-- 第 4 周：rich 版 CLI 见 `erpilot chat`（agent_core.cli），本入口保留为最简演示
+- 第 4 周：rich 版 CLI 见 `erpilot chat`（apps/cli），本入口保留为最简演示
 
 用法：
     uv run --package agent-core python -m agent_core "订单 123 里的商品还有货吗？有货的话报个价"

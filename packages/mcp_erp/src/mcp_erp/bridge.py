@@ -1,0 +1,119 @@
+"""MCP → agent_core 工具桥：让手写 agent loop 经 MCP 协议消费 ERP 工具。
+
+桥接两侧：
+- 工具发现：Client(create_server(db)) 内存连接 list_tools，把 MCP 的
+  inputSchema 动态转成 Pydantic 参数模型（agent loop 用它做入参校验）
+- 工具调用：Tool.handler 每次调用开一个内存 MCP 会话 call_tool，
+  返回 CallToolResult.data（fastmcp 已反序列化的 dict/list）
+
+为什么每次调用都开会话：内存传输的会话开销可忽略，换来的是无连接生命周期
+管理（不会在长连接断开后悄悄失效）；独立进程（stdio/HTTP）部署在 M3 第 3
+周之后按需切换，桥接口不变。
+"""
+
+import asyncio
+import json
+from pathlib import Path
+from typing import Any
+
+from agent_core.tools import Tool
+from erp_store.db import DEFAULT_DB
+from fastmcp import Client
+from fastmcp.client.client import CallToolResult
+from pydantic import BaseModel, Field, create_model
+
+from mcp_erp.server import create_server
+
+_TYPE_MAP: dict[str, type] = {
+    "string": str,
+    "integer": int,
+    "number": float,
+    "boolean": bool,
+}
+
+
+def build_agent_tools(db_path: Path | str = DEFAULT_DB) -> list[Tool]:
+    """同步入口（应用启动 / CLI main，不能在事件循环内调用）。"""
+    return asyncio.run(build_agent_tools_async(db_path))
+
+
+async def build_agent_tools_async(db_path: Path | str = DEFAULT_DB) -> list[Tool]:
+    """发现 MCP 工具并转换为 agent_core Tool 列表（可在运行中的 loop 内调用）。
+
+    db 文件不存在时报带指引的错误。
+    """
+    db_path = Path(db_path)
+    if not db_path.is_file():
+        raise FileNotFoundError(
+            f"ERP 数据库不存在：{db_path}（先运行 uv run --package erp-store "
+            "python -m erp_store seed 生成）"
+        )
+    server = create_server(db_path)
+    async with Client(server) as client:
+        mcp_tools = await client.list_tools()
+    return [_convert(t.name, t.description or "", t.input_schema, db_path) for t in mcp_tools]
+
+
+def _convert(name: str, description: str, schema: dict[str, Any], db_path: Path) -> Tool:
+    params_model = _params_model(name, schema)
+
+    async def handler(args: BaseModel, _name: str = name) -> object:
+        server = create_server(db_path)
+        async with Client(server) as client:
+            result = await client.call_tool(
+                _name, args.model_dump(mode="json", exclude_none=True)
+            )
+        return _extract(result)
+
+    return Tool(name=name, description=description, params_model=params_model, handler=handler)
+
+
+def _params_model(tool_name: str, schema: dict[str, Any]) -> type[BaseModel]:
+    """inputSchema → Pydantic 模型：required 无默认值，可选参数给默认。"""
+    fields: dict[str, Any] = {}
+    required = set(schema.get("required", []))
+    for prop_name, prop in schema.get("properties", {}).items():
+        description = prop.get("description", "")
+        annotation = _annotation_of(prop)
+        if prop_name in required:
+            fields[prop_name] = (annotation, Field(description=description))
+        elif prop.get("default") is not None:
+            # 工具有自己的默认值：不传时 exclude_none 会让服务端走默认
+            fields[prop_name] = (
+                annotation,
+                Field(default=prop["default"], description=description),
+            )
+        else:
+            fields[prop_name] = (
+                annotation | None,
+                Field(default=None, description=description),
+            )
+    model = create_model(f"{tool_name}_params", **fields)
+    model.__doc__ = f"工具 {tool_name} 的入参（由 MCP inputSchema 生成）"
+    return model
+
+
+def _annotation_of(prop: dict[str, Any]) -> type:
+    """单个 property 的类型：基本类型映射；anyOf [T, null] → Optional[T]。"""
+    if "anyOf" in prop:
+        non_null = [p for p in prop["anyOf"] if p.get("type") != "null"]
+        return _TYPE_MAP.get(non_null[0].get("type", "string"), str) if non_null else str
+    return _TYPE_MAP.get(prop.get("type", "string"), str)
+
+
+def _extract(result: CallToolResult) -> Any:
+    """取回模型需要的数据：优先 fastmcp 反序列化的 .data，退回解析 JSON 文本。"""
+    data = getattr(result, "data", None)
+    if data is not None:
+        if isinstance(data, BaseModel):
+            return json.loads(data.model_dump_json())
+        if isinstance(data, (dict, list)):
+            return data
+    for block in result.content:
+        text = getattr(block, "text", None)
+        if text:
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return text
+    return None

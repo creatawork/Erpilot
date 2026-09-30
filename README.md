@@ -21,11 +21,12 @@ Python 3.12 · FastAPI · 手写 agent loop → LangGraph · FastMCP · PostgreS
 ```
 ├── apps/
 │   ├── api/            # FastAPI：agent 宿主、会话管理、SSE
+│   ├── cli/            # erpilot CLI：typer + rich（组合层，默认 MCP 真数据）
 │   └── web/            # React + TS：流式对话、工具时间线、审批卡片（M1 第 4 周初始化）
 ├── packages/
-│   ├── agent_core/     # 手写 agent loop（不依赖业务包）
-│   ├── mcp_erp/        # FastMCP Server：ERP 能力 → MCP 工具
-│   ├── erp_store/      # 领域模型 + 种子数据（商品/库存/订单）
+│   ├── agent_core/     # 手写 agent loop（不依赖任何业务包）
+│   ├── mcp_erp/        # FastMCP Server：ERP 能力 → MCP 工具 + agent 桥
+│   ├── erp_store/      # 领域模型 + 种子数据（商品/库存/订单，SQLite）
 │   └── evals/          # 评测集 + runner + 报告
 └── docs/adr/           # 架构决策记录
 ```
@@ -38,17 +39,19 @@ uv sync --all-packages       # 创建虚拟环境并安装全部工作区依赖
 cp .env.example .env         # 填入 ZHIPU_API_KEY
 uv run pytest                # 单元测试（mock，不消耗 token）
 
-# CLI：rich 渲染流式对话 + trace 自动落盘 traces/*.jsonl
-uv run erpilot chat "订单 123 里买了什么？还有货吗？有货的话报个价"
-uv run erpilot replay traces/<某个>.jsonl      # 把 trace 还原成可读对话
-
-# M3 起步：生成演示数据库（商品/库存/订单，data/erpilot.db，确定性种子）
+# CLI：默认经 MCP 桥查询真数据（先 seed），trace 自动落盘 traces/*.jsonl
 uv run --package erp-store python -m erp_store seed
+uv run erpilot chat "订单 123 里买了什么？还有货吗？有货的话报个价"
+uv run erpilot chat --tools demo                # 内置假数据（离线演示）
+uv run erpilot replay traces/<某个>.jsonl        # 把 trace 还原成可读对话
 
 # API + 前端：SSE 链路
-uv run --package erpilot-api uvicorn erpilot_api.main:app --reload
+ERPILOT_TOOLS=mcp uv run --package erpilot-api uvicorn erpilot_api.main:app --reload
 # 验证：http://127.0.0.1:8000/healthz
 cd apps/web && npm install && npm run dev      # http://localhost:5173
+
+# MCP server 独立进程（stdio，给外部 MCP 客户端）
+uv run --package mcp-erp python -m mcp_erp serve
 ```
 
 M1 各周验收入口：第 1–3 周为 `python -m agent_core`（最简演示，多步任务 + 并行工具）；

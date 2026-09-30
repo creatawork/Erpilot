@@ -1,17 +1,19 @@
 """会话管理 + agent 宿主：每个会话一份消息历史，每次 run 顺带落一份 trace。
 
-M1 第 4 周的最小实现：单进程内存会话（重启即失）、trace 本地 JSONL。
-持久化（Postgres checkpointer）与远程可观测（Langfuse）按路线图在 M6 前后接入，
-届时替换的是本模块的存储层，事件协议与前端不动。
+工具集由组合层注入（评审遗留项，M3 第 2 周落地）——api 本体不关心工具来自
+MCP 桥还是演示假数据。M1 第 4 周的最小实现：单进程内存会话（重启即失）、
+trace 本地 JSONL。持久化（Postgres checkpointer）与远程可观测（Langfuse）
+按路线图在 M6 前后接入，届时替换的是本模块的存储层，事件协议与前端不动。
 """
 
 import asyncio
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Sequence
 from pathlib import Path
 
-from agent_core.demo_tools import DEMO_TOOLS, SYSTEM_PROMPT
+from agent_core.demo_tools import SYSTEM_PROMPT
 from agent_core.llm import LLMClient
 from agent_core.loop import AgentEvent, AgentLoop, LoopConfig
+from agent_core.tools import Tool
 from agent_core.trace import JsonlTraceRecorder, new_trace_path
 
 
@@ -22,11 +24,13 @@ class ChatService:
         client_factory: Callable[[], LLMClient],
         model: str,
         trace_dir: Path,
+        tools: Sequence[Tool],
         loop_config: LoopConfig | None = None,
     ) -> None:
         self._client_factory = client_factory
         self._model = model
         self._trace_dir = trace_dir
+        self._tools = list(tools)
         self._loop_config = loop_config or LoopConfig()
         self._client: LLMClient | None = None
         self._sessions: dict[str, list] = {}
@@ -54,7 +58,7 @@ class ChatService:
             self._client = self._client_factory()
         messages = self._session_messages(session_id)
         messages.append({"role": "user", "content": message})
-        agent = AgentLoop(self._client, tools=DEMO_TOOLS, config=self._loop_config)
+        agent = AgentLoop(self._client, tools=self._tools, config=self._loop_config)
         trace_path = new_trace_path(self._trace_dir, self._model)
         self.last_trace = trace_path
         recorder = JsonlTraceRecorder(trace_path, self._model)

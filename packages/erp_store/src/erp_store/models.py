@@ -10,7 +10,7 @@ v1 金额用 float 并在生成边界 round 保留两位——真实 ERP 该用 
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 class ProductStatus(StrEnum):
@@ -56,6 +56,7 @@ class Order(BaseModel):
     items: list[OrderItem]
     note: str | None = None
 
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def total_amount(self) -> float:
         """按快照价汇总——订单金额永远由订单项推导，不单独入库。"""
@@ -72,3 +73,40 @@ class Quote(BaseModel):
     discount: float = Field(description="1.0 表示无折扣")
     total: float
     stock_quantity: int = Field(description="当前库存；为 0 时报价仅参考")
+
+
+class LowStockItem(BaseModel):
+    """库存预警行：商品信息 + 当前库存。"""
+
+    sku: str
+    name: str
+    category: str
+    price: float
+    quantity: int
+    warehouse: str
+
+
+class SalesSummary(BaseModel):
+    """销量汇总（有效口径 = 待发货 / 已发货 / 已签收，取消与退款不计）。"""
+
+    days: int
+    order_count: int
+    total_amount: float
+
+
+class ProductSales(BaseModel):
+    """畅销榜行：按销量（件数）降序。"""
+
+    sku: str
+    name: str
+    category: str
+    total_quantity: int
+    order_count: int
+    total_amount: float
+
+
+class CategoryStat(BaseModel):
+    """品类统计：品类名与在售商品数。"""
+
+    category: str
+    product_count: int
