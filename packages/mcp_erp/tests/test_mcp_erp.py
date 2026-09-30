@@ -31,7 +31,7 @@ def repo(seeded_db) -> ErpRepository:
 # ---- MCP server 工具面 ----
 
 EXPECTED_TOOLS = {
-    "get_order", "list_orders", "get_orders_by_sku",
+    "get_order", "list_orders", "get_orders_by_sku", "get_customer_purchases",
     "get_product", "search_products", "list_products",
     "get_stock", "compute_quote", "compare_quotes", "list_low_stock",
     "sales_summary", "top_products", "daily_sales", "stock_valuation",
@@ -45,7 +45,7 @@ async def test_server_exposes_all_readonly_tools(seeded_db) -> None:
     async with Client(create_server(seeded_db)) as client:
         tools = {t.name for t in await client.list_tools()}
     assert tools == EXPECTED_TOOLS
-    assert len(EXPECTED_TOOLS) == 15  # §4 冻结线 15~20 的下限
+    assert len(EXPECTED_TOOLS) == 16  # §4 冻结线 15~20 区间内
 
 
 async def test_get_order_error_contract_v1(seeded_db) -> None:
@@ -74,13 +74,40 @@ async def test_list_orders_payload_has_total_and_filters(seeded_db) -> None:
     assert "可选" in bad.data["error"]["hint"]
 
 
+async def test_list_orders_slim_by_default(seeded_db) -> None:
+    """列表默认订单头摘要（明细是上下文的大头），detail=True 才带明细。"""
+    from fastmcp import Client
+
+    async with Client(create_server(seeded_db)) as client:
+        slim = await client.call_tool("list_orders", {"limit": 5})
+        detail = await client.call_tool("list_orders", {"limit": 5, "detail": True})
+    first = slim.data["items"][0]
+    assert "items" not in first and first["items_count"] >= 0
+    assert "get_customer_purchases" in slim.data["note"]
+    assert "items" in detail.data["items"][0]
+
+
+async def test_get_customer_purchases_aggregates(seeded_db, repo) -> None:
+    from fastmcp import Client
+
+    customer = repo.list_orders(limit=1)[0].customer
+    async with Client(create_server(seeded_db)) as client:
+        ok = await client.call_tool("get_customer_purchases", {"customer": customer})
+        missing = await client.call_tool(
+            "get_customer_purchases", {"customer": "不存在的客户xyz"}
+        )
+    assert ok.data["order_count"] == repo.count_orders(customer=customer)
+    assert ok.data["by_status"] and ok.data["items"]
+    assert missing.data["error"]["code"] == "not_found"
+
+
 # ---- bridge：MCP 工具 → agent_core Tool ----
 
 
 def test_bridge_builds_agent_tools(seeded_db) -> None:
     tools = build_agent_tools(seeded_db)
 
-    assert len(tools) == 15  # M3 第 3 周：15 个只读工具
+    assert len(tools) == len(EXPECTED_TOOLS)
     by_name = {t.name: t for t in tools}
     # 描述来自工具 docstring（模型选择工具的依据）
     assert "订单" in by_name["get_order"].description

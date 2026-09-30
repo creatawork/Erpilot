@@ -112,6 +112,38 @@ class CategoryStat(BaseModel):
     product_count: int
 
 
+class StatusAmount(BaseModel):
+    """订单状态分布行：该状态的订单数与金额。"""
+
+    status: str
+    order_count: int
+    total_amount: float
+
+
+class PurchaseLine(BaseModel):
+    """购物聚合行：某客户在某 SKU 上的总件数与总金额（快照价）。"""
+
+    sku: str
+    name: str
+    total_quantity: int
+    total_amount: float
+
+
+class CustomerPurchases(BaseModel):
+    """客户购物聚合：一次调用回答"买了什么/共多少钱/各状态分布"。
+
+    total_amount 为有效口径（待发货/已发货/已签收）；total_amount_all 含
+    取消、退款、待付款的全部下单金额。items 按金额降序。
+    """
+
+    customer: str
+    order_count: int
+    total_amount: float
+    total_amount_all: float
+    by_status: list[StatusAmount]
+    items: list[PurchaseLine]
+
+
 class StockValuationLine(BaseModel):
     """库存估值行：按品类聚合（数量 × 现价）。"""
 

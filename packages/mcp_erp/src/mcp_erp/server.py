@@ -1,4 +1,4 @@
-"""FastMCP Server：把 mini-ERP 的只读查询暴露为 MCP 工具（M3 第 3 周：15 个）。
+"""FastMCP Server：把 mini-ERP 的只读查询暴露为 MCP 工具（M3 第 3 周：16 个）。
 
 设计约定（工具卡的完整语义见 docs/tool-cards.md，文档-代码有同步测试把关）：
 
@@ -8,6 +8,9 @@
   传什么参数）；业务校验在工具体内做并返回该结构，而不是靠 schema 约束
   抛协议异常（协议异常到模型手里只剩一句 pydantic 报错，无法自愈）
 - 列表类工具返回 {"total", "items"}，让模型知道还有没有下一页
+- **返回值信息密度**：列表默认订单头摘要（明细行是上下文的大头），聚合类
+  问题引导到聚合工具——把大结果整块塞回下一轮 LLM 请求会被上游中转拒绝
+  （实证见 docs/error-recovery-log.md #2）
 - 参数用 Annotated + Field(description=...)，描述会进 inputSchema
 
 用法：
@@ -47,6 +50,18 @@ def _parse_status(value: str, enum_cls, help_text: str) -> tuple[Any, dict[str, 
         return None, _err("invalid_argument", f"无效取值：{value}", f"可选：{help_text}")
 
 
+def _order_brief(order) -> dict[str, Any]:
+    """订单头摘要：不含明细行（明细是上下文的大头），件数与金额保留。"""
+    return {
+        "order_id": order.order_id,
+        "customer": order.customer,
+        "status": order.status.value,
+        "created_at": order.created_at.isoformat(timespec="seconds"),
+        "items_count": len(order.items),
+        "total_amount": order.total_amount,
+    }
+
+
 def create_server(db_path: Path = DEFAULT_DB) -> FastMCP:
     """构建 MCP server 实例（库内集成与独立进程共用）。"""
     repo = ErpRepository(make_engine(Path(db_path)))
@@ -84,37 +99,81 @@ def create_server(db_path: Path = DEFAULT_DB) -> FastMCP:
             str | None, Field(description=f"按状态过滤，可选：{_ORDER_STATUS_HELP}")
         ] = None,
         customer: Annotated[str | None, Field(description="按客户名精确过滤")] = None,
-        limit: Annotated[int, Field(description="每页条数（1~100）")] = 20,
+        limit: Annotated[int, Field(description="每页条数（1~50）")] = 20,
         offset: Annotated[int, Field(description="跳过条数（翻页用）")] = 0,
+        detail: Annotated[
+            bool,
+            Field(description="是否带每单明细行；默认 False（订单头+件数+金额，省上下文）"),
+        ] = False,
     ) -> dict[str, Any]:
-        """按时间倒序列订单（带 total，供翻页判断）。"""
-        if not 1 <= limit <= 100 or offset < 0:
-            return _err("invalid_argument", "limit 须在 1~100，offset 须 ≥ 0")
+        """按时间倒序列订单（带 total，供翻页判断）。逐单浏览用；
+        按客户统计"买了什么/总共多少钱/各状态分布"请改用
+        get_customer_purchases（一次聚合，结果小得多）。"""
+        if not 1 <= limit <= 50 or offset < 0:
+            return _err("invalid_argument", "limit 须在 1~50，offset 须 ≥ 0")
         parsed, err = (None, None)
         if status:
             parsed, err = _parse_status(status, OrderStatus, _ORDER_STATUS_HELP)
             if err:
                 return err
+        if detail and limit > 20:
+            limit = 20  # 带明细时收紧页大小：明细行是上下文的大头
         orders = repo.list_orders(status=parsed, customer=customer, limit=limit, offset=offset)
+        items = [_order_brief(o) if not detail else o.model_dump(mode="json") for o in orders]
         return {
             "total": repo.count_orders(status=parsed, customer=customer),
-            "items": [o.model_dump(mode="json") for o in orders],
+            "items": items,
+            "note": "列表不含明细；单笔明细用 get_order，按客户聚合用 get_customer_purchases",
         }
 
     @mcp.tool
     def get_orders_by_sku(
         sku: Annotated[str, Field(description="商品 SKU")],
-        limit: Annotated[int, Field(description="最多返回条数（1~100）")] = 20,
+        limit: Annotated[int, Field(description="最多返回条数（1~50）")] = 20,
+        detail: Annotated[
+            bool, Field(description="是否带每单明细行；默认 False（订单头摘要）")
+        ] = False,
     ) -> dict[str, Any]:
         """反查某 SKU 出现在哪些订单里（含全部状态，按下单时间倒序）——
         "这个商品都卖给谁了 / 进了哪些单"场景。"""
-        if not 1 <= limit <= 100:
-            return _err("invalid_argument", "limit 须在 1~100")
+        if not 1 <= limit <= 50:
+            return _err("invalid_argument", "limit 须在 1~50")
+        if detail and limit > 20:
+            limit = 20
         orders = repo.get_orders_by_sku(sku, limit=limit)
+        items = [_order_brief(o) if not detail else o.model_dump(mode="json") for o in orders]
         return {
             "total": repo.count_orders_by_sku(sku),
-            "items": [o.model_dump(mode="json") for o in orders],
+            "items": items,
+            "note": "列表不含明细；单笔明细用 get_order",
         }
+
+    @mcp.tool
+    def get_customer_purchases(
+        customer: Annotated[
+            str, Field(description="客户名，精确匹配；不确定写法时先用 list_orders 试")
+        ],
+    ) -> dict[str, Any]:
+        """聚合某客户的购物汇总：买过什么（按商品聚合件数/金额）、各状态多少单
+        多少钱、总花费（有效口径 = 待发货/已发货/已签收）。回答"某人买了些什么 /
+        总共多少钱 / 哪些已发货哪些未付款"用本工具——一次调用代替逐单翻页。"""
+        if not customer.strip():
+            return _err(
+                "invalid_argument",
+                "客户名不能为空",
+                "客户名为精确匹配，可先用 list_orders 翻几页确认写法",
+            )
+        result = repo.customer_purchases(customer.strip())
+        if result is None:
+            return _not_found(
+                "客户订单", customer,
+                "客户名为精确匹配；可先用 list_orders 翻几页确认写法，或请用户确认全名",
+            )
+        data = result.model_dump(mode="json")
+        if len(data["items"]) > 40:
+            data["items"] = data["items"][:40]
+            data["note"] = "仅展示金额最高的 40 种商品"
+        return data
 
     # ---- 商品 ----
 

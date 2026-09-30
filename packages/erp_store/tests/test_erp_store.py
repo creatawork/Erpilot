@@ -233,5 +233,32 @@ def test_daily_sales_within_window(seeded) -> None:
     assert (datetime.now() - datetime.fromisoformat(dates[0])).days <= 30
 
 
+def test_customer_purchases_aggregation(seeded) -> None:
+    """聚合 = 一次调用回答"买了什么/共多少钱/各状态分布"，结果代替全量明细。"""
+    repo, _ = seeded
+    customer = repo.list_orders(limit=1)[0].customer
+    result = repo.customer_purchases(customer)
+    assert result is not None and result.customer == customer
+
+    orders = repo.list_orders(customer=customer, limit=500)
+    assert result.order_count == len(orders) == repo.count_orders(customer=customer)
+    valid = [o for o in orders if o.status.value in ("待发货", "已发货", "已签收")]
+    assert result.total_amount == round(sum(o.total_amount for o in valid), 2)
+    assert result.total_amount_all == round(sum(o.total_amount for o in orders), 2)
+    assert sum(s.order_count for s in result.by_status) == len(orders)
+    # 聚合行按金额降序，且件数与订单明细对得上
+    amounts = [i.total_amount for i in result.items]
+    assert amounts == sorted(amounts, reverse=True)
+    top = result.items[0]
+    assert top.total_quantity == sum(
+        i.quantity for o in orders for i in o.items if i.sku == top.sku
+    )
+
+
+def test_customer_purchases_missing_customer(seeded) -> None:
+    repo, _ = seeded
+    assert repo.customer_purchases("不存在的客户xyz") is None
+
+
 def test_default_seed_is_pinned() -> None:
     assert DEFAULT_SEED == 20260930  # 换种子 = 换数据集，必须显式改这里

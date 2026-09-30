@@ -1,4 +1,4 @@
-# MCP 工具卡（erpilot-erp · 15 个只读工具）
+# MCP 工具卡（erpilot-erp · 16 个只读工具）
 
 > M3 第 3 周 · 工具设计精研（上）。每个工具一张卡：用途 / 参数 / 返回 / 错误。
 > 本文档与 server 工具集有同步测试把关（`test_tool_cards_doc_matches_server_tools`）——
@@ -28,16 +28,22 @@
 - 错误：`not_found` → hint 建议用 `list_orders` 浏览或请用户提供完整单号
 
 ### list_orders
-- 用途：按时间倒序列订单
-- 参数：`status`（可选，待付款/待发货/已发货/已签收/已取消/已退款）、`customer`（可选，精确匹配）、`limit`（1~100，默认 20）、`offset`
-- 返回：`{"total", "items"}`——total 是过滤后的总数，判断有无下一页
-- 错误：`invalid_argument`（状态取值非法时 hint 列出全部可选值）
+- 用途：按时间倒序列订单（**逐单浏览**用；按客户统计"买了什么/花了多少"请用 `get_customer_purchases`，一次聚合结果小得多）
+- 参数：`status`（可选，待付款/待发货/已发货/已签收/已取消/已退款）、`customer`（可选，精确匹配）、`limit`（1~50，默认 20）、`offset`、`detail`（默认 False）
+- 返回：`{"total", "items", "note"}`——**默认不含明细行**（订单头：单号/客户/状态/时间/件数/金额），`detail=true` 才带明细且 limit 自动收紧到 20
+- 错误：`invalid_argument`（状态取值非法时 hint 列出全部可选值；limit/offset 越界）
 
 ### get_orders_by_sku
 - 用途：反查某 SKU 进了哪些订单（含全部状态）——"这个商品都卖给谁了"
-- 参数：`sku`（必填）、`limit`（1~100，默认 20）
-- 返回：`{"total", "items"}`（订单对象同 get_order）
+- 参数：`sku`（必填）、`limit`（1~50，默认 20）、`detail`（默认 False，同 list_orders 瘦身）
+- 返回：`{"total", "items", "note"}`
 - 错误：total 为 0 表示该 SKU 无订单（合法结果，非错误）
+
+### get_customer_purchases
+- 用途：**聚合某客户的购物汇总**——买过什么（按商品聚合件数/金额）、各状态多少单多少钱、总花费。回答"某人买了些什么/总共多少钱/哪些已发货哪些未付款"用本工具，一次调用代替逐单翻页
+- 参数：`customer`（必填，精确匹配；不确定写法先 list_orders 确认）
+- 返回：`{"customer", "order_count", "total_amount"（有效口径=待发货/已发货/已签收）, "total_amount_all"（含取消/退款/待付款）, "by_status": [{status, order_count, total_amount}], "items": [{sku, name, total_quantity, total_amount}]（按金额降序，最多 40 行）}`
+- 错误：`invalid_argument`（客户名为空）；`not_found`（该客户无订单 → hint 用 list_orders 确认写法）
 
 ## 商品
 

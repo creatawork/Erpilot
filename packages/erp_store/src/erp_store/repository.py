@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, selectinload
 from erp_store.db import OrderItemRow, OrderRow, ProductRow, StockRow
 from erp_store.models import (
     CategoryStat,
+    CustomerPurchases,
     DailySalesPoint,
     LowStockItem,
     Order,
@@ -23,8 +24,10 @@ from erp_store.models import (
     Product,
     ProductSales,
     ProductStatus,
+    PurchaseLine,
     Quote,
     SalesSummary,
+    StatusAmount,
     StockItem,
     StockValuationLine,
 )
@@ -120,6 +123,47 @@ class ErpRepository:
         with self._session() as s:
             return s.scalar(stmt) or 0
 
+    def customer_purchases(self, customer: str) -> CustomerPurchases | None:
+        """聚合某客户的全部订单：买过什么（按 SKU 聚合件数/金额）、各状态
+        多少单多少钱、总花费（有效口径 + 全口径）。
+
+        这是"某人买了些什么/总共多少钱"类问题的正解——一次聚合返回紧凑结果，
+        代替把该客户全部订单明细怼进上下文（那会把下一轮 LLM 请求撑爆，
+        见 docs/error-recovery-log.md #2）。客户无订单返回 None。
+        """
+        orders = self.list_orders(customer=customer, limit=500)
+        if not orders:
+            return None
+        by_status: dict[str, list[float]] = {}
+        items: dict[tuple[str, str], list[float]] = {}
+        total_valid = total_all = 0.0
+        for order in orders:
+            amount = order.total_amount
+            bucket = by_status.setdefault(order.status.value, [0, 0.0])
+            bucket[0] += 1
+            bucket[1] = round(bucket[1] + amount, 2)
+            total_all = round(total_all + amount, 2)
+            if order.status in VALID_SALES_STATUSES:
+                total_valid = round(total_valid + amount, 2)
+            for item in order.items:
+                agg = items.setdefault((item.sku, item.name), [0, 0.0])
+                agg[0] += item.quantity
+                agg[1] = round(agg[1] + item.quantity * item.unit_price, 2)
+        return CustomerPurchases(
+            customer=customer,
+            order_count=len(orders),
+            total_amount=total_valid,
+            total_amount_all=total_all,
+            by_status=[
+                StatusAmount(status=s, order_count=c, total_amount=a)
+                for s, (c, a) in sorted(by_status.items(), key=lambda kv: -kv[1][1])
+            ],
+            items=[
+                PurchaseLine(sku=sku, name=name, total_quantity=q, total_amount=a)
+                for (sku, name), (q, a) in sorted(items.items(), key=lambda kv: -kv[1][1])
+            ],
+        )
+
     def stock_valuation(self) -> list[StockValuationLine]:
         """库存估值：按品类聚合 Σ数量 × 现价——掌柜算家底。"""
         stmt = (
@@ -205,7 +249,9 @@ class ErpRepository:
     def count_orders(
         self, *, status: OrderStatus | None = None, customer: str | None = None
     ) -> int:
-        stmt = select(func.count()).select_from(_orders_query(status).subquery())
+        stmt = select(func.count()).select_from(
+            _orders_query(status, customer).subquery()
+        )
         with self._session() as s:
             return s.scalar(stmt) or 0
 
