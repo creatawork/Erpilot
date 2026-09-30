@@ -24,7 +24,7 @@ M1（第 1–4 周）手写完整 agent loop，不引入任何编排框架；M6 
 
 - **面试原理题**：模型如何决定调用工具、tool 消息为何必须与 assistant tool_calls 成对、上下文为何要按轮裁剪——亲手实现过一遍才有第一手答案，这是框架给不了的
 - **事件协议自主权**：SSE 前端、trace 格式、成本计量的字段形状由自己定义，M6 换 LangGraph 时被替换的只是 loop 内核，这层协议和四个消费方不动
-- **面积可控**：loop.py + context.py + llm.py 合计约 600 行、44 项单测，远未到"重新发明 LangGraph"的规模；LangGraph 真正解决的（checkpoint 持久化、interrupt 人工介入、图编排）恰好都在 M6 之后的 HITL 阶段才需要
+- **面积可控**：loop.py + context.py + llm.py 合计约 550 行（另有 trace/cli 等消费模块），全套 44 项单测，远未到"重新发明 LangGraph"的规模；LangGraph 真正解决的（checkpoint 持久化、interrupt 人工介入、图编排）恰好都在 M6 之后的 HITL 阶段才需要
 - **迁移风险前置消化**：手写阶段积累的事件流、错误回填、压缩策略直接定义了 LangGraph 重构的验收标准
 
 ## 备选与放弃原因

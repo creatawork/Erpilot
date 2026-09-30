@@ -25,7 +25,7 @@ v1 用 `agent_core/trace.py`：JSONL 事件溯源落盘（一行一个 JSON 记�
 
 ## 理由
 
-- **零依赖零部署**：trace.py 约 200 行，标准库实现；Langfuse 自托管要 Docker + Postgres + ClickHouse + 对象存储，M1 的收益撑不起这个运维面积
+- **零依赖零部署**：trace.py 约 240 行，标准库实现；Langfuse 自托管要 Docker + Postgres + ClickHouse + 对象存储，M1 的收益撑不起这个运维面积
 - **故障留痕最可靠**：逐行 flush 的追加写意味着进程崩溃、断网、上游 5xx 时已发生的记录都在——本周两次真实上游故障（APIError / 502 upstream_error）都被 `run_error` 记录即为实证；而"观测管道自身不可达"恰恰是故障高发时刻
 - **格式自有，不被锁定**：JSONL 记录与 loop 事件一一对应，后续接 Langfuse/OTel GenAI 时把 recorder 替换/并联为一个 sink 即可，字段映射是自己定义的
 - **回放即验收**：`erpilot replay` 把流水还原成"用户提问 → 每轮工具调用与 token/成本 → 最终回答"的可读对话，直接满足 M1 验收线，不依赖任何 UI

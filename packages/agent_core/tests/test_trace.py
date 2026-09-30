@@ -4,8 +4,16 @@ import json
 
 import httpx2
 import pytest
-from agent_core.llm import Usage
-from agent_core.loop import AgentLoop, LoopEnd, ToolCallFinished, ToolCallStarted
+from agent_core.llm import TextDelta, Usage
+from agent_core.loop import (
+    AgentLoop,
+    LoopEnd,
+    StepEnd,
+    StepStarted,
+    ToolCall,
+    ToolCallFinished,
+    ToolCallStarted,
+)
 from agent_core.testing import USAGE, chunk, make_client, sse_response, tool_call_chunks
 from agent_core.tools import tool
 from agent_core.trace import (
@@ -67,11 +75,22 @@ async def test_records_full_pipeline_and_passes_events_through(tmp_path) -> None
         "step_start", "step_end",
         "run_end",
     ]
-    # 事件透传：recorder 只是旁观者
-    assert [e for e in events if isinstance(e, (ToolCallStarted, ToolCallFinished))]
-    assert events[-1] == LoopEnd(
-        steps=2, usage=Usage(26, 14, 40), completed=True
-    )
+    # 事件透传：recorder 只是旁观者——除轮次边界事件（含非确定耗时）外逐个相等
+    core = [e for e in events if not isinstance(e, (StepStarted, StepEnd))]
+    assert core == [
+        ToolCallStarted(
+            call=ToolCall(id="call_1", name="get_order_status", arguments='{"order_id": "123"}')
+        ),
+        ToolCallFinished(
+            call_id="call_1",
+            name="get_order_status",
+            content=json.dumps({"status": "已发货", "order_id": "123"}, ensure_ascii=False),
+            ok=True,
+        ),
+        TextDelta(text="订单 123 已发货"),
+        LoopEnd(steps=2, usage=Usage(26, 14, 40), completed=True),
+    ]
+    assert [e.step for e in events if isinstance(e, StepStarted)] == [1, 2]
 
     run_start = records[0]
     assert run_start["model"] == "glm-5.3-flash"

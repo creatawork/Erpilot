@@ -2,7 +2,7 @@
 
 > Erpilot 系列第 1 篇 · 2026-09-30
 >
-> 代码在 [erpilot/packages/agent_core](https://github.com/creatawork/erpilot)（M1 第 1–4 周），约 600 行 Python + 44 项单测。
+> 代码在 [erpilot/packages/agent_core](https://github.com/creatawork/erpilot)（M1 第 1–4 周），约 1200 行 Python + 44 项单测。
 > 这一版刻意不用任何 agent 框架——为什么、以及什么时候我会换上 LangGraph，文末说。
 
 大模型 API 本身只会一件事：你发一段消息列表，它回一段消息。所谓 agent，是在这件事外面套了一个循环——**让它能用工具、能看结果、能接着想**。市面上所有 agent 框架，剥开 UI 和生态，核心都是这个循环。这篇文章把它从零写一遍：从一次流式 API 调用开始，到多步工具调用、防死循环、错误回填、上下文压缩，最后落一份可回放的 trace。
