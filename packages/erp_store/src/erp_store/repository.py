@@ -9,7 +9,7 @@ from contextlib import contextmanager
 
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from erp_store.db import OrderRow, ProductRow, StockRow
 from erp_store.models import (
@@ -81,7 +81,14 @@ class ErpRepository:
         limit: int = 20,
         offset: int = 0,
     ) -> list[Order]:
-        stmt = _orders_query(status, customer).limit(limit).offset(offset)
+        # selectinload：明细第二条查询 IN 批量取，避免每单一查的 N+1；
+        # 不用 joinedload 是因为它会破坏 limit/offset 的分页语义
+        stmt = (
+            _orders_query(status, customer)
+            .options(selectinload(OrderRow.items))
+            .limit(limit)
+            .offset(offset)
+        )
         with self._session() as s:
             return [_order(r) for r in s.scalars(stmt)]
 

@@ -66,8 +66,16 @@ class OrderItemRow(Base):
 
 
 def make_engine(db_path: Path = DEFAULT_DB) -> Engine:
+    """SQLite 引擎。
+
+    check_same_thread=False：连接池里的连接会被不同线程取用（M3 工具层
+    跑在 FastMCP/FastAPI 的工作线程里），SQLite 的同线程限制交给连接池
+    与文件锁兜底；M6 换 PostgreSQL 后该参数随之消失。
+    """
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    return create_engine(f"sqlite:///{db_path}")
+    return create_engine(
+        f"sqlite:///{db_path}", connect_args={"check_same_thread": False}
+    )
 
 
 def init_db(engine: Engine) -> None:
