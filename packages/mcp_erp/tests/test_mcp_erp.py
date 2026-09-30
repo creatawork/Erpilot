@@ -5,15 +5,18 @@ LLM 在 HTTP 边界 mock（agent_core.testing），ERP 数据用小规模确定�
 """
 
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 from agent_core.loop import AgentLoop, ToolCallFinished
 from agent_core.testing import chunk, make_client, sse_response, tool_call_chunks
-from erp_store.db import make_engine
+from erp_store.db import OrderItemRow, OrderRow, init_db, make_engine
+from erp_store.models import OrderStatus
 from erp_store.repository import ErpRepository
 from erp_store.seed import seed_database
 from mcp_erp import build_agent_tools, build_agent_tools_async, create_server
+from sqlalchemy.orm import Session
 
 
 @pytest.fixture(scope="module")
@@ -99,6 +102,54 @@ async def test_get_customer_purchases_aggregates(seeded_db, repo) -> None:
     assert ok.data["order_count"] == repo.count_orders(customer=customer)
     assert ok.data["by_status"] and ok.data["items"]
     assert missing.data["error"]["code"] == "not_found"
+
+
+async def test_list_orders_detail_clamps_page_size(seeded_db) -> None:
+    """detail=True 收紧页大小到 20；note 如实说明带没带明细（不说反话）。"""
+    from fastmcp import Client
+
+    async with Client(create_server(seeded_db)) as client:
+        clamped = await client.call_tool("list_orders", {"limit": 50, "detail": True})
+        as_asked = await client.call_tool("list_orders", {"limit": 5, "detail": True})
+        slim = await client.call_tool("list_orders", {"limit": 50})
+    assert len(clamped.data["items"]) == 20
+    assert "已带每单明细" in clamped.data["note"] and "收紧到 20" in clamped.data["note"]
+    assert len(as_asked.data["items"]) == 5
+    assert "收紧" not in as_asked.data["note"]
+    assert "列表不含明细" in slim.data["note"]
+
+
+async def test_get_customer_purchases_truncates_items_at_40(tmp_path) -> None:
+    """聚合行 > 40 时服务端截前 40 并给 note；仓库层仍是全量（截断是表现层策略）。"""
+    from fastmcp import Client
+
+    db = tmp_path / "big.db"
+    engine = make_engine(db)
+    init_db(engine)
+    with Session(engine) as session:
+        for j in range(3):  # 45 个不同 SKU 分三单，全部归到独立客户名下
+            session.add(OrderRow(
+                order_id=f"SO20260101-{j + 1:04d}",
+                customer="测试大户",
+                status=OrderStatus.PENDING_SHIPMENT.value,
+                created_at=datetime(2026, 1, 1) + timedelta(days=j),
+                items=[
+                    OrderItemRow(sku=f"X{i:03d}", name=f"测试品{i:03d}",
+                                 quantity=1, unit_price=10.0 + i)
+                    for i in range(j * 15, (j + 1) * 15)
+                ],
+            ))
+        session.commit()
+
+    async with Client(create_server(db)) as client:
+        result = await client.call_tool("get_customer_purchases", {"customer": "测试大户"})
+    assert result.data["order_count"] == 3
+    assert len(result.data["items"]) == 40
+    assert result.data["note"] == "仅展示金额最高的 40 种商品"
+    full = ErpRepository(engine).customer_purchases("测试大户")
+    assert full is not None and len(full.items) == 45
+    # 截断保留的是金额最高的一批：第 40 行金额仍高于第 41 名
+    assert result.data["items"][-1]["total_amount"] > full.items[40].total_amount
 
 
 # ---- bridge：MCP 工具 → agent_core Tool ----

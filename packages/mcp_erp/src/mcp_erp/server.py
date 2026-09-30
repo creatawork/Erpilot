@@ -116,14 +116,20 @@ def create_server(db_path: Path = DEFAULT_DB) -> FastMCP:
             parsed, err = _parse_status(status, OrderStatus, _ORDER_STATUS_HELP)
             if err:
                 return err
-        if detail and limit > 20:
+        clamped = detail and limit > 20
+        if clamped:
             limit = 20  # 带明细时收紧页大小：明细行是上下文的大头
         orders = repo.list_orders(status=parsed, customer=customer, limit=limit, offset=offset)
         items = [_order_brief(o) if not detail else o.model_dump(mode="json") for o in orders]
+        if detail:
+            note = "已带每单明细" + ("，页大小已收紧到 20" if clamped else "")
+            note += "；按客户聚合统计请用 get_customer_purchases"
+        else:
+            note = "列表不含明细；单笔明细用 get_order，按客户聚合用 get_customer_purchases"
         return {
             "total": repo.count_orders(status=parsed, customer=customer),
             "items": items,
-            "note": "列表不含明细；单笔明细用 get_order，按客户聚合用 get_customer_purchases",
+            "note": note,
         }
 
     @mcp.tool
@@ -138,14 +144,19 @@ def create_server(db_path: Path = DEFAULT_DB) -> FastMCP:
         "这个商品都卖给谁了 / 进了哪些单"场景。"""
         if not 1 <= limit <= 50:
             return _err("invalid_argument", "limit 须在 1~50")
-        if detail and limit > 20:
+        clamped = detail and limit > 20
+        if clamped:
             limit = 20
         orders = repo.get_orders_by_sku(sku, limit=limit)
         items = [_order_brief(o) if not detail else o.model_dump(mode="json") for o in orders]
+        if detail:
+            note = "已带每单明细" + ("，页大小已收紧到 20" if clamped else "")
+        else:
+            note = "列表不含明细；单笔明细用 get_order"
         return {
             "total": repo.count_orders_by_sku(sku),
             "items": items,
-            "note": "列表不含明细；单笔明细用 get_order",
+            "note": note,
         }
 
     @mcp.tool

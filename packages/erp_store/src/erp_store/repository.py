@@ -129,26 +129,30 @@ class ErpRepository:
 
         这是"某人买了些什么/总共多少钱"类问题的正解——一次聚合返回紧凑结果，
         代替把该客户全部订单明细怼进上下文（那会把下一轮 LLM 请求撑爆，
-        见 docs/error-recovery-log.md #2）。客户无订单返回 None。
+        见 docs/error-recovery-log.md #2）。先计数再按数取全量，不做固定上限
+        截断——截断会静默少算。客户无订单返回 None。
         """
-        orders = self.list_orders(customer=customer, limit=500)
-        if not orders:
+        total = self.count_orders(customer=customer)
+        if not total:
             return None
-        by_status: dict[str, list[float]] = {}
-        items: dict[tuple[str, str], list[float]] = {}
+        orders = self.list_orders(customer=customer, limit=total)
+        by_status: dict[str, tuple[int, float]] = {}
+        items: dict[tuple[str, str], tuple[int, float]] = {}
         total_valid = total_all = 0.0
         for order in orders:
             amount = order.total_amount
-            bucket = by_status.setdefault(order.status.value, [0, 0.0])
-            bucket[0] += 1
-            bucket[1] = round(bucket[1] + amount, 2)
+            count, status_amount = by_status.get(order.status.value, (0, 0.0))
+            by_status[order.status.value] = (count + 1, round(status_amount + amount, 2))
             total_all = round(total_all + amount, 2)
             if order.status in VALID_SALES_STATUSES:
                 total_valid = round(total_valid + amount, 2)
             for item in order.items:
-                agg = items.setdefault((item.sku, item.name), [0, 0.0])
-                agg[0] += item.quantity
-                agg[1] = round(agg[1] + item.quantity * item.unit_price, 2)
+                key = (item.sku, item.name)
+                qty, line_amount = items.get(key, (0, 0.0))
+                items[key] = (
+                    qty + item.quantity,
+                    round(line_amount + item.quantity * item.unit_price, 2),
+                )
         return CustomerPurchases(
             customer=customer,
             order_count=len(orders),

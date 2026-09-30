@@ -4,7 +4,7 @@
 确定性断言单独用小规模库种两次对比。
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 from erp_store import (
@@ -14,10 +14,11 @@ from erp_store import (
     ProductStatus,
     StockItem,
 )
-from erp_store.db import make_engine
+from erp_store.db import OrderItemRow, OrderRow, init_db, make_engine
 from erp_store.repository import ErpRepository
 from erp_store.seed import DEFAULT_SEED, seed_database
 from pydantic import ValidationError
+from sqlalchemy.orm import Session
 
 _FIXED_NOW = datetime(2026, 9, 30, 12, 0)  # 确定性断言把日期锚死
 
@@ -258,6 +259,28 @@ def test_customer_purchases_aggregation(seeded) -> None:
 def test_customer_purchases_missing_customer(seeded) -> None:
     repo, _ = seeded
     assert repo.customer_purchases("不存在的客户xyz") is None
+
+
+def test_customer_purchases_covers_all_orders_no_page_cap(tmp_path) -> None:
+    """聚合必须覆盖全部订单——回归护栏：曾用固定 limit=500，超页会静默少算。"""
+    engine = make_engine(tmp_path / "many.db")
+    init_db(engine)
+    with Session(engine) as session:
+        for j in range(505):
+            session.add(OrderRow(
+                order_id=f"SO20260101-{j + 1:04d}",
+                customer="多单客户",
+                status=OrderStatus.PENDING_SHIPMENT.value,
+                created_at=datetime(2026, 1, 1) + timedelta(minutes=j),
+                items=[OrderItemRow(sku="A1001", name="测试品", quantity=1, unit_price=9.9)],
+            ))
+        session.commit()
+    result = ErpRepository(engine).customer_purchases("多单客户")
+    assert result is not None
+    assert result.order_count == 505
+    assert result.by_status[0].order_count == 505
+    assert result.items[0].total_quantity == 505
+    assert result.total_amount == round(505 * 9.9, 2)
 
 
 def test_default_seed_is_pinned() -> None:
