@@ -5,7 +5,7 @@
 > 代码在 [erpilot/packages/agent_core](https://github.com/creatawork/Erpilot)（M1 第 1–4 周），约 1200 行 Python + 44 项单测。
 > 这一版刻意不用任何 agent 框架——为什么、以及什么时候我会换上 LangGraph，文末说。
 
-大模型 API 只会一件事：发一段消息列表，收一段消息。但上周我的"掌柜助手"完成了这样的任务——用户问"订单 123 里买了什么？还有货吗？报个价"，它自己拆成三步：查订单 → 查库存和报价（这一轮它**自发同时调用了两个工具**，没人教过它并行）→ 组织一句能直接发给顾客的回复。三轮 LLM 往返，成本约 ¥0.0003。
+大模型 API 只会一件事：发一段消息列表，收一段消息。但我的"掌柜助手"已经能完成这样的任务——用户问"订单 123 里买了什么？还有货吗？报个价"，它自己拆成三步：查订单 → 查库存和报价（这一轮它**自发同时调用了两个工具**，没人教过它并行）→ 组织一句能直接发给顾客的回复。三轮 LLM 往返，成本约 ¥0.0003。
 
 中间没有魔法，只有一个循环。市面上的 agent 框架，剥掉 UI 和生态，核心都是这个循环。这篇文章把它从零写一遍：从一次流式 API 调用开始，到多步工具调用、防死循环、错误回填、上下文压缩，最后落一份可回放的 trace。写完你会知道框架在替你做什么——以及哪些它替不了。
 
@@ -36,7 +36,7 @@ class ToolCall:    id: str; name: str; arguments: str
 class StreamEnd:   usage: Usage | None
 ```
 
-`stream_chat()` 产出 `TextDelta | ToolCall | StreamEnd`，并且保证**恰好以一个 StreamEnd 结束**。这条小约定后来救了我好几次：所有下游（CLI 渲染、SSE 转发、trace 落盘）都只需要处理三种事件、都只需要等一个确定的终止信号。供应商换成智谱、DeepSeek 还是中转端点，下游一行不改。
+`stream_chat()` 产出 `TextDelta | ToolCall | StreamEnd`，并且保证**恰好以一个 StreamEnd 结束**。有了这层边界，下游就只需要认识三种事件：CLI 等一个终止信号来收口统计，SSE 把事件逐个转发，trace 逐行落盘——SDK 的流式细节被封在 `stream_chat` 里面，谁都不用再碰。
 
 顺带处理一个容易忽略的脏活：流式模式下工具调用是**分片到达**的——第一个包只有 `id` 和函数名，参数 JSON 分成好几段。要按 `index` 把碎片归并回完整的 ToolCall：
 
@@ -86,7 +86,7 @@ async def run(self, messages) -> AsyncIterator[AgentEvent]:
 
 （重试与工具超时在 `_execute` 里，此处删了枝节；其余与 `loop.py` 一致。）
 
-三个协议细节必须做对，做错任何一条，下一次请求会被端点直接拒绝：
+三个协议细节必须做对：
 
 **schema 注入**。工具用 Pydantic 定义参数模型，`model_json_schema()` 自动生成 OpenAI tools 格式。一个小技巧：生成后递归剥掉所有 `title` 键——Pydantic 会给每个字段加 title，对注入请求是纯噪音，白花 token。
 
@@ -137,7 +137,7 @@ for done in asyncio.as_completed(pending):
 
 三个顺序要分清：`Started` 事件按**调用顺序**发（模型请求了什么）；`Finished` 按**完成顺序**发（谁先跑完谁先走，前端时间线如实呈现）；回填消息按**调用顺序**放（与 assistant 消息里的 `tool_calls` 一一对应，协议最稳）。`Finished` 事件带着 `call_id`，前端靠它把 started/finished 配对，不怕乱序。
 
-值得强调的是：**并行不是代码教给模型的，是模型自己决定的**。工具定义和系统提示词里都没有"可以并行"的字样——OpenAI 兼容协议本身就允许一轮返回多个 tool_calls，模型自然会用。代码要做的只是别把它们串起来。而省下的时间相当可观：trace 里一次工具执行只要几毫秒，任务耗时几乎全花在等 LLM 往返上——把同一轮的两次独立调用并成一次等待，省的就是最贵的那部分。
+有意思的是，**并行不是代码教给模型的，是模型自己决定的**。工具定义和系统提示词里都没有"可以并行"的字样——OpenAI 兼容协议本身就允许一轮返回多个 tool_calls，模型自然会用。代码要做的只是别把它们串起来。省下的时间也很直观：trace 里一次工具执行只要几毫秒，任务耗时几乎全花在等 LLM 往返上——把同一轮的两次独立调用并成一次等待，省的就是最贵的那部分。
 
 ## 五、上下文压缩：把历史塞回预算里
 
@@ -152,7 +152,7 @@ system 消息和最近几条永远保留；发生过丢弃就插入一条 system
 
 agent 的行为是非确定的：同一个问题，今天两步明天三步，工具调用顺序每次都可能不同。**出了错，你需要的不是堆栈，是完整的过程回放**。
 
-trace 模块的设计上只做一件事：旁观事件流，原样落盘。
+trace 模块在设计上只做一件事：旁观事件流，原样落盘。
 
 ```python
 recorder = JsonlTraceRecorder(path, model=config.model)
@@ -162,7 +162,7 @@ async for event in recorder.run(agent, messages):   # 事件原样透传
 
 一行一个 JSON 记录，追加写、逐行 flush：`run_start`（开跑时的历史快照）→ `step_start` / `step_end`（每轮文本、token、成本、耗时）→ `tool_call`（每次调用的入参出参与耗时）→ `run_end`（结束时完整历史）。异常也留痕：`run_error` 记完再原样抛出。
 
-JSONL 这个格式被质疑过"不如上 Langfuse"。但对 M1 来说：逐行 flush 意味着**进程崩了已写的行还在**（观测管道最需要工作的时刻恰恰是故障时刻）；裸文本意味着 `grep`/`jq`/`tail -f` 全都能用；而且格式是我自己定义的，将来映射到 OTel GenAI 语义约定或者 Langfuse 只是换个 sink。取舍全文写进了 [ADR-0003](https://github.com/creatawork/Erpilot/blob/main/docs/adr/0003-local-jsonl-trace-first.md)。
+为什么不是直接上 Langfuse？不是它不好，是 M1 用不上：自托管一套要 Docker + Postgres + ClickHouse + 对象存储，而现在的场景是单机、单进程、低频调用。逐行 flush 的 JSONL 意味着**进程崩了已写的行还在**（观测管道最需要工作的时刻恰恰是故障时刻）；裸文本意味着 `grep`/`jq`/`tail -f` 全都能用；格式是自定义的，将来映射到 OTel GenAI 语义约定或者 Langfuse 只是换个 sink。取舍全文写进了 [ADR-0003](https://github.com/creatawork/Erpilot/blob/main/docs/adr/0003-local-jsonl-trace-first.md)。
 
 `erpilot replay` 把流水还原成可读对话。下面是本文写作当天的一段**真实 trace**——那会儿上游端点正在抽风，一轮请求慢到 266 秒，我在第 2 轮等不到结果时手动中止了它：
 
