@@ -4,7 +4,6 @@ import json
 
 import httpx2
 import pytest
-from _mock_openai import USAGE, chunk, make_client, sse_response, tool_call_chunks
 from agent_core.llm import (
     StreamEnd,
     StreamResult,
@@ -13,6 +12,7 @@ from agent_core.llm import (
     ToolCall,
     Usage,
 )
+from agent_core.testing import USAGE, chunk, make_client, sse_response, tool_call_chunks
 from pydantic import BaseModel, ValidationError
 
 

@@ -117,17 +117,25 @@ Python 侧用 uv workspace 管理四个包；依赖方向：`apps` → `packages
 - 产出：3 步以上任务的稳定 demo，错误场景有单测（真实链路 3 步验收：第 2 步
   模型自发并行调用 check_stock + get_price）
 
-### 第 4 周 — 可观测与收口
-- [ ] 本地 trace：JSONL 落盘，含每轮消息、工具调用、耗时、token、成本
-- [ ] typer/rich CLI demo + FastAPI SSE 最小链路 + React 最小流式页（验证前后端协议）
-- [ ] ADR：为什么主栈选 Python；为什么手写 loop 而不是先上框架
-- [ ] 文章：《手写 Agent Loop：从一次 API 调用到多步任务》
+### 第 4 周 — 可观测与收口（代码完成 2026-09-30；文章发布与真实链路完整数字待补）
+- [x] 本地 trace：JSONL 落盘（trace.py：run_start/step_start/step_end/tool_call/
+      run_end/run_error 六类记录，逐行 flush 异常也留痕），`erpilot replay` 回放
+- [x] typer/rich CLI（`erpilot chat` + `erpilot replay`）+ FastAPI SSE 最小链路
+      （POST /api/chat/stream，协议 start/step/delta/tool_started/tool_finished/
+      done/error）+ React 最小流式页（fetch 手解 SSE + 工具时间线 + token/成本）
+- [x] ADR：手写 loop 而不是先上框架（ADR-0002）；本地 JSONL trace 先行、Langfuse
+      推迟到评测起步（ADR-0003）。"为什么主栈选 Python"已由 ADR-0001（脚手架周）覆盖
+- [x] 文章：《手写 Agent Loop：从一次 API 调用到多步任务》文稿完成
+      （docs/articles/01-handwritten-agent-loop.md），待发布到 VIE
+- 产出：同一条 loop + trace 链路供 CLI / SSE / 前端三种入口消费；SSE 协议字段
+  表落在 erpilot_api/events.py docstring，前端镜像类型在 apps/web/src/protocol.ts
 
 ### M1 验收标准
-- [ ] 无框架实现完整 loop：流式、tool calling、结构化输出、并行工具调用
-- [ ] 防死循环 + 工具超时 + 错误回填，均有测试覆盖
-- [ ] 一次完整任务的 trace 可回放，成本/延迟有数字
-- [ ] 2 篇 ADR + 1 篇文章发布到 VIE
+- [x] 无框架实现完整 loop：流式、tool calling、结构化输出、并行工具调用
+- [x] 防死循环 + 工具超时 + 错误回填，均有测试覆盖
+- [ ] 一次完整任务的 trace 可回放，成本/延迟有数字（回放与计量已实现并单测；
+      真实链路完整数字待端点恢复后补跑一次成功任务，见第 8 节）
+- [ ] 2 篇 ADR + 1 篇文章发布到 VIE（ADR 已入库；文章待发布）
 
 ## 7. 风险与对策
 
@@ -148,6 +156,7 @@ Python 侧用 uv workspace 管理四个包；依赖方向：`apps` → `packages
 - [x] M1 第 1 周完成：LLM client（流式 + usage + 成本估算）+ demo 入口 + 10 项单测通过 + 真实链路冒烟通过（2026-09-29，经 flashcoding.ai 中转端点，单次成本 ≈¥0.00015，按现价目表折算）
 - [x] M1 第 2 周完成：AgentLoop 工具循环（tools 协议 + max_steps/超时防护 + structured 输出）+ 26 项单测 + 真实链路验收（2026-09-29，单工具任务 2 步正常结束）
 - [x] M1 第 3 周完成：多步任务 + 并行工具调用 + 错误回填策略 v1（结构化错误 + 瞬态重试）+ 上下文压缩 v1 + 34 项单测 + 真实链路验收（2026-09-29，3 步任务 ≈¥0.0003，第 2 步模型自发并行调用两工具）
+- [x] M1 第 4 周完成（代码侧）：本地 JSONL trace + `erpilot` CLI（chat/replay）+ FastAPI SSE 链路 + React 最小流式页 + ADR-0002/0003 + 文章文稿 + 44 项单测通过（2026-09-30）。真实链路当日两次验收尝试均遇上游故障（APIError / 502 upstream_error），均被 trace 的 run_error 完整留痕——异常留痕路径实战验证通过；成功任务的完整数字待端点恢复后补跑
 - [ ] assistant-ui 还是 CopilotKit（M6 前端成型时定；M1–M5 先手写最小 React UI，理解协议层）
 
 ## 9. 参考资料

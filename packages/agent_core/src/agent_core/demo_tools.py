@@ -1,0 +1,70 @@
+"""演示用假 ERP 工具与提示词。
+
+M3 起真实 ERP 能力由 mcp_erp（FastMCP）提供，这里用进程内假数据演示工具协议；
+CLI（cli.py）、FastAPI（apps/api）与 python -m agent_core 共用这一套，
+保证三条入口跑的是同一种工具、同一个系统提示词。
+"""
+
+from pydantic import BaseModel, Field
+
+from agent_core.tools import tool
+
+SYSTEM_PROMPT = (
+    "你是 Erpilot 掌柜助手：查订单、盘库存、算报价。"
+    "需要数据时必须调用工具查询，不要编造。"
+)
+
+DEFAULT_PROMPT = (
+    "订单 123 里买了什么？这些商品现在还有货吗？"
+    "有货的话报个价，最后给我一句能直接发给顾客的话。"
+)
+
+
+class OrderStatusQuery(BaseModel):
+    order_id: str = Field(description="订单号，例如 123")
+
+
+class SkuQuery(BaseModel):
+    sku: str = Field(description="商品 SKU 编码，例如 A1001")
+
+
+_FAKE_ORDERS = {
+    "123": {
+        "status": "待发货",
+        "carrier": None,
+        "items": [{"sku": "A1001", "name": "景德镇青瓷茶具", "qty": 2}],
+    },
+    "456": {
+        "status": "待付款",
+        "carrier": None,
+        "items": [{"sku": "B2002", "name": "加厚宣纸 100 张", "qty": 5}],
+    },
+}
+_FAKE_STOCK = {"A1001": 18, "B2002": 0}
+_FAKE_PRICES = {"A1001": 299.0, "B2002": 45.5}
+
+
+@tool(
+    name="get_order_status", description="按订单号查询订单状态与所含商品", params=OrderStatusQuery
+)
+async def get_order_status(params: OrderStatusQuery) -> dict[str, object]:
+    return _FAKE_ORDERS.get(params.order_id) or {"error": f"订单 {params.order_id} 不存在"}
+
+
+@tool(name="check_stock", description="按 SKU 查询商品当前库存", params=SkuQuery)
+async def check_stock(params: SkuQuery) -> dict[str, object]:
+    stock = _FAKE_STOCK.get(params.sku)
+    if stock is None:
+        return {"error": f"SKU {params.sku} 不存在"}
+    return {"sku": params.sku, "stock": stock, "available": stock > 0}
+
+
+@tool(name="get_price", description="按 SKU 查询商品当前售价（元）", params=SkuQuery)
+async def get_price(params: SkuQuery) -> dict[str, object]:
+    price = _FAKE_PRICES.get(params.sku)
+    if price is None:
+        return {"error": f"SKU {params.sku} 不存在"}
+    return {"sku": params.sku, "price": price, "currency": "CNY"}
+
+
+DEMO_TOOLS = [get_order_status, check_stock, get_price]

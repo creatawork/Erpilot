@@ -37,10 +37,19 @@ Python 3.12 · FastAPI · 手写 agent loop → LangGraph · FastMCP · PostgreS
 uv sync --all-packages       # 创建虚拟环境并安装全部工作区依赖
 cp .env.example .env         # 填入 ZHIPU_API_KEY
 uv run pytest                # 单元测试（mock，不消耗 token）
-uv run --package agent-core python -m agent_core   # M1 第 3 周验收：多步任务（订单→库存/报价→建议）+ 并行工具
+
+# CLI：rich 渲染流式对话 + trace 自动落盘 traces/*.jsonl
+uv run erpilot chat "订单 123 里买了什么？还有货吗？有货的话报个价"
+uv run erpilot replay traces/<某个>.jsonl      # 把 trace 还原成可读对话
+
+# API + 前端：SSE 链路
 uv run --package erpilot-api uvicorn erpilot_api.main:app --reload
 # 验证：http://127.0.0.1:8000/healthz
+cd apps/web && npm install && npm run dev      # http://localhost:5173
 ```
+
+M1 各周验收入口：第 1–3 周为 `python -m agent_core`（最简演示，多步任务 + 并行工具）；
+第 4 周为上述 `erpilot` CLI 与 API/前端链路。
 
 ## 路线图
 
@@ -54,5 +63,6 @@ uv run --package erpilot-api uvicorn erpilot_api.main:app --reload
 
 ## 文章与决策
 
-- 所有架构决策记录在 `docs/adr/`，范围冻结与启动计划见 [`docs/agent-project-plan.md`](docs/agent-project-plan.md)
-- 系列文章《手写 Agent Loop》《给 ERP 写一个 MCP Server》《Agent 的评测怎么做》等发布于个人站点 [Vie](https://vie-vibe.cn)
+- 所有架构决策记录在 `docs/adr/`（当前：0001 技术栈、0002 手写 loop 优先、0003 本地 JSONL trace 先行），范围冻结与启动计划见 [`docs/agent-project-plan.md`](docs/agent-project-plan.md)
+- 系列文章发布于个人站点 [Vie](https://vie-vibe.cn)，文稿随仓库维护：
+  1. 《手写 Agent Loop：从一次 API 调用到多步任务》—— [`docs/articles/01-handwritten-agent-loop.md`](docs/articles/01-handwritten-agent-loop.md)

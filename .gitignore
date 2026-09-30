@@ -15,6 +15,7 @@ build/
 *.db
 *.sqlite3
 data/
+traces/
 
 # Node（apps/web）
 node_modules/

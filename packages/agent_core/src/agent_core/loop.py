@@ -1,10 +1,10 @@
-"""M1 第 2–3 周产出：手写 agent loop——工具调用循环 + 防护 + 并行 + 错误策略。
+"""M1 第 2–4 周产出：手写 agent loop——工具调用循环 + 防护 + 并行 + 错误策略。
 
 第 2 周范围（计划 §6）：
 1. 工具循环：tools schema 注入请求 → 解析 tool_calls → Pydantic 校验入参 → asyncio 执行
    → 结果回填 → 继续生成，直到模型给出不含工具调用的最终回答
 2. 防护：max_steps 防死循环；单工具执行超时 asyncio.wait_for
-3. 事件流：TextDelta / ToolCallStarted / ToolCallFinished / LoopEnd，供第 4 周 SSE 转发
+3. 事件流：TextDelta / ToolCallStarted / ToolCallFinished / LoopEnd
 
 第 3 周增强（计划 §6）：
 - 并行工具调用：同一轮多个 tool_calls 用 asyncio.as_completed 并发执行，完成一个转发一个
@@ -12,11 +12,16 @@
   是确定性错误直接回填让模型修正或改道，timeout/execution 视为瞬态按重试策略重试
 - 上下文压缩：每步请求前按 ContextPolicy 截断/压缩历史（见 context.py）
 
-刻意留到第 4 周：本地 trace JSONL 落盘、FastAPI SSE 链路、CLI 美化。
+第 4 周增强（计划 §6）：
+- 轮次边界事件：StepStarted / StepEnd（每步的开始与 LLM 生成的 usage/耗时），
+  供 trace 逐轮记录与 SSE/前端的"第 n 轮"展示；ToolCallFinished 补 call_id，
+  消费方可把 started/finished 精确配对
+- 事件消费：trace.py（JSONL 落盘）、cli.py（rich 渲染）、apps/api（SSE 转发）
 """
 
 import asyncio
 import json
+import time
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 
@@ -56,11 +61,32 @@ class ToolCallStarted:
 
 @dataclass(frozen=True, slots=True)
 class ToolCallFinished:
-    """工具执行完毕；ok=False 时 content 是回填给模型的错误信息。"""
+    """工具执行完毕；ok=False 时 content 是回填给模型的错误信息。
 
+    call_id 与 ToolCallStarted.call.id 对应——并行调用完成顺序不定，
+    消费方靠它把 started/finished 精确配对。
+    """
+
+    call_id: str
     name: str
     content: str
     ok: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class StepStarted:
+    """一轮 LLM 请求开始（step 从 1 计）。"""
+
+    step: int
+
+
+@dataclass(frozen=True, slots=True)
+class StepEnd:
+    """一轮 LLM 生成结束：本步 usage 与耗时（含该步前的上下文压缩）。"""
+
+    step: int
+    usage: Usage | None = None
+    duration_ms: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,7 +98,9 @@ class LoopEnd:
     completed: bool = True
 
 
-AgentEvent = TextDelta | ToolCallStarted | ToolCallFinished | LoopEnd
+AgentEvent = (
+    TextDelta | StepStarted | StepEnd | ToolCallStarted | ToolCallFinished | LoopEnd
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +168,8 @@ class AgentLoop:
         schemas = [t.openai_schema() for t in self._tools.values()] or None
         total_usage: Usage | None = None
         for step in range(1, self._config.max_steps + 1):
+            t0 = time.perf_counter()
+            yield StepStarted(step=step)
             compress_messages(messages, self._config.context)
             parts: list[str] = []
             calls: list[ToolCall] = []
@@ -154,6 +184,11 @@ class AgentLoop:
                     case StreamEnd(usage=usage):
                         step_usage = usage
             total_usage = _merge_usage(total_usage, step_usage)
+            yield StepEnd(
+                step=step,
+                usage=step_usage,
+                duration_ms=round((time.perf_counter() - t0) * 1000, 1),
+            )
 
             if not calls:  # 本步不含工具调用，即最终回答
                 messages.append({"role": "assistant", "content": "".join(parts)})
@@ -170,7 +205,9 @@ class AgentLoop:
             for done in asyncio.as_completed(pending):
                 index, content, ok = await done
                 outcomes[index] = (content, ok)
-                yield ToolCallFinished(name=calls[index].name, content=content, ok=ok)
+                yield ToolCallFinished(
+                    call_id=calls[index].id, name=calls[index].name, content=content, ok=ok
+                )
             for call, (content, _ok) in zip(calls, outcomes, strict=True):
                 messages.append(
                     {"role": "tool", "tool_call_id": call.id, "content": content}

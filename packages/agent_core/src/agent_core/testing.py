@@ -1,11 +1,18 @@
-"""测试共享件：用 httpx2.MockTransport 伪造 OpenAI 兼容端点的 SSE 流（不烧真实 token）。"""
+"""测试共享件：用 httpx2.MockTransport 伪造 OpenAI 兼容端点的 SSE 流（不烧真实 token）。
+
+M1 第 4 周从 agent_core/tests/_mock_openai.py 提升为包内模块——apps/api 的
+链路测试要在同一个 HTTP 边界上 mock，两处共用同一套 chunk 构造。
+本模块只在测试里导入：agent-core 的运行时依赖仍是 openai + pydantic（httpx2
+由工作区 dev 依赖组提供）。
+"""
 
 import json
 from collections.abc import Callable
 
 import httpx2
-from agent_core.llm import LLMClient, LLMConfig
 from openai import AsyncOpenAI
+
+from agent_core.llm import LLMClient, LLMConfig
 
 BASE_URL = "https://llm.test/api/v1/"
 SSE_HEADERS = {"content-type": "text/event-stream"}

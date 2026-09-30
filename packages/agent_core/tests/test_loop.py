@@ -5,23 +5,25 @@ import json
 
 import httpx2
 import pytest
-from _mock_openai import (
-    USAGE,
-    chunk,
-    make_client,
-    multi_tool_chunks,
-    sse_response,
-    tool_call_chunks,
-)
 from agent_core.context import DROPPED_NOTE, ContextPolicy
 from agent_core.llm import TextDelta, ToolCall, Usage
 from agent_core.loop import (
     AgentLoop,
     LoopConfig,
     LoopEnd,
+    StepEnd,
+    StepStarted,
     ToolCallFinished,
     ToolCallStarted,
     ToolRetryPolicy,
+)
+from agent_core.testing import (
+    USAGE,
+    chunk,
+    make_client,
+    multi_tool_chunks,
+    sse_response,
+    tool_call_chunks,
 )
 from agent_core.tools import tool
 from pydantic import BaseModel
@@ -96,11 +98,14 @@ async def test_single_tool_task_round_trip() -> None:
 
     events = [e async for e in agent.run(messages)]
 
-    assert events == [
+    # 轮次边界事件（StepStarted/StepEnd 含耗时，不作精确相等断言），其余逐个比对
+    core = [e for e in events if not isinstance(e, (StepStarted, StepEnd))]
+    assert core == [
         ToolCallStarted(
             call=ToolCall(id="call_1", name="get_order_status", arguments='{"order_id": "123"}')
         ),
         ToolCallFinished(
+            call_id="call_1",
             name="get_order_status",
             content=json.dumps({"status": "已发货", "order_id": "123"}, ensure_ascii=False),
             ok=True,
@@ -112,6 +117,10 @@ async def test_single_tool_task_round_trip() -> None:
             completed=True,
         ),
     ]
+    assert [e.step for e in events if isinstance(e, StepStarted)] == [1, 2]
+    step_ends = [e for e in events if isinstance(e, StepEnd)]
+    assert [e.step for e in step_ends] == [1, 2]
+    assert all(e.usage == Usage(13, 7, 20) and e.duration_ms >= 0 for e in step_ends)
     # 第一次请求：注入了 tools schema
     assert requests[0]["tools"][0]["function"]["name"] == "get_order_status"
     # 第二次请求：历史里追加了 assistant 工具调用消息与 tool 结果消息
