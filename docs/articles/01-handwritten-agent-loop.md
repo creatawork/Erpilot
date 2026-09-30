@@ -2,10 +2,12 @@
 
 > Erpilot 系列第 1 篇 · 2026-09-30
 >
-> 代码在 [erpilot/packages/agent_core](https://github.com/creatawork/erpilot)（M1 第 1–4 周），约 1200 行 Python + 44 项单测。
+> 代码在 [erpilot/packages/agent_core](https://github.com/creatawork/Erpilot)（M1 第 1–4 周），约 1200 行 Python + 44 项单测。
 > 这一版刻意不用任何 agent 框架——为什么、以及什么时候我会换上 LangGraph，文末说。
 
-大模型 API 本身只会一件事：你发一段消息列表，它回一段消息。所谓 agent，是在这件事外面套了一个循环——**让它能用工具、能看结果、能接着想**。市面上所有 agent 框架，剥开 UI 和生态，核心都是这个循环。这篇文章把它从零写一遍：从一次流式 API 调用开始，到多步工具调用、防死循环、错误回填、上下文压缩，最后落一份可回放的 trace。
+大模型 API 只会一件事：发一段消息列表，收一段消息。但上周我的"掌柜助手"完成了这样的任务——用户问"订单 123 里买了什么？还有货吗？报个价"，它自己拆成三步：查订单 → 查库存和报价（这一轮它**自发同时调用了两个工具**，没人教过它并行）→ 组织一句能直接发给顾客的回复。三轮 LLM 往返，成本约 ¥0.0003。
+
+中间没有魔法，只有一个循环。市面上的 agent 框架，剥掉 UI 和生态，核心都是这个循环。这篇文章把它从零写一遍：从一次流式 API 调用开始，到多步工具调用、防死循环、错误回填、上下文压缩，最后落一份可回放的 trace。写完你会知道框架在替你做什么——以及哪些它替不了。
 
 ## 一、先让流式跑起来
 
@@ -46,24 +48,63 @@ if delta.function.arguments:
 
 ## 二、工具循环：agent 的本体
 
-有了流式，agent loop 的骨架其实只有十几行伪代码：
+有了流式，agent 的本体是这样一个循环：**生成 → 有工具调用就执行 → 结果回填 → 再生成**，直到模型给出不含工具调用的回答。核心不到三十行（真实版本在 `loop.py`，含防护与重试，这里删了枝节）：
 
-```
-while 步数 < 上限:
-    回复 = 流式请求(messages, tools=schema)
-    if 回复不含工具调用: return 回复          # 模型认为可以收口了
-    执行每个工具调用, 把结果以 role=tool 消息回填
+```python
+async def run(self, messages) -> AsyncIterator[AgentEvent]:
+    schemas = [t.openai_schema() for t in self._tools.values()]
+    total_usage = None
+    for step in range(1, self._config.max_steps + 1):
+        yield StepStarted(step=step)
+        compress_messages(messages, self._config.context)      # 上下文压缩，第五节
+        parts, calls, step_usage = [], [], None
+        async for event in self._client.stream_chat(messages, tools=schemas):
+            match event:
+                case TextDelta(text=text):
+                    parts.append(text); yield event
+                case ToolCall() as call:
+                    calls.append(call)
+                case StreamEnd(usage=usage):
+                    step_usage = usage                         # 本步 token 计量
+        total_usage = _merge_usage(total_usage, step_usage)    # 跨步合计
+        yield StepEnd(step=step, usage=step_usage, ...)        # 供 trace 逐轮记录
+
+        if not calls:                                          # 没有工具调用 = 最终回答
+            messages.append({"role": "assistant", "content": "".join(parts)})
+            yield LoopEnd(steps=step, usage=total_usage, completed=True)
+            return
+
+        messages.append(_assistant_toolcall_message("".join(parts), calls))
+        for call in calls:
+            yield ToolCallStarted(call=call)
+        pending = [self._execute_indexed(i, c) for i, c in enumerate(calls)]
+        for done in asyncio.as_completed(pending):             # 并行执行，第四节
+            index, content, ok = await done
+            yield ToolCallFinished(...)                        # 带 call_id，乱序可配对
+        # 结果按调用顺序回填进 messages，进入下一轮
 ```
 
-每一步有几个协议细节必须做对：
+（重试与工具超时在 `_execute` 里，此处删了枝节；其余与 `loop.py` 一致。）
+
+三个协议细节必须做对，做错任何一条，下一次请求会被端点直接拒绝：
 
 **schema 注入**。工具用 Pydantic 定义参数模型，`model_json_schema()` 自动生成 OpenAI tools 格式。一个小技巧：生成后递归剥掉所有 `title` 键——Pydantic 会给每个字段加 title，对注入请求是纯噪音，白花 token。
 
-**回填必须成对**。模型发出工具调用后，历史里要有两条消息：assistant 消息带 `tool_calls`（它在请求什么），tool 消息带 `tool_call_id`（结果是什么）。漏掉一半或者 id 对不上，下一次请求直接被端点拒绝。这也是后面上下文压缩的约束来源：**裁剪只能按轮进行，不能把 tool 结果和它的父调用拆开**。
+**回填必须成对**。模型发出工具调用后，历史里要有两条消息：assistant 消息带 `tool_calls`（它在请求什么），tool 消息带 `tool_call_id`（结果是什么）。漏掉一半或者 id 对不上，请求直接报错。这也是第五节上下文压缩的约束来源：**裁剪只能按轮进行，不能把 tool 结果和它的父调用拆开**。
 
 **校验放在执行前**。工具入参先过 Pydantic 校验，模型给错参数时，错误信息回填给它自己修正，而不是让 handler 炸出一个堆栈。
 
 到这里，"查订单 123 的状态"就能跑通了：模型请求 `get_order_status` → 执行 → 回填 → 第二轮生成"订单 123 已发货"。两步，这就是一个最小的 agent。
+
+整个循环对外只暴露一条事件流，这是本文最重要的一张图：
+
+```
+LLM(流式) ──▶ AgentLoop.run() ──▶ AgentEvent 流 ──┬─▶ trace.py    JSONL 落盘 + 回放
+             生成 → 工具 → 回填 → 再生成            ├─▶ cli.py      rich 渲染
+                                                   └─▶ FastAPI SSE ──▶ React 页
+```
+
+循环本身不知道也不关心谁在消费——第六节的 trace、CLI 的渲染、第七节的前端，挂的都是同一条流。
 
 ## 三、防护：循环的第一课是刹车
 
@@ -85,7 +126,7 @@ while 步数 < 上限:
 
 ## 四、并行工具调用
 
-一个真实任务——"订单里买了什么？有货吗？报个价"——模型第一轮会同时要订单明细，第二轮同时查库存和价格。第二轮的多个调用**互相独立，串行执行纯属浪费**：
+开头那个三步任务里，模型在第二轮同时要了库存和价格。两个调用互相独立，串行执行纯属浪费：
 
 ```python
 pending = [self._execute_indexed(i, c) for i, c in enumerate(calls)]
@@ -94,9 +135,9 @@ for done in asyncio.as_completed(pending):
     yield ToolCallFinished(...)   # 完成一个转发一个
 ```
 
-三个顺序要分清：`Started` 事件按**调用顺序**发（模型请求了什么）；`Finished` 按**完成顺序**发（谁先跑完谁先走，前端时间线如实呈现）；回填消息按**调用顺序**放（协议要求 tool 消息顺序无所谓，但和 assistant 的 tool_calls 一一对应最稳）。
+三个顺序要分清：`Started` 事件按**调用顺序**发（模型请求了什么）；`Finished` 按**完成顺序**发（谁先跑完谁先走，前端时间线如实呈现）；回填消息按**调用顺序**放（与 assistant 消息里的 `tool_calls` 一一对应，协议最稳）。`Finished` 事件带着 `call_id`，前端靠它把 started/finished 配对，不怕乱序。
 
-实测这一步把三工具任务的耗时从 3 次串行往返压到 1 次并行往返——LLM 请求占掉任务时间的 90%，工具本身几微秒，省的全是等待模型的时间。
+值得强调的是：**并行不是代码教给模型的，是模型自己决定的**。工具定义和系统提示词里都没有"可以并行"的字样——OpenAI 兼容协议本身就允许一轮返回多个 tool_calls，模型自然会用。代码要做的只是别把它们串起来。而省下的时间相当可观：trace 里一次工具执行只要几毫秒，任务耗时几乎全花在等 LLM 往返上——把同一轮的两次独立调用并成一次等待，省的就是最贵的那部分。
 
 ## 五、上下文压缩：把历史塞回预算里
 
@@ -111,7 +152,7 @@ system 消息和最近几条永远保留；发生过丢弃就插入一条 system
 
 agent 的行为是非确定的：同一个问题，今天两步明天三步，工具调用顺序每次都可能不同。**出了错，你需要的不是堆栈，是完整的过程回放**。
 
-第 4 周加了 trace 模块，设计上只做一件事：旁观事件流，原样落盘。
+trace 模块的设计上只做一件事：旁观事件流，原样落盘。
 
 ```python
 recorder = JsonlTraceRecorder(path, model=config.model)
@@ -121,34 +162,32 @@ async for event in recorder.run(agent, messages):   # 事件原样透传
 
 一行一个 JSON 记录，追加写、逐行 flush：`run_start`（开跑时的历史快照）→ `step_start` / `step_end`（每轮文本、token、成本、耗时）→ `tool_call`（每次调用的入参出参与耗时）→ `run_end`（结束时完整历史）。异常也留痕：`run_error` 记完再原样抛出。
 
-JSONL 这个格式被质疑过"不如上 Langfuse"。但对 M1 来说：逐行 flush 意味着**进程崩了已写的行还在**（观测管道最需要工作的时刻恰恰是故障时刻）；裸文本意味着 `grep`/`jq`/`tail -f` 全都能用；而且格式是我自己定义的，将来映射到 OTel GenAI 语义约定或者 Langfuse 只是换个 sink。这个取舍我写进了 [ADR-0003](https://github.com/creatawork/erpilot/blob/main/docs/adr/0003-local-jsonl-trace-first.md)。
+JSONL 这个格式被质疑过"不如上 Langfuse"。但对 M1 来说：逐行 flush 意味着**进程崩了已写的行还在**（观测管道最需要工作的时刻恰恰是故障时刻）；裸文本意味着 `grep`/`jq`/`tail -f` 全都能用；而且格式是我自己定义的，将来映射到 OTel GenAI 语义约定或者 Langfuse 只是换个 sink。取舍全文写进了 [ADR-0003](https://github.com/creatawork/Erpilot/blob/main/docs/adr/0003-local-jsonl-trace-first.md)。
 
-回放长这样（`erpilot replay traces/xxx.jsonl`）：
+`erpilot replay` 把流水还原成可读对话。下面是本文写作当天的一段**真实 trace**——那会儿上游端点正在抽风，一轮请求慢到 266 秒，我在第 2 轮等不到结果时手动中止了它：
 
 ```
-== run ac89906e358e · glm-5.3-flash · 2026-09-30T10:01:38 ==
-[用户] 订单 123 里买了什么？这些商品现在还有货吗？…
+== run b3f76f57cf40 · glm-5.3-flash · 2026-09-30T10:13:38 ==
+[用户] 订单 123 里买了什么？现在还有货吗？
 --- 第 1 轮 ---
-[工具✓] get_order_status({"order_id": "123"}) → {"status": "待发货", ...}（4123ms）
-== 结束：3 步 · 共 1240 tok · ≈¥0.0003 · 18.2s ==
+（266261ms · in 332 / out 121 tok · ≈¥0.0001）
+[工具✓] get_order_status({"order_id":"123"}) → {"status": "待发货", ...}（5ms）
+--- 第 2 轮 ---
+（68289ms · in 390 / out 34 tok · ≈¥0.0000）
 ```
 
-顺带一个真实案例：写本文当天，上游中转端点连续挂掉两次（一次 APIError、一次 502 upstream_error），两次都被 `run_error` 完整留痕——**trace 的第一次实战价值，就是记录它自己没跑成的那两次**。
+同一天更早的两次尝试直接死在上游（一次 APIError、一次 502 upstream_error），也都被 `run_error` 完整留痕。trace 的第一次实战价值，就是记录它自己没跑成的那几次——顺便注意上面那组数字：工具执行 5ms，LLM 一轮 266 秒，第四节说的"时间都花在等模型"在这里是字面意义的。
 
-## 七、验收：三条入口，一个循环
+## 七、三条入口，一个循环
 
-同一套 loop + 同一批工具，三种消费方式：
-
-- **CLI**（`erpilot chat`）：rich 渲染流式输出与工具时间线，trace 自动落盘
-- **FastAPI**（`POST /api/chat/stream`）：loop 事件逐个转成 SSE 帧转发，前端按 `event` 名分发
-- **React 页**：fetch + ReadableStream 手解 SSE（`EventSource` 不支持 POST），增量文本、工具时间线、token/成本全都在
+同一套 loop + 同一批工具，三种消费方式：**CLI**（`erpilot chat`，rich 渲染流式输出与工具时间线，trace 自动落盘）；**FastAPI**（`POST /api/chat/stream`，loop 事件逐个转成 SSE 帧转发）；**React 页**（fetch + ReadableStream 手解 SSE——`EventSource` 不支持 POST——增量文本、工具时间线、token/成本全都在）。
 
 前后端协议就是 loop 的事件模型加两个信封事件（`start` / `done`），字段表在 `erpilot_api/events.py` 的 docstring 里，TypeScript 侧的镜像类型在 `apps/web/src/protocol.ts`——两侧必须同步改，这是目前协议唯一的"文档"。
 
 ## 写在最后：什么时候轮到框架
 
-手写这 600 行之后，我很清楚框架在替你做什么：流式事件归并、工具执行的并发调度、错误回填——这些手写过一遍就不再是魔法。但也同样清楚**手写解决不了什么**：会话持久化、断点恢复、人工审批的 interrupt/恢复，这些是 LangGraph 的 checkpointer 和 interrupt 真正在行的东西，恰好是 Erpilot 的核心卖点（分级 HITL 审批）在 M6 才需要的。
+手写这上千行之后，我很清楚框架在替你做什么：流式事件归并、工具执行的并发调度、错误回填——这些手写过一遍就不再是魔法。但也同样清楚**手写解决不了什么**：会话持久化、断点恢复、人工审批的 interrupt/恢复，这些是 LangGraph 的 checkpointer 和 interrupt 真正在行的东西，恰好是 Erpilot 的核心卖点（分级 HITL 审批）在 M6 才需要的。
 
-所以计划是：M6 把 loop 内核换成 LangGraph，事件协议、trace 格式、前端、评测**全部不动**——这层协议自主权就是手写这两周买下的东西。迁移完成后我会再写一篇对比，验证这个判断对不对。
+所以计划是：M6 把 loop 内核换成 LangGraph，事件协议、trace 格式、前端、评测**全部不动**——这层协议自主权就是手写这几个星期买下的东西。迁移完成后我会再写一篇对比，验证这个判断对不对。
 
 下一篇：《给 ERP 写一个 MCP Server》。

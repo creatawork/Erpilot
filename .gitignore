@@ -23,3 +23,6 @@ node_modules/
 # 日志与系统文件
 *.log
 .DS_Store
+
+# 工具生成（ZCode 环境的忽略规则镜像）
+.zcodeignore
