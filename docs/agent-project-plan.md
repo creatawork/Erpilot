@@ -117,7 +117,7 @@ Python 侧用 uv workspace 管理四个包；依赖方向：`apps` → `packages
 - 产出：3 步以上任务的稳定 demo，错误场景有单测（真实链路 3 步验收：第 2 步
   模型自发并行调用 check_stock + get_price）
 
-### 第 4 周 — 可观测与收口（代码完成 2026-09-30；文章发布与真实链路完整数字待补）
+### 第 4 周 — 可观测与收口（代码完成 2026-09-30；文章已发布 VIE，真实链路完整数字待补）
 - [x] 本地 trace：JSONL 落盘（trace.py：run_start/step_start/step_end/tool_call/
       run_end/run_error 六类记录，逐行 flush 异常也留痕），`erpilot replay` 回放
 - [x] typer/rich CLI（`erpilot chat` + `erpilot replay`）+ FastAPI SSE 最小链路
@@ -125,8 +125,8 @@ Python 侧用 uv workspace 管理四个包；依赖方向：`apps` → `packages
       done/error）+ React 最小流式页（fetch 手解 SSE + 工具时间线 + token/成本）
 - [x] ADR：手写 loop 而不是先上框架（ADR-0002）；本地 JSONL trace 先行、Langfuse
       推迟到评测起步（ADR-0003）。"为什么主栈选 Python"已由 ADR-0001（脚手架周）覆盖
-- [x] 文章：《手写 Agent Loop：从一次 API 调用到多步任务》文稿完成
-      （docs/articles/01-handwritten-agent-loop.md），待发布到 VIE
+- [x] 文章：《手写 Agent Loop：从一次 API 调用到多步任务》已发布到 VIE（2026-09-30），
+      文稿见 docs/articles/01-handwritten-agent-loop.md
 - 产出：同一条 loop + trace 链路供 CLI / SSE / 前端三种入口消费；SSE 协议字段
   表落在 erpilot_api/events.py docstring，前端镜像类型在 apps/web/src/protocol.ts
 
@@ -135,7 +135,39 @@ Python 侧用 uv workspace 管理四个包；依赖方向：`apps` → `packages
 - [x] 防死循环 + 工具超时 + 错误回填，均有测试覆盖
 - [ ] 一次完整任务的 trace 可回放，成本/延迟有数字（回放与计量已实现并单测；
       真实链路完整数字待端点恢复后补跑一次成功任务，见第 8 节）
-- [ ] 2 篇 ADR + 1 篇文章发布到 VIE（ADR 已入库；文章待发布）
+- [x] 2 篇 ADR + 1 篇文章发布到 VIE（ADR-0002/0003 已入库；文章 2026-09-30 发布）
+
+### M3 详细拆解（FastMCP Server + 评测集起步；M1–2 关键产出已于第 1–4 周全部交付，提前启动 2026-09-30）
+
+### 第 1 周 — erp_store：领域模型 + 种子数据（已完成 2026-09-30）
+- [x] Pydantic 领域模型（商品/库存/订单 + 状态枚举）+ SQLAlchemy 表（SQLite 落盘 data/，
+      M6 无缝切 PostgreSQL 的既定路径）
+- [x] 确定性种子生成器：300 条商品（文创品类词库组合）、近 6 个月 600 笔订单流水、
+      预埋异常数据（零库存商品、已取消/已退款订单、含下架商品的订单、下单快照价
+      与现价不一致）——异常数据是边界 case 评测的来源（§4 范围冻结）
+- [x] 只读查询 API（repository，M3 工具层的唯一入口）+ 报价计算（数量梯度折扣）
+- [x] 测试：模型约束、种子确定性（同 seed 同数据）、查询正确性、异常数据存在性
+- 产出：`python -m erp_store seed` 一键生成可复现数据库；下单快照价 vs 现价
+  （订单查询用快照价、报价用现价）作为真实 ERP 的关键语义预埋
+
+### 第 2 周 — mcp_erp：FastMCP Server + 首批工具
+- [ ] FastMCP server 骨架，erp_store 查询暴露为 MCP 工具（只读 ~10 个：查订单 /
+      订单列表 / 查库存 / 查价格 / 搜商品 / 报价……）
+- [ ] agent 侧接入：ChatService 工具集改为注入（评审遗留项），demo_tools 退役
+- [ ] 真实链路验收：`erpilot chat` 查询的是真数据
+- 产出：agent 回答"订单 88 里有几个青瓷杯"这类问题用的是真库
+
+### 第 3 周 — 工具设计精研（上）
+- [ ] 工具描述打磨：参数 description、返回结构、错误语义统一
+- [ ] 列表类工具分页 / 批量设计；工具数量扩到 15~20 个（§4 冻结线）
+- [ ] 错误自愈数据开始积累：每类错误回填后模型行为的记录
+- 产出：工具卡（name / description / 参数 / 返回 / 错误）文档化
+
+### 第 4 周 — 评测集起步
+- [ ] 人工标注标准先写（四类 case：单工具 / 多步 / 边界 / 对抗）
+- [ ] 首批 20~30 条 case + pytest runner 骨架（CI 预算熔断）
+- [ ] Langfuse 接入（ADR-0003 约定时点）：trace.py 转双写中的本地兜底 sink
+- 产出：evals 包跑出首份成功率报告（成本受控）
 
 ## 7. 风险与对策
 
@@ -157,6 +189,7 @@ Python 侧用 uv workspace 管理四个包；依赖方向：`apps` → `packages
 - [x] M1 第 2 周完成：AgentLoop 工具循环（tools 协议 + max_steps/超时防护 + structured 输出）+ 26 项单测 + 真实链路验收（2026-09-29，单工具任务 2 步正常结束）
 - [x] M1 第 3 周完成：多步任务 + 并行工具调用 + 错误回填策略 v1（结构化错误 + 瞬态重试）+ 上下文压缩 v1 + 34 项单测 + 真实链路验收（2026-09-29，3 步任务 ≈¥0.0003，第 2 步模型自发并行调用两工具）
 - [x] M1 第 4 周完成（代码侧）：本地 JSONL trace + `erpilot` CLI（chat/replay）+ FastAPI SSE 链路 + React 最小流式页 + ADR-0002/0003 + 文章文稿 + 44 项单测通过（2026-09-30）。真实链路当日两次验收尝试均遇上游故障（APIError / 502 upstream_error），均被 trace 的 run_error 完整留痕——异常留痕路径实战验证通过；成功任务的完整数字待端点恢复后补跑
+- [x] M1–2 里程碑收口、M3 提前启动（2026-09-30）：《手写 Agent Loop》发布 VIE，M1 验收仅剩"真实链路完整数字"待端点恢复后补跑；M3 第 1 周（erp_store 领域模型 + 种子数据）当日完成
 - [ ] assistant-ui 还是 CopilotKit（M6 前端成型时定；M1–M5 先手写最小 React UI，理解协议层）
 
 ## 9. 参考资料

@@ -42,6 +42,9 @@ uv run pytest                # 单元测试（mock，不消耗 token）
 uv run erpilot chat "订单 123 里买了什么？还有货吗？有货的话报个价"
 uv run erpilot replay traces/<某个>.jsonl      # 把 trace 还原成可读对话
 
+# M3 起步：生成演示数据库（商品/库存/订单，data/erpilot.db，确定性种子）
+uv run --package erp-store python -m erp_store seed
+
 # API + 前端：SSE 链路
 uv run --package erpilot-api uvicorn erpilot_api.main:app --reload
 # 验证：http://127.0.0.1:8000/healthz

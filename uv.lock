@@ -362,11 +362,15 @@ name = "erp-store"
 version = "0.1.0"
 source = { editable = "packages/erp_store" }
 dependencies = [
+    { name = "pydantic" },
     { name = "sqlalchemy" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "sqlalchemy", specifier = ">=2.0" }]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.7" },
+    { name = "sqlalchemy", specifier = ">=2.0" },
+]
 
 [[package]]
 name = "erpilot"

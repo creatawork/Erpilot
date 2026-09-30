@@ -1,6 +1,6 @@
 # 手写 Agent Loop：从一次 API 调用到多步任务
 
-> Erpilot 系列第 1 篇 · 2026-09-30
+> Erpilot 系列第 1 篇 · 2026-09-30 · 已发布：[Vie](https://vie-vibe.cn)
 >
 > 代码在 [erpilot/packages/agent_core](https://github.com/creatawork/Erpilot)（M1 第 1–4 周），约 1200 行 Python + 44 项单测。
 > 这一版刻意不用任何 agent 框架——为什么、以及什么时候我会换上 LangGraph，文末说。

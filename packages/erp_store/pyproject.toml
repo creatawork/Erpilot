@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "mini-ERP 领域模型：商品/库存/订单（SQLAlchemy）+ 种子数据"
 requires-python = ">=3.12"
 dependencies = [
+    "pydantic>=2.7",
     "sqlalchemy>=2.0",
 ]
 
