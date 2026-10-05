@@ -21,6 +21,19 @@ SYSTEM_PROMPT = (
     "不把错误当数据复述。"
 )
 
+# 写工具面开启时的提示词（M4 ADR-0005）：只换写操作条款，其余口径不动
+WRITES_PROMPT = SYSTEM_PROMPT.replace(
+    "- 工具面没有写操作：改订单状态、改库存、上下架商品都做不到，如实说明，绝不假装已执行。\n",
+    "- 写操作（建单/取消订单/改库存/上下架）需人工审批后才会真正执行："
+    "工具返回 approval=denied 表示操作未执行，如实向用户说明，绝不假装已执行；"
+    "不替用户决定是否绕过审批。\n",
+)
+
+
+def system_prompt(writes_enabled: bool = False) -> str:
+    """三入口（CLI/API/评测）共用的系统提示词；写工具面开启时换写操作条款。"""
+    return WRITES_PROMPT if writes_enabled else SYSTEM_PROMPT
+
 DEFAULT_PROMPT = (
     "订单 123 里买了什么？这些商品现在还有货吗？"
     "有货的话报个价，最后给我一句能直接发给顾客的话。"

@@ -202,6 +202,84 @@ def test_bridge_handles_array_params_and_error_contract(seeded_db, repo) -> None
     assert result["unavailable"] == [off_sale]
 
 
+# ---- 写工具面（M4 第 1 周，ADR-0005） ----
+
+WRITE_TOOLS = {"create_order", "cancel_order", "adjust_stock", "set_product_status"}
+
+
+async def test_default_server_excludes_write_tools(seeded_db) -> None:
+    """写工具默认不存在——工具面收窄是默认态（ADR-0005 决策 4）。"""
+    from fastmcp import Client
+
+    async with Client(create_server(seeded_db)) as client:
+        tools = {t.name for t in await client.list_tools()}
+    assert tools == EXPECTED_TOOLS
+    assert not (tools & WRITE_TOOLS)
+
+
+async def test_write_server_exposes_full_surface(seeded_db) -> None:
+    from fastmcp import Client
+
+    async with Client(create_server(seeded_db, include_writes=True)) as client:
+        tools = {t.name for t in await client.list_tools()}
+    assert tools == EXPECTED_TOOLS | WRITE_TOOLS
+    assert len(tools) == 20  # §4 冻结线 15~20 区间内
+
+
+async def test_write_error_contract_via_mcp(seeded_db, repo) -> None:
+    """mutations 的 MutationError 在工具层转成错误契约 v1（code/message/hint）。"""
+    from fastmcp import Client
+
+    delivered = repo.list_orders(status=OrderStatus.DELIVERED, limit=1)[0]
+    async with Client(create_server(seeded_db, include_writes=True)) as client:
+        bad = await client.call_tool(
+            "cancel_order", {"order_id": delivered.order_id}
+        )
+        missing = await client.call_tool(
+            "create_order", {"customer": "张三", "items": [{"sku": "ZZZ999", "quantity": 1}]}
+        )
+    assert bad.data["error"]["code"] == "invalid_transition"
+    assert "已签收" in bad.data["error"]["message"]
+    assert bad.data["error"]["hint"]
+    assert missing.data["error"]["code"] == "not_found"
+
+
+def test_bridge_writes_without_gate_raises(seeded_db) -> None:
+    """无 gate 不给写工具——结构性保证（ADR-0005 决策 4），不是调用约定。"""
+    with pytest.raises(ValueError, match="approval_gate"):
+        build_agent_tools(seeded_db, writes=True)
+
+
+def test_bridge_writes_with_gate_marks_risk_and_guards(seeded_db, repo) -> None:
+    """writes=True + gate：写工具带风险等级并包门，只读工具原样。"""
+    from agent_core.approval import RISK_BATCH_CONFIRM, RISK_SINGLE_CONFIRM, AutoDenyGate
+
+    tools = {
+        t.name: t
+        for t in build_agent_tools(seeded_db, writes=True, approval_gate=AutoDenyGate())
+    }
+    assert set(tools) == EXPECTED_TOOLS | WRITE_TOOLS
+    assert tools["create_order"].risk == RISK_SINGLE_CONFIRM
+    assert tools["adjust_stock"].risk == RISK_BATCH_CONFIRM
+    assert all(tools[name].risk is None for name in EXPECTED_TOOLS)
+
+    # 拒绝路径：handler 返回"未执行"结构，且底层数据未变
+    delivered = repo.list_orders(status=OrderStatus.DELIVERED, limit=1)[0]
+    args = tools["cancel_order"].params_model.model_validate_json(
+        json.dumps({"order_id": delivered.order_id})
+    )
+    content = _run(tools["cancel_order"].handler(args))
+    payload = json.loads(content)
+    assert payload["approval"] == "denied"
+    assert payload["message"].startswith("操作未执行")
+
+
+def test_write_tool_risk_map_covers_surface() -> None:
+    from mcp_erp.bridge import WRITE_TOOL_RISK
+
+    assert set(WRITE_TOOL_RISK) == WRITE_TOOLS
+
+
 def test_error_contract_survives_bridge(seeded_db) -> None:
     """业务错误经桥回到 agent 侧仍是 {"error": {code, message, hint}} 结构。"""
     tools = {t.name: t for t in build_agent_tools(seeded_db)}
@@ -229,7 +307,7 @@ def test_tool_cards_doc_matches_server_tools() -> None:
         for line in doc.read_text(encoding="utf-8").splitlines()
         if line.startswith("### ")
     }
-    assert documented == EXPECTED_TOOLS
+    assert documented == EXPECTED_TOOLS | WRITE_TOOLS
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]

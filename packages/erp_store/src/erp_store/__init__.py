@@ -28,14 +28,18 @@ from erp_store.models import (
     StockItem,
     StockValuationLine,
 )
+from erp_store.mutations import CANCELLABLE_STATUSES, ErpMutations, MutationError
 from erp_store.repository import ErpRepository
 
 __all__ = [
+    "CANCELLABLE_STATUSES",
     "CategoryStat",
     "CustomerPurchases",
     "DailySalesPoint",
+    "ErpMutations",
     "ErpRepository",
     "LowStockItem",
+    "MutationError",
     "Order",
     "OrderItem",
     "OrderStatus",

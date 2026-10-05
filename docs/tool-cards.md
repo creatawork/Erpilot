@@ -1,8 +1,13 @@
-# MCP 工具卡（erpilot-erp · 16 个只读工具）
+# MCP 工具卡（erpilot-erp · 16 个只读工具 + 4 个写工具）
 
-> M3 第 3 周 · 工具设计精研（上）。每个工具一张卡：用途 / 参数 / 返回 / 错误。
+> M3 第 3 周 · 工具设计精研（上）；M4 第 1 周起增补写操作（ADR-0005）。
+> 每个工具一张卡：用途 / 参数 / 返回 / 错误。
 > 本文档与 server 工具集有同步测试把关（`test_tool_cards_doc_matches_server_tools`）——
 > 新增或删除工具必须同步改这里，否则测试失败。
+> 写工具仅在 `include_writes=True` 时注册（默认关闭）；agent 侧执行受审批门
+> （`agent_core.approval`）拦截，风险等级 `single_confirm` / `batch_confirm`
+> 由 bridge 标注——审批拒绝时返回 `{"approval": "denied", ...}`，
+> 模型必须如实说明未执行。
 
 ## 错误契约 v1
 
@@ -124,3 +129,37 @@
 - 参数：无
 - 返回：`{"total", "items": [{"category", "product_count"}]}`
 - 错误：无
+
+## 写操作（include_writes=True 才注册；ADR-0005）
+
+> 领域校验在 `erp_store.mutations`，错误契约 v1 在写路径新增两个 code：
+> `invalid_transition`（状态机非法迁移 / 空操作）与 `insufficient_stock`。
+> 写工具的执行永远先过审批门——拒绝时模型拿到的是"未执行"，不是错误。
+
+### create_order
+- 用途：创建订单（**single_confirm**）——快照价取现价，校验在售与库存，扣库存与建单同事务
+- 参数：`customer`（必填，全名）、`items`（必填，`[{sku, quantity}]`，同 SKU 自动合并）、`note`（可选）
+- 返回：订单对象（状态「待付款」，金额按下单快照价）+ `result_note`
+- 错误：`invalid_argument`（客户名空 / 数量 < 1）；`not_found`（SKU 不存在，hint 用 search_products）；
+  `invalid_transition`（商品已下架不可下单）；`insufficient_stock`（库存不足，报需量与现量）
+
+### cancel_order
+- 用途：取消订单（**single_confirm**）——仅待付款/待发货可取消，取消后回补库存
+- 参数：`order_id`（必填）
+- 返回：订单对象（状态「已取消」）+ `result_note`
+- 错误：`not_found`（订单不存在，hint 用 list_orders）；`invalid_transition`
+  （状态不允许取消——已发货/已签收走退款流程，工具面未开放）
+
+### adjust_stock
+- 用途：库存增减（**batch_confirm**）——正数入库、负数出库
+- 参数：`sku`（必填）、`delta`（必填，≠0）
+- 返回：`{"sku", "quantity", "note"}`——quantity 为调整后的当前库存
+- 错误：`invalid_argument`（delta = 0）；`not_found`（SKU 不存在）；
+  `insufficient_stock`（减到负数，报当前库存）
+
+### set_product_status
+- 用途：商品上架/下架（**batch_confirm**）
+- 参数：`sku`（必填）、`status`（必填，在售/已下架）
+- 返回：`{"sku", "status", "note"}`
+- 错误：`invalid_argument`（状态取值非法）；`not_found`（SKU 不存在）；
+  `invalid_transition`（**已是目标状态**——空操作不报成功，让模型如实转述"无需变更"）

@@ -27,6 +27,9 @@ class Tool:
     description: str
     params_model: type[BaseModel]
     handler: Callable[[BaseModel], Awaitable[object]]
+    # 风险等级（ADR-0005）：None = 只读放行；写工具由 mcp_erp 标注
+    # batch_confirm / single_confirm，审批门（approval.guarded）据此拦截
+    risk: str | None = None
 
     def openai_schema(self) -> dict[str, Any]:
         """OpenAI tools 参数格式：{"type": "function", "function": {...}}。"""
@@ -41,11 +44,13 @@ class Tool:
 
 
 def tool(
-    *, name: str, description: str, params: type[BaseModel]
+    *, name: str, description: str, params: type[BaseModel], risk: str | None = None
 ) -> Callable[[Callable[[BaseModel], Awaitable[object]]], Tool]:
     """装饰器：把 async 函数注册成 Tool，调用时以 params 模型校验入参。"""
 
     def decorator(fn: Callable[[BaseModel], Awaitable[object]]) -> Tool:
-        return Tool(name=name, description=description, params_model=params, handler=fn)
+        return Tool(
+            name=name, description=description, params_model=params, handler=fn, risk=risk
+        )
 
     return decorator

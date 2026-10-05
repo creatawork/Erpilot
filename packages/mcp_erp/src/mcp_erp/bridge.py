@@ -6,6 +6,11 @@
 - 工具调用：Tool.handler 每次调用开一个内存 MCP 会话 call_tool，
   返回 CallToolResult.data（fastmcp 已反序列化的 dict/list）
 
+写操作（ADR-0005）：writes=True 时写工具进入工具面，并**必须**提供
+approval_gate——审批门（agent_core.approval.guarded）包在 handler 外层，
+先 review 后执行；writes=True 而 gate 缺失直接 raise。写工具的风险等级
+在本模块标注（MCP schema 不承载风险语义）。
+
 为什么每次调用都开会话：内存传输的会话开销可忽略，换来的是无连接生命周期
 管理（不会在长连接断开后悄悄失效）；独立进程（stdio/HTTP）部署在 M3 第 3
 周之后按需切换，桥接口不变。
@@ -16,6 +21,12 @@ import json
 from pathlib import Path
 from typing import Any
 
+from agent_core.approval import (
+    RISK_BATCH_CONFIRM,
+    RISK_SINGLE_CONFIRM,
+    ApprovalGate,
+    guarded,
+)
 from agent_core.tools import Tool
 from erp_store.db import DEFAULT_DB
 from fastmcp import Client
@@ -32,27 +43,69 @@ _TYPE_MAP: dict[str, type] = {
     "array": list,
 }
 
+# 写工具的风险分级（ADR-0005：资金/单据单笔确认，低风险批量确认）
+WRITE_TOOL_RISK: dict[str, str] = {
+    "create_order": RISK_SINGLE_CONFIRM,
+    "cancel_order": RISK_SINGLE_CONFIRM,
+    "adjust_stock": RISK_BATCH_CONFIRM,
+    "set_product_status": RISK_BATCH_CONFIRM,
+}
 
-def build_agent_tools(db_path: Path | str = DEFAULT_DB) -> list[Tool]:
+
+def build_agent_tools(
+    db_path: Path | str = DEFAULT_DB,
+    *,
+    writes: bool = False,
+    approval_gate: ApprovalGate | None = None,
+) -> list[Tool]:
     """同步入口（应用启动 / CLI main，不能在事件循环内调用）。"""
-    return asyncio.run(build_agent_tools_async(db_path))
+    return asyncio.run(build_agent_tools_async(db_path, writes=writes, approval_gate=approval_gate))
 
 
-async def build_agent_tools_async(db_path: Path | str = DEFAULT_DB) -> list[Tool]:
+async def build_agent_tools_async(
+    db_path: Path | str = DEFAULT_DB,
+    *,
+    writes: bool = False,
+    approval_gate: ApprovalGate | None = None,
+) -> list[Tool]:
     """发现 MCP 工具并转换为 agent_core Tool 列表（可在运行中的 loop 内调用）。
 
-    db 文件不存在时报带指引的错误。
+    db 文件不存在时报带指引的错误。writes=True 必须给 approval_gate
+    （无 gate 不给写工具，ADR-0005 决策 4）。
     """
+    if writes and approval_gate is None:
+        raise ValueError(
+            "writes=True 必须提供 approval_gate：写工具不过审批门就不该存在"
+        )
     db_path = Path(db_path)
     if not db_path.is_file():
         raise FileNotFoundError(
             f"ERP 数据库不存在：{db_path}（先运行 uv run --package erp-store "
             "python -m erp_store seed 生成）"
         )
-    server = create_server(db_path)
+    server = create_server(db_path, include_writes=writes)
     async with Client(server) as client:
         mcp_tools = await client.list_tools()
-    return [_convert(t.name, t.description or "", t.input_schema, db_path) for t in mcp_tools]
+    tools = [_convert(t.name, t.description or "", t.input_schema, db_path) for t in mcp_tools]
+    if writes:
+        tools = [_with_risk_and_gate(t, approval_gate) for t in tools]  # type: ignore[arg-type]
+    return tools
+
+
+def _with_risk_and_gate(tool: Tool, gate: ApprovalGate | None) -> Tool:
+    """给写工具标注风险等级并包审批门；只读工具原样返回。"""
+    risk = WRITE_TOOL_RISK.get(tool.name)
+    if risk is None:
+        return tool
+    marked = Tool(
+        name=tool.name,
+        description=tool.description,
+        params_model=tool.params_model,
+        handler=tool.handler,
+        risk=risk,
+    )
+    assert gate is not None  # build_agent_tools_async 已校验
+    return guarded(marked, gate)
 
 
 def _convert(name: str, description: str, schema: dict[str, Any], db_path: Path) -> Tool:

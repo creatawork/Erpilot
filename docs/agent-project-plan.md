@@ -1,6 +1,8 @@
 # Agent 求职项目 · 启动计划
 
-> 状态：v6（2026-10-05）——M1–M2 已收口；M3 提前完成全部 4 周（工具设计精研上 + 评测集起步）并进入评测常态运维（runner 瞬态重试 + 提示词加固 + 29 条 case），下一站 M4 写操作 + HITL 前置设计
+> 状态：v7（2026-10-05）——M1–M3 已收口（评测常态运维：29 条 case + 瞬态重试 +
+> 提示词加固）；M4 启动：写操作 + HITL 前置设计（第 1 周写操作地基当日完成，
+> 见 §6b；ADR-0005）
 > 目标：12 个月内以本项目为核心作品，转入 agent 应用开发岗位
 > 策略：三个深方向（工具设计 / HITL 审批 / 评测体系），每个方向落到可展示的证据——数字、曲线、文章
 
@@ -228,6 +230,60 @@ Python 侧用 uv workspace 管理四个包；依赖方向：`apps` → `packages
 - 本批成功率（定点报告 reports/evals/20261005-1051*.md、20261005-1057*.md）：
   adv-05 / adv-07 / adv-08 / adv-09 / edge-07 / edge-08 全过，成本 ≈¥0.007
 
+## 6b. M4 详细拆解（写操作 + HITL 前置设计；启动 2026-10-05）
+
+> 主题：把工具面从"只读"扩到"可写"，第一次让 agent 碰动账动货的操作。
+> 核心问题不是"怎么写库"，而是**写操作的治理**——审批门是硬约束，提示词只是
+> 软约束；M6 的 LangGraph interrupt 之前，先手写一遍审批流才能懂协议层。
+> 设计决策见 ADR-0005。
+
+### 第 1 周 — 写操作地基（2026-10-05 当日完成）
+- [x] ADR-0005：写操作分层（mutations 独立于只读 repository）+ 风险分级
+      （batch_confirm 低风险 / single_confirm 资金单笔）+ 审批门内建于工具层
+      （无 gate 不给写工具——结构性保证，不靠调用方自觉）
+- [x] erp_store 写 API（mutations.py）：create_order（快照价 + 库存扣减同事务）、
+      adjust_stock、cancel_order（状态机 + 回补库存）、set_product_status；
+      MutationError(code/message/hint) 延伸错误契约 v1，新增
+      invalid_transition（状态机非法迁移）与 insufficient_stock
+- [x] agent_core 审批门原型（approval.py）：ApprovalGate 协议（review →
+      approved/denied）+ guarded() 包装器——带 risk 的工具先过门再执行，
+      拒绝时回填结构化"未执行"结果给模型；门在工具层内，loop 与组合层零改动
+- [x] mcp_erp 写工具 ×4（include_writes=False 默认关闭）+ 桥接
+      build_agent_tools(writes=True, approval_gate=...)：**writes=True 而不给
+      gate 直接 raise**——写工具不过审批门就不该存在
+- [x] 评测集写操作类起步：评测环境无真人，审批门以 AutoDenyGate 参评
+      （拒绝一切写调用）——考"未批准不得假装执行"（adversarial 3 条，独立
+      live 模块跑，读评测集 29 条不受影响）；真实链路预跑 3/3 通过
+      （reports/evals/20261005-1151*.md，成本 ≈¥0.004）——adv-23 实证
+      完整拒绝链路：模型发起 create_order → 门拒绝 → 如实说明"审批未通过，
+      订单未创建"，还顺带发现该商品零库存并给出下一步建议
+- 产出：写路径全链路（loop → gate → MCP → mutations → SQLite）单测覆盖；
+  工具卡 +4 张（同步测试同步扩到双工具面口径）；全仓 130 项离线单测全绿
+
+### 第 2 周 — 审批流原型（CLI/API 可见的待审批交互）
+- [ ] 审批决策从"同步回调"升级为"待审批事件"：ApprovalPending 事件进事件流
+      （trace / SSE / 前端审批卡片同源），会话挂起等待决定
+- [ ] CLI 审批交互：写调用前终端确认（y/n + 展示将要执行的操作与参数）；
+      API 侧审批卡片（前端最小实现）
+- [ ] 拒绝与批准的回填路径：批准 → 执行 → 结果回填；拒绝 → 结构化未执行
+      结果回填，模型如实向用户转述
+- [ ] 评测：批准确率类 case 起步（该批的批、不该批的拒——用脚本化审批策略
+      参评，如"金额超阈值拒绝"）
+
+### 第 3 周 — 写路径错误自愈 + 幂等
+- [ ] 写路径错误自愈观察开档（error-recovery-log 写路径篇）：invalid_transition /
+      insufficient_stock 的 hint 能否让模型改道（先查状态再操作）
+- [ ] 幂等：create_order 幂等键（client_token）——重复提交返回原单而非二次建单
+      （mcp_erp 包注释里挂账的"幂等键用武之地"兑现）
+- [ ] 评测补写操作 case：脚本化审批放行下的真实写链路（临时库，跑完即弃），
+      考"执行后如实复述结果、失败如实转述错误"
+
+### 第 4 周 — M4 收口
+- [ ] 真实链路验收：审批前（AutoDeny）与审批后（人工批准）两段完整数字
+- [ ] 成功率报告进常态（reports/evals/）；读评测集回归确认写工具上线无副作用
+- [ ] 文章素材沉淀：HITL 前置设计（为什么门在工具层不在提示词层）
+- [ ] 里程碑收口：单测全绿 + ADR/工具卡/标注标准三文档同步
+
 ## 7. 风险与对策
 
 | 风险 | 对策 |
@@ -253,6 +309,7 @@ Python 侧用 uv workspace 管理四个包；依赖方向：`apps` → `packages
 - [x] M3 第 3 周完成：错误契约 v1（code/message/hint）+ 工具扩到 16 个（新增 get_customer_purchases 客户购买聚合、按 SKU 反查订单、批量比价、库存估值、逐日销量）+ 工具卡 16 张（文档-代码同步测试）+ 错误自愈记录开档（docs/error-recovery-log.md #1）+ 72 项单测（2026-09-30）
 - [x] M3 第 4 周完成（M3 里程碑收口）：人工标注标准 + 24 条四类 case + pytest 自建 runner（ADR-0004）+ 预算熔断 + Langfuse 双写（本地 JSONL 降级为兜底 sink）+ CI 评测 job + 首份成功率报告（reports/evals/，详见 §6 第 4 周）（2026-10-05）
 - [x] 评测常态运维第 5 周批次（2026-10-05）：runner 瞬态重试 + 系统提示词加固（adv-05 复测通过）+ 补 5 条 case（评测集 24→29 条，详见 §6）
+- [x] M4 第 1 周完成（2026-10-05 当日）：ADR-0005（写操作分层 + 风险分级 + 审批门内建）+ erp_store 写 API ×4（快照价/库存同事务/状态机）+ agent_core 审批门原型（ApprovalGate + guarded）+ mcp_erp 写工具 ×4（默认关闭，writes=True 必须 gate）+ 写操作评测 3 条真实链路预跑通过（详见 §6b）
 - [ ] assistant-ui 还是 CopilotKit（M6 前端成型时定；M1–M5 先手写最小 React UI，理解协议层）
 - [ ] Langfuse 真实端到端联调（sink 已就绪并有 fake 单测；待自托管部署后填 keys 验证）
 

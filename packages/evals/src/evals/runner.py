@@ -88,6 +88,7 @@ async def run_case(
     sinks: Sequence = (),
     retries: int = 2,
     backoff: float = 2.0,
+    system_prompt: str = SYSTEM_PROMPT,
 ) -> tuple[CaseResult, Path]:
     """跑一条已解析占位符的 case，返回 (结果, trace 路径)。
 
@@ -95,6 +96,8 @@ async def run_case(
     记为失败，trace 的 run_error 同步留痕。瞬态错误自动重跑（每次尝试重建
     messages 与 recorder，同一路径追加写，重试过程在 trace 里可回溯）；
     被放弃的尝试已烧掉的 token 无 LoopEnd 计量，成本按成功 attempt 计。
+    system_prompt 默认读工具面口径；写工具面评测传 system_prompt(True)
+    （M4 ADR-0005）。
     """
     case = case.format_with(resolved)
     trace_path = new_trace_path(trace_dir, client.config.model)
@@ -103,7 +106,7 @@ async def run_case(
     for attempt in range(1, retries + 2):
         agent = AgentLoop(client, tools=list(tools))
         messages: list = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": case.question},
         ]
         recorder = JsonlTraceRecorder(trace_path, client.config.model, sinks=list(sinks))

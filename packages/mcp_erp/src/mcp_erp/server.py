@@ -1,12 +1,15 @@
-"""FastMCP Server：把 mini-ERP 的只读查询暴露为 MCP 工具（M3 第 3 周：16 个）。
+"""FastMCP Server：把 mini-ERP 的查询与写操作暴露为 MCP 工具。
 
-设计约定（工具卡的完整语义见 docs/tool-cards.md，文档-代码有同步测试把关）：
+M3：16 个只读工具（错误契约 v1 + 工具卡，docs/tool-cards.md 有同步测试把关）。
+M4（ADR-0005）：写操作 ×4，`include_writes=True` 才注册（默认关闭）——
+写工具的执行由审批门（agent_core.approval）在 agent 侧拦截，本层只负责
+领域校验与错误契约转译：
 
 - 工具**永不返回 None**：查不到返回结构化错误——这是给模型看的信息
 - **错误契约 v1**：{"error": {"code", "message", "hint"}}——code 供模型分类
-  （not_found / invalid_argument），hint 给出可操作的下一步（用哪个工具、
-  传什么参数）；业务校验在工具体内做并返回该结构，而不是靠 schema 约束
-  抛协议异常（协议异常到模型手里只剩一句 pydantic 报错，无法自愈）
+  （not_found / invalid_argument / invalid_transition / insufficient_stock），
+  hint 给出可操作的下一步；写路径业务校验在 erp_store.mutations，
+  MutationError 在这里转成该结构
 - 列表类工具返回 {"total", "items"}，让模型知道还有没有下一页
 - **返回值信息密度**：列表默认订单头摘要（明细行是上下文的大头），聚合类
   问题引导到聚合工具——把大结果整块塞回下一轮 LLM 请求会被上游中转拒绝
@@ -23,9 +26,10 @@ from typing import Annotated, Any
 
 from erp_store.db import DEFAULT_DB, make_engine
 from erp_store.models import OrderStatus, ProductStatus
+from erp_store.mutations import ErpMutations, MutationError
 from erp_store.repository import ErpRepository
 from fastmcp import FastMCP
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 _ORDER_STATUS_HELP = " / ".join(s.value for s in OrderStatus)
 _PRODUCT_STATUS_HELP = " / ".join(s.value for s in ProductStatus)
@@ -62,16 +66,34 @@ def _order_brief(order) -> dict[str, Any]:
     }
 
 
-def create_server(db_path: Path = DEFAULT_DB) -> FastMCP:
-    """构建 MCP server 实例（库内集成与独立进程共用）。"""
-    repo = ErpRepository(make_engine(Path(db_path)))
+class OrderItemInput(BaseModel):
+    """建单入参的订单行（进 inputSchema，模型按描述构造）。"""
+
+    sku: str = Field(description="商品 SKU，如 A1001")
+    quantity: int = Field(description="数量，至少为 1", ge=1)
+
+
+def create_server(db_path: Path = DEFAULT_DB, *, include_writes: bool = False) -> FastMCP:
+    """构建 MCP server 实例（库内集成与独立进程共用）。
+
+    include_writes=True 才注册写工具（ADR-0005：写工具默认不存在；
+    agent 侧的审批门由 bridge 装配，本层不做审批）。
+    """
+    engine = make_engine(Path(db_path))
+    repo = ErpRepository(engine)
+    mutations = ErpMutations(engine)
     mcp = FastMCP(
         name="erpilot-erp",
         instructions=(
-            "Erpilot mini-ERP 只读工具集（商品/库存/订单/报价）。"
+            "Erpilot mini-ERP 工具集（商品/库存/订单/报价）。"
             '查不到时返回 {"error": {"code", "message", "hint"}}——按 hint 换工具'
             "或向用户要更多信息；列表类返回 {\"total\", \"items\"}。"
-            "下单/改库存等写操作当前未开放。"
+            + (
+                "写操作工具（建单/取消/改库存/上下架）需人工审批后才会真正执行；"
+                "审批拒绝时返回 approval=denied，如实向用户说明未执行。"
+                if include_writes
+                else "下单/改库存等写操作当前未开放。"
+            )
         ),
     )
 
@@ -347,5 +369,84 @@ def create_server(db_path: Path = DEFAULT_DB) -> FastMCP:
         """列出全部品类与在售商品数——探索库存时的第一步。"""
         cats = repo.list_categories()
         return {"total": len(cats), "items": [c.model_dump(mode="json") for c in cats]}
+
+    # ---- 写操作（include_writes=True 才注册；执行受 agent 侧审批门拦截） ----
+
+    if include_writes:
+
+        @mcp.tool
+        def create_order(
+            customer: Annotated[str, Field(description="下单客户全名，精确匹配")],
+            items: Annotated[
+                list[OrderItemInput], Field(description="订单行列表（SKU + 数量）")
+            ],
+            note: Annotated[str | None, Field(description="订单备注（可选）")] = None,
+        ) -> dict[str, Any]:
+            """创建订单（需人工审批后执行）：快照价取现价，校验在售与库存，
+            新订单从「待付款」起步。同 SKU 多行自动合并数量。"""
+            try:
+                order = mutations.create_order(
+                    customer,
+                    [(i.sku, i.quantity) for i in items],
+                    note=note,
+                )
+            except MutationError as exc:
+                return _err(exc.code, exc.message, exc.hint)
+            data = order.model_dump(mode="json")
+            data["result_note"] = "订单已创建，当前状态「待付款」；金额按下单快照价"
+            return data
+
+        @mcp.tool
+        def cancel_order(
+            order_id: Annotated[str, Field(description="订单号，如 SO20260301-0001")],
+        ) -> dict[str, Any]:
+            """取消订单（需人工审批后执行）：仅待付款/待发货可取消，取消后
+            回补库存；已发货/已签收的订单不可取消。"""
+            try:
+                order = mutations.cancel_order(order_id)
+            except MutationError as exc:
+                return _err(exc.code, exc.message, exc.hint)
+            data = order.model_dump(mode="json")
+            data["result_note"] = "订单已取消，库存已回补"
+            return data
+
+        @mcp.tool
+        def adjust_stock(
+            sku: Annotated[str, Field(description="商品 SKU")],
+            delta: Annotated[
+                int, Field(description="调整量：正数入库、负数出库，不能为 0")
+            ],
+        ) -> dict[str, Any]:
+            """调整库存（需人工审批后执行）：按 delta 增减，库存不能减为负数。"""
+            if delta == 0:
+                return _err("invalid_argument", "调整量不能为 0（正数入库，负数出库）")
+            try:
+                sku, quantity = mutations.adjust_stock(sku, delta)
+            except MutationError as exc:
+                return _err(exc.code, exc.message, exc.hint)
+            return {
+                "sku": sku,
+                "quantity": quantity,
+                "note": f"库存已调整（{'+' if delta > 0 else ''}{delta}），"
+                "当前数量见 quantity",
+            }
+
+        @mcp.tool
+        def set_product_status(
+            sku: Annotated[str, Field(description="商品 SKU")],
+            status: Annotated[
+                str, Field(description=f"目标状态，可选：{_PRODUCT_STATUS_HELP}")
+            ],
+        ) -> dict[str, Any]:
+            """商品上架/下架（需人工审批后执行）；已是目标状态时报
+            invalid_transition 而不是空转成功。"""
+            parsed, err = _parse_status(status, ProductStatus, _PRODUCT_STATUS_HELP)
+            if err:
+                return err
+            try:
+                sku = mutations.set_product_status(sku, parsed)
+            except MutationError as exc:
+                return _err(exc.code, exc.message, exc.hint)
+            return {"sku": sku, "status": parsed.value, "note": "商品状态已更新"}
 
     return mcp

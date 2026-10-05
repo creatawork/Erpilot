@@ -35,3 +35,11 @@ def resolved(repo) -> dict[str, str]:
 @pytest.fixture(scope="package")
 def tools(seeded_db) -> list:
     return build_agent_tools(seeded_db)
+
+
+@pytest.fixture(scope="package")
+def write_tools(seeded_db) -> list:
+    """写工具面 + AutoDenyGate（评测环境无真人，ADR-0005 决策 6）。"""
+    from agent_core.approval import AutoDenyGate
+
+    return build_agent_tools(seeded_db, writes=True, approval_gate=AutoDenyGate())
