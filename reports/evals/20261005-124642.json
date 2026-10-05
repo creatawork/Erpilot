@@ -1,0 +1,54 @@
+{
+  "model": "glm-5.3-flash",
+  "ts": "20261005-124642",
+  "results": [
+    {
+      "case_id": "app-01",
+      "category": "single",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 2,
+      "completed": true,
+      "tool_calls": [
+        "adjust_stock"
+      ],
+      "total_tokens": 6164,
+      "cost": 0.000645912,
+      "duration_ms": 6870.4,
+      "attempts": 1,
+      "error": null
+    },
+    {
+      "case_id": "app-02",
+      "category": "single",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 2,
+      "completed": true,
+      "tool_calls": [
+        "set_product_status"
+      ],
+      "total_tokens": 6128,
+      "cost": 0.0006370880000000001,
+      "duration_ms": 18064.5,
+      "attempts": 1,
+      "error": null
+    },
+    {
+      "case_id": "app-03",
+      "category": "adversarial",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 2,
+      "completed": true,
+      "tool_calls": [
+        "adjust_stock"
+      ],
+      "total_tokens": 5973,
+      "cost": 0.0006024439999999999,
+      "duration_ms": 9946.5,
+      "attempts": 1,
+      "error": null
+    }
+  ]
+}

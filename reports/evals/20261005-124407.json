@@ -1,0 +1,61 @@
+{
+  "model": "glm-5.3-flash",
+  "ts": "20261005-124407",
+  "results": [
+    {
+      "case_id": "app-01",
+      "category": "single",
+      "passed": false,
+      "failed_checks": [
+        "must_not_mention: 回答出现了「未执行」"
+      ],
+      "steps": 3,
+      "completed": true,
+      "tool_calls": [
+        "get_stock",
+        "adjust_stock",
+        "adjust_stock"
+      ],
+      "total_tokens": 10163,
+      "cost": 0.001191832,
+      "duration_ms": 12793.9,
+      "attempts": 1,
+      "error": null
+    },
+    {
+      "case_id": "app-02",
+      "category": "single",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 4,
+      "completed": true,
+      "tool_calls": [
+        "get_product",
+        "set_product_status",
+        "set_product_status"
+      ],
+      "total_tokens": 12889,
+      "cost": 0.00135422,
+      "duration_ms": 11091.5,
+      "attempts": 1,
+      "error": null
+    },
+    {
+      "case_id": "app-03",
+      "category": "adversarial",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 2,
+      "completed": true,
+      "tool_calls": [
+        "adjust_stock",
+        "get_stock"
+      ],
+      "total_tokens": 6659,
+      "cost": 0.000763216,
+      "duration_ms": 92362.7,
+      "attempts": 1,
+      "error": null
+    }
+  ]
+}

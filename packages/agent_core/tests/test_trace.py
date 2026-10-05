@@ -1,6 +1,7 @@
 """trace 单测：JSONL 记录齐全、事件原样透传、异常留痕、可回放（transcript/摘要）。"""
 
 import json
+from pathlib import Path
 
 import httpx2
 import pytest
@@ -43,10 +44,12 @@ def _handler_pair(requests: list[httpx2.Request], *, first_args: str):
         body = json.loads(request.content)
         requests.append(body)
         if any(m["role"] == "tool" for m in body["messages"]):
-            return sse_response([
-                chunk(delta={"content": "订单 123 已发货"}),
-                chunk(usage=USAGE),
-            ])
+            return sse_response(
+                [
+                    chunk(delta={"content": "订单 123 已发货"}),
+                    chunk(usage=USAGE),
+                ]
+            )
         return sse_response(tool_call_chunks("call_1", "get_order_status", first_args))
 
     return handler
@@ -70,9 +73,11 @@ async def test_records_full_pipeline_and_passes_events_through(tmp_path) -> None
 
     assert [r["type"] for r in records] == [
         "run_start",
-        "step_start", "step_end",
+        "step_start",
+        "step_end",
         "tool_call",
-        "step_start", "step_end",
+        "step_start",
+        "step_end",
         "run_end",
     ]
     # 事件透传：recorder 只是旁观者——除轮次边界事件（含非确定耗时）外逐个相等
@@ -120,9 +125,7 @@ async def test_records_full_pipeline_and_passes_events_through(tmp_path) -> None
 
 @pytest.mark.asyncio
 async def test_transcript_replay_restores_conversation(tmp_path) -> None:
-    _, records = await _recorded_run(
-        tmp_path, _handler_pair([], first_args='{"order_id": "123"}')
-    )
+    _, records = await _recorded_run(tmp_path, _handler_pair([], first_args='{"order_id": "123"}'))
 
     text = format_transcript(records)
 
@@ -151,9 +154,7 @@ async def test_exception_is_recorded_then_reraised(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_summarize_and_new_trace_path(tmp_path) -> None:
-    _, records = await _recorded_run(
-        tmp_path, _handler_pair([], first_args='{"order_id": "123"}')
-    )
+    _, records = await _recorded_run(tmp_path, _handler_pair([], first_args='{"order_id": "123"}'))
     summary = summarize(records)
     assert summary is not None
     assert summary.steps == 2 and summary.completed is True
@@ -168,11 +169,65 @@ async def test_recorder_appends_and_creates_dirs(tmp_path) -> None:
     """同一个文件可追加多次 run（按行流水，不覆盖），深层目录自动创建。"""
     target = tmp_path / "a" / "b" / "run.jsonl"
     for _ in range(2):
-        agent = AgentLoop(make_client(_handler_pair([], first_args='{"order_id": "1"}')),
-                          tools=[get_order_status])
+        agent = AgentLoop(
+            make_client(_handler_pair([], first_args='{"order_id": "1"}')), tools=[get_order_status]
+        )
         recorder = JsonlTraceRecorder(target, model="glm-5.3-flash")
         [e async for e in recorder.run(agent, [{"role": "user", "content": "hi"}])]
 
     records = load_records(target)
     assert [r["type"] for r in records].count("run_start") == 2
     assert [r["type"] for r in records].count("run_end") == 2
+
+
+# ---- 审批事件留痕（M4 第 2 周，ADR-0006） ----
+
+
+@pytest.mark.asyncio
+async def test_recorder_writes_approval_records(tmp_path: Path) -> None:
+    """挂起式审批的 pending/resolved 都进 trace，回放文本可读。"""
+    from agent_core.approval import (
+        RISK_SINGLE_CONFIRM,
+        ApprovalDecision,
+        StreamApprovalGate,
+        guarded,
+    )
+    from agent_core.loop import AgentLoop, ApprovalPending
+    from agent_core.testing import USAGE, chunk, make_client, sse_response, tool_call_chunks
+    from pydantic import BaseModel
+
+    class WriteInput(BaseModel):
+        sku: str
+
+    @tool(name="create_order_x", description="建单", params=WriteInput, risk=RISK_SINGLE_CONFIRM)
+    async def create_order_x(params: WriteInput) -> dict[str, str]:
+        return {"created": params.sku}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        body = json.loads(request.content)
+        if any(m["role"] == "tool" for m in body["messages"]):
+            return sse_response([chunk(delta={"content": "已创建"}), chunk(usage=USAGE)])
+        return sse_response(tool_call_chunks("call_w", "create_order_x", '{"sku": "A1001"}'))
+
+    gate = StreamApprovalGate()
+    agent = AgentLoop(make_client(handler), tools=[guarded(create_order_x, gate)])
+    path = tmp_path / "approval.jsonl"
+    recorder = JsonlTraceRecorder(path, "glm-5.3-flash")
+
+    async for event in recorder.run(agent, [{"role": "user", "content": "下单"}]):
+        if isinstance(event, ApprovalPending):
+            assert gate.respond(
+                event.pending_id, ApprovalDecision(approved=False, reason="测试拒绝")
+            )
+
+    records = load_records(path)
+    kinds = [r["type"] for r in records]
+    assert "approval_pending" in kinds and "approval_resolved" in kinds
+    pend = next(r for r in records if r["type"] == "approval_pending")
+    assert pend["tool"] == "create_order_x" and pend["risk"] == RISK_SINGLE_CONFIRM
+    assert pend["arguments"] == {"sku": "A1001"}
+    res = next(r for r in records if r["type"] == "approval_resolved")
+    assert res["approved"] is False and res["reason"] == "测试拒绝"
+
+    transcript = format_transcript(records)
+    assert "待审批" in transcript and "拒绝" in transcript

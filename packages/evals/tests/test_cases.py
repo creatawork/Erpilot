@@ -28,8 +28,9 @@ def test_ids_unique_and_well_formed() -> None:
     for c in ALL_CASES:
         assert _ID_RE.match(c.id), f"{c.id}: id 不符合 类别前缀-序号 规范"
         assert c.id.startswith(
-            {"single": "single", "multi": "multi", "edge": "edge",
-             "adversarial": "adv"}[c.category.value]
+            {"single": "single", "multi": "multi", "edge": "edge", "adversarial": "adv"}[
+                c.category.value
+            ]
         ), f"{c.id}: id 前缀与类别不符"
         assert c.points.strip(), f"{c.id}: 缺考点说明（标注标准 §3）"
         assert c.question.strip() == c.question
@@ -105,11 +106,51 @@ def test_write_cases_follow_annotation_rules(resolved, write_tools) -> None:
 def test_write_cases_are_all_governance_adversarial() -> None:
     """第一周写集全部落 adversarial（治理行为），且必须防假装执行。"""
     assert WRITE_CASES, "写评测集不应为空"
-    assert all(
-        c.category is CaseCategory.ADVERSARIAL for c in WRITE_CASES
-    ), "M4 第 1 周写 case 只考'未批准不得假装执行'（标注标准 §7）"
+    assert all(c.category is CaseCategory.ADVERSARIAL for c in WRITE_CASES), (
+        "M4 第 1 周写 case 只考'未批准不得假装执行'（标注标准 §7）"
+    )
     for c in WRITE_CASES:
         assert any(
-            "执行" in s or "审批" in s
-            for s in [*c.must_mention_any, *c.must_mention, *c.points]
+            "执行" in s or "审批" in s for s in [*c.must_mention_any, *c.must_mention, *c.points]
         ), f"{c.id}: 写 case 必须把'未执行/需审批'口径写进检查项或考点"
+
+
+# ---- 脚本化审批策略评测集（M4 第 2 周，标注标准 §7 批准确率起步） ----
+
+from evals.approval_cases import APPROVAL_CASES  # noqa: E402
+
+_APPROVAL_ID_RE = re.compile(r"^app-\d{2}$")
+
+
+def test_approval_cases_follow_annotation_rules(resolved, write_tools) -> None:
+    """策略集：app- 前缀 id 不与读/写集冲突、占位符可解析、工具名真实存在。"""
+    real = {t.name for t in write_tools}
+    taken = {c.id for c in ALL_CASES} | {c.id for c in WRITE_CASES}
+    for c in APPROVAL_CASES:
+        assert _APPROVAL_ID_RE.match(c.id), f"{c.id}: 策略集 id 须为 app-序号"
+        assert c.id not in taken, f"{c.id}: 与既有评测集 id 冲突（id 永不复用）"
+        assert c.points.strip(), f"{c.id}: 缺考点说明"
+        has_check = (
+            c.expect_tools_all
+            or c.expect_tools_any
+            or c.must_mention
+            or c.must_mention_any
+            or c.must_not_mention
+        )
+        assert has_check, f"{c.id}: 没有任何检查项"
+        for name in [*c.expect_tools_all, *c.expect_tools_any]:
+            assert name in real, f"{c.id}: 引用了写工具面上不存在的工具 {name}"
+        texts = [c.question, *c.must_mention, *c.must_mention_any, *c.must_not_mention]
+        used = set(_PLACEHOLDER_RE.findall(" ".join(texts)))
+        assert used <= set(resolved), f"{c.id}: 未知占位符 {used - set(resolved)}"
+
+
+def test_approval_cases_cover_both_paths() -> None:
+    """批准确率的两个方向都要有 case：放行路径钉住执行，拒绝路径防假装。"""
+    approved = [c for c in APPROVAL_CASES if c.expect_tools_all]
+    denied = [c for c in APPROVAL_CASES if not c.expect_tools_all]
+    assert approved and denied, "策略集须同时覆盖批准路径与拒绝路径"
+    for c in approved:  # 放行路径必须排除"未执行"措辞（防把执行说成没执行）
+        assert any("未执行" in s or "无法执行" in s for s in c.must_not_mention), c.id
+    for c in denied:  # 拒绝路径必须把"未执行/需审批"口径写进检查项
+        assert c.must_mention_any, c.id

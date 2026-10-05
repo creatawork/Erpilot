@@ -1,13 +1,17 @@
-"""审批门单测（M4 第 1 周，ADR-0005）：guarded 包装、拒绝回填、风险透传。"""
+"""审批门单测（M4 第 1-2 周，ADR-0005/0006）：guarded 包装、拒绝回填、风险透传。"""
 
+import asyncio
 import json
 
+import pytest
 from agent_core.approval import (
     RISK_SINGLE_CONFIRM,
     ApprovalDecision,
     ApprovalRequest,
+    ApprovalSuspended,
     AutoApproveGate,
     AutoDenyGate,
+    StreamApprovalGate,
     guard_tools,
     guarded,
 )
@@ -114,8 +118,82 @@ def test_auto_deny_gate_decision_shape() -> None:
     import asyncio
 
     gate = AutoDenyGate()
-    decision = asyncio.run(
-        gate.review(ApprovalRequest(tool="x", risk="r", arguments={}))
-    )
+    decision = asyncio.run(gate.review(ApprovalRequest(tool="x", risk="r", arguments={})))
     assert decision.approved is False
     assert decision.reason  # 拒绝必须带理由——模型转述时不能只说"被拒了"
+
+
+# ---- 挂起式事件门（M4 第 2 周，ADR-0006） ----
+
+
+async def test_suspending_gate_handler_raises_signal() -> None:
+    """挂起门的守门 handler 抛 ApprovalSuspended，而不是同步给决策。"""
+    wrapped = guarded(_write_tool(), StreamApprovalGate())
+    args = wrapped.params_model.model_validate_json('{"sku": "A1001"}')
+
+    with pytest.raises(ApprovalSuspended) as exc_info:
+        await wrapped.handler(args)
+
+    signal = exc_info.value
+    assert signal.request.tool == "cancel_order"
+    assert signal.request.arguments == {"sku": "A1001"}
+    assert signal.pending_id  # 门生成的回填凭据
+    assert signal.call_id == ""  # loop 捕获时才回填
+    assert signal.decision is not None and not signal.decision.done()
+
+
+async def test_resume_executes_underlying_handler_on_approval() -> None:
+    wrapped = guarded(_write_tool(), StreamApprovalGate())
+    args = wrapped.params_model.model_validate_json('{"sku": "B2002"}')
+
+    with pytest.raises(ApprovalSuspended) as exc_info:
+        await wrapped.handler(args)
+    signal = exc_info.value
+
+    result = await signal.resume(ApprovalDecision(approved=True))
+    assert result == {"executed": "B2002"}  # 批准 → 真执行
+
+
+async def test_resume_returns_denial_payload_on_rejection() -> None:
+    wrapped = guarded(_write_tool(), StreamApprovalGate())
+    args = wrapped.params_model.model_validate_json('{"sku": "A1001"}')
+
+    with pytest.raises(ApprovalSuspended) as exc_info:
+        await wrapped.handler(args)
+    signal = exc_info.value
+
+    payload = await signal.resume(ApprovalDecision(approved=False, reason="店长不在"))
+    assert json.loads(payload)["approval"] == "denied"
+    assert "店长不在" in json.loads(payload)["message"]
+
+
+async def test_stream_gate_respond_roundtrip() -> None:
+    gate = StreamApprovalGate()
+
+    async def fake_resume(decision: ApprovalDecision) -> object:
+        return decision
+
+    async def requester() -> ApprovalSuspended:
+        request = ApprovalRequest(tool="w", risk="r", arguments={})
+        signal = gate.suspend(request, fake_resume)
+        return signal
+
+    signal = await requester()
+    assert not gate.respond("unknown-id", ApprovalDecision(approved=True))
+    assert gate.respond(signal.pending_id, ApprovalDecision(approved=False, reason="拒绝"))
+    assert not gate.respond(signal.pending_id, ApprovalDecision(approved=True))  # 已决
+    assert await signal.decision == ApprovalDecision(approved=False, reason="拒绝")
+
+
+def test_stream_gate_discard_cleans_waiter() -> None:
+    gate = StreamApprovalGate()
+
+    async def make() -> ApprovalSuspended:
+        return gate.suspend(
+            ApprovalRequest(tool="w", risk="r", arguments={}),
+            lambda d: asyncio.sleep(0, result=d),
+        )
+
+    signal = asyncio.run(make())
+    gate.discard(signal.pending_id)
+    assert not gate.respond(signal.pending_id, ApprovalDecision(approved=True))

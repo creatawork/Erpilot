@@ -185,3 +185,41 @@ button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* 审批卡片（M4 第 2 周） */
+.approval {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.approval-label {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.approval .approve,
+.approval .deny {
+  align-self: auto;
+  padding: 4px 14px;
+  font-size: 13px;
+}
+
+.approval .deny {
+  background: transparent;
+  color: inherit;
+  border: 1px solid var(--line);
+}
+
+.approval.ok {
+  border-color: var(--ok, #2a9d5c);
+}
+
+.approval.fail {
+  border-color: #c0392b;
+}

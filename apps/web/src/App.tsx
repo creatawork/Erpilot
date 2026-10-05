@@ -1,6 +1,8 @@
 import { useCallback, useRef, useState } from "react";
 import "./App.css";
 import {
+  type ApprovalPendingPayload,
+  type ApprovalResolvedPayload,
   type DonePayload,
   type ToolFinishedPayload,
   type ToolStartedPayload,
@@ -12,6 +14,8 @@ interface ToolItem {
   name: string;
   arguments: string;
   finished: ToolFinishedPayload | null;
+  approval: ApprovalPendingPayload | null;
+  approvalResolved: ApprovalResolvedPayload | null;
 }
 
 interface Turn {
@@ -49,6 +53,18 @@ export default function App() {
       listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
     });
   };
+
+  const respondApproval = useCallback(
+    async (pendingId: string, approved: boolean) => {
+      const resp = await fetch("/api/chat/approve", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pending_id: pendingId, approved }),
+      });
+      if (!resp.ok) setError(`审批回填失败：HTTP ${resp.status}`);
+    },
+    [],
+  );
 
   const send = useCallback(async () => {
     const message = input.trim();
@@ -89,7 +105,10 @@ export default function App() {
             const started: ToolStartedPayload = ev.data;
             updateAssistant(t => ({
               ...t,
-              tools: [...t.tools, { ...started, finished: null }],
+              tools: [
+                ...t.tools,
+                { ...started, finished: null, approval: null, approvalResolved: null },
+              ],
             }));
             setStatus(`调用工具 ${ev.data.name}…`);
             break;
@@ -102,6 +121,28 @@ export default function App() {
                 x.id === finished.id ? { ...x, finished } : x,
               ),
             }));
+            break;
+          }
+          case "approval_pending": {
+            const pending: ApprovalPendingPayload = ev.data;
+            updateAssistant(t => ({
+              ...t,
+              tools: t.tools.map(x =>
+                x.id === pending.call_id ? { ...x, approval: pending } : x,
+              ),
+            }));
+            setStatus(`待审批：${pending.tool}（${pending.risk}）`);
+            break;
+          }
+          case "approval_resolved": {
+            const resolved: ApprovalResolvedPayload = ev.data;
+            updateAssistant(t => ({
+              ...t,
+              tools: t.tools.map(x =>
+                x.id === resolved.call_id ? { ...x, approvalResolved: resolved } : x,
+              ),
+            }));
+            setStatus(resolved.approved ? "已批准，执行中…" : "已拒绝");
             break;
           }
           case "done":
@@ -160,6 +201,32 @@ export default function App() {
                         {tool.name}
                       </summary>
                       <pre className="args">{tool.arguments}</pre>
+                      {tool.approval && !tool.approvalResolved && (
+                        <div className="approval">
+                          <span className="approval-label">
+                            待审批 · 风险等级 {tool.approval.risk}
+                          </span>
+                          <button
+                            className="approve"
+                            onClick={() => void respondApproval(tool.approval!.pending_id, true)}
+                          >
+                            批准
+                          </button>
+                          <button
+                            className="deny"
+                            onClick={() => void respondApproval(tool.approval!.pending_id, false)}
+                          >
+                            拒绝
+                          </button>
+                        </div>
+                      )}
+                      {tool.approvalResolved && (
+                        <div className={`approval ${tool.approvalResolved.approved ? "ok" : "fail"}`}>
+                          {tool.approvalResolved.approved
+                            ? "已批准"
+                            : `已拒绝：${tool.approvalResolved.reason || "无理由"}`}
+                        </div>
+                      )}
                       {tool.finished && <pre className="result">{tool.finished.content}</pre>}
                     </details>
                   ))}

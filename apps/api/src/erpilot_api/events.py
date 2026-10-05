@@ -2,13 +2,17 @@
 
 前端按 event 名分发（实现见 apps/web/src/protocol.ts，两侧字段必须同步改）：
 
-- start         {session_id, model}                  流开始（含服务端分配的会话 id）
-- step          {step}                               第 n 轮 LLM 生成开始
-- delta         {text}                               增量回复文本
-- tool_started  {id, name, arguments}                即将执行工具调用
-- tool_finished {id, name, content, ok}              工具执行完毕（ok=False 时 content 是错误）
-- done          {steps, completed, usage, cost, duration_ms, trace}   一次 run 收口
-- error         {message}                            服务端异常（随后流关闭）
+- start             {session_id, model}                  流开始（含服务端分配的会话 id）
+- step              {step}                               第 n 轮 LLM 生成开始
+- delta             {text}                               增量回复文本
+- tool_started      {id, name, arguments}                即将执行工具调用
+- tool_finished     {id, name, content, ok}              工具执行完毕（ok=False 时 content 是错误）
+- approval_pending  {call_id, pending_id, tool, risk, arguments}   写调用等待人工审批；
+                                                             流在此挂起，POST /api/chat/approve
+                                                             回填决策后继续
+- approval_resolved {call_id, pending_id, tool, approved, reason}  决策已回填
+- done              {steps, completed, usage, cost, duration_ms, trace}   一次 run 收口
+- error             {message}                            服务端异常（随后流关闭）
 
 step_end 不下发——它是 trace 的计量记录，前端无需感知。
 """
@@ -19,6 +23,8 @@ from typing import Any
 from agent_core.llm import TextDelta
 from agent_core.loop import (
     AgentEvent,
+    ApprovalPending,
+    ApprovalResolved,
     LoopEnd,
     StepEnd,
     StepStarted,
@@ -38,6 +44,24 @@ def encode_event(event: AgentEvent) -> tuple[str, dict[str, Any]] | None:
             return "tool_started", {"id": call.id, "name": call.name, "arguments": call.arguments}
         case ToolCallFinished(call_id=cid, name=name, content=content, ok=ok):
             return "tool_finished", {"id": cid, "name": name, "content": content, "ok": ok}
+        case ApprovalPending(call_id=cid, pending_id=pid, tool=name, risk=risk, arguments=args):
+            return "approval_pending", {
+                "call_id": cid,
+                "pending_id": pid,
+                "tool": name,
+                "risk": risk,
+                "arguments": args,
+            }
+        case ApprovalResolved(
+            call_id=cid, pending_id=pid, tool=name, approved=approved, reason=reason
+        ):
+            return "approval_resolved", {
+                "call_id": cid,
+                "pending_id": pid,
+                "tool": name,
+                "approved": approved,
+                "reason": reason,
+            }
         case StepEnd() | LoopEnd():
             return None
     return None  # pragma: no cover —— match 已穷尽 AgentEvent

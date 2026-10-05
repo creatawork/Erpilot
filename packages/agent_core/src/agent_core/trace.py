@@ -4,11 +4,13 @@
 追加写并逐行 flush——进程崩了已写的行还在，tail -f 能盯，grep/jq 能查；
 格式自有可控，接 Langfuse / OTel GenAI 语义约定时把本模块换成一个 sink 即可。
 
-记录模型 v1（run_id 关联一次 agent.run，六类记录按时间顺序成流水）：
+记录模型 v1（run_id 关联一次 agent.run，按时间顺序成流水）：
 
 - run_start ：model / ts / messages —— 开跑时的历史快照（提问前的完整上下文）
 - step_start：step / ts —— 一轮 LLM 请求开始
 - tool_call ：step / id / name / arguments / content / ok / duration_ms —— 每次工具调用一行
+- approval_pending   ：step / call_id / pending_id / tool / risk / arguments —— 写调用等待人工审批
+- approval_resolved  ：call_id / pending_id / tool / approved / reason —— 决策回填（批准/拒绝）
 - step_end  ：step / text / usage / cost / duration_ms —— 该轮模型文本输出与计量
 - run_end   ：steps / completed / usage / cost / duration_ms / messages —— 结束时完整历史
 - run_error ：error / duration_ms —— 异常留痕后原样抛出，trace 不吞错
@@ -44,6 +46,8 @@ from agent_core.llm import TextDelta, ToolCall, Usage
 from agent_core.loop import (
     AgentEvent,
     AgentLoop,
+    ApprovalPending,
+    ApprovalResolved,
     LoopEnd,
     StepEnd,
     StepStarted,
@@ -99,15 +103,16 @@ class JsonlTraceRecorder:
                 for sink in self._sinks:
                     sink.write(record)
 
-
-            write({
-                "type": "run_start",
-                "v": TRACE_VERSION,
-                "run_id": run_id,
-                "model": self._model,
-                "ts": _now(),
-                "messages": copy.deepcopy(messages),
-            })
+            write(
+                {
+                    "type": "run_start",
+                    "v": TRACE_VERSION,
+                    "run_id": run_id,
+                    "model": self._model,
+                    "ts": _now(),
+                    "messages": copy.deepcopy(messages),
+                }
+            )
             step = 0
             step_text: list[str] = []
             pending: dict[str, tuple[float, ToolCall]] = {}
@@ -117,59 +122,100 @@ class JsonlTraceRecorder:
                         case StepStarted(step=s):
                             step = s
                             step_text.clear()
-                            write({
-                                "type": "step_start", "run_id": run_id, "step": s, "ts": _now()
-                            })
+                            write({"type": "step_start", "run_id": run_id, "step": s, "ts": _now()})
                         case TextDelta(text=text):
                             step_text.append(text)
                         case StepEnd(step=s, usage=usage, duration_ms=ms):
-                            write({
-                                "type": "step_end",
-                                "run_id": run_id,
-                                "step": s,
-                                "ts": _now(),
-                                "text": "".join(step_text),
-                                "usage": _usage_dict(usage),
-                                "cost": cost_of(self._model, usage),
-                                "duration_ms": ms,
-                            })
+                            write(
+                                {
+                                    "type": "step_end",
+                                    "run_id": run_id,
+                                    "step": s,
+                                    "ts": _now(),
+                                    "text": "".join(step_text),
+                                    "usage": _usage_dict(usage),
+                                    "cost": cost_of(self._model, usage),
+                                    "duration_ms": ms,
+                                }
+                            )
                         case ToolCallStarted(call=call):
                             pending[call.id] = (time.perf_counter(), call)
                         case ToolCallFinished(call_id=cid, name=name, content=content, ok=ok):
                             t0, call = pending.pop(cid, (time.perf_counter(), None))
-                            write({
-                                "type": "tool_call",
-                                "run_id": run_id,
-                                "step": step,
-                                "ts": _now(),
-                                "id": cid,
-                                "name": name,
-                                "arguments": call.arguments if call else "",
-                                "content": content,
-                                "ok": ok,
-                                "duration_ms": round((time.perf_counter() - t0) * 1000, 1),
-                            })
+                            write(
+                                {
+                                    "type": "tool_call",
+                                    "run_id": run_id,
+                                    "step": step,
+                                    "ts": _now(),
+                                    "id": cid,
+                                    "name": name,
+                                    "arguments": call.arguments if call else "",
+                                    "content": content,
+                                    "ok": ok,
+                                    "duration_ms": round((time.perf_counter() - t0) * 1000, 1),
+                                }
+                            )
+                        case ApprovalPending(
+                            call_id=cid, pending_id=pid, tool=name, risk=risk, arguments=args
+                        ):
+                            write(
+                                {
+                                    "type": "approval_pending",
+                                    "run_id": run_id,
+                                    "step": step,
+                                    "ts": _now(),
+                                    "call_id": cid,
+                                    "pending_id": pid,
+                                    "tool": name,
+                                    "risk": risk,
+                                    "arguments": args,
+                                }
+                            )
+                        case ApprovalResolved(
+                            call_id=cid,
+                            pending_id=pid,
+                            tool=name,
+                            approved=approved,
+                            reason=reason,
+                        ):
+                            write(
+                                {
+                                    "type": "approval_resolved",
+                                    "run_id": run_id,
+                                    "ts": _now(),
+                                    "call_id": cid,
+                                    "pending_id": pid,
+                                    "tool": name,
+                                    "approved": approved,
+                                    "reason": reason,
+                                }
+                            )
                         case LoopEnd(steps=steps, usage=usage, completed=completed):
-                            write({
-                                "type": "run_end",
-                                "run_id": run_id,
-                                "ts": _now(),
-                                "steps": steps,
-                                "completed": completed,
-                                "usage": _usage_dict(usage),
-                                "cost": cost_of(self._model, usage),
-                                "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-                                "messages": copy.deepcopy(messages),
-                            })
+                            write(
+                                {
+                                    "type": "run_end",
+                                    "run_id": run_id,
+                                    "ts": _now(),
+                                    "steps": steps,
+                                    "completed": completed,
+                                    "usage": _usage_dict(usage),
+                                    "cost": cost_of(self._model, usage),
+                                    "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                                    "messages": copy.deepcopy(messages),
+                                }
+                            )
                     yield event
             except Exception as exc:
-                write({
-                    "type": "run_error",
-                    "run_id": run_id,
-                    "ts": _now(),
-                    "error": f"{type(exc).__name__}: {exc}",
-                    "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-                })
+                write(
+                    {
+                        "type": "run_error",
+                        "run_id": run_id,
+                        "ts": _now(),
+                        "error": f"{type(exc).__name__}: {exc}",
+                        "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                    }
+                )
                 raise
             finally:
                 for sink in self._sinks:
@@ -185,9 +231,7 @@ def new_trace_path(trace_dir: Path, model: str) -> Path:
 def load_records(path: Path) -> list[dict]:
     """读回一个 trace 文件（每行一个 JSON 记录），坏行报错不静默。"""
     return [
-        json.loads(line)
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
+        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
     ]
 
 
@@ -224,6 +268,16 @@ def format_transcript(records: Sequence[dict], *, max_chars: int = 600) -> str:
                 f"[工具{mark}] {r['name']}({_shorten(r.get('arguments', ''), 200)})"
                 f" → {_shorten(r.get('content', ''), max_chars)}（{r['duration_ms']:.0f}ms）"
             )
+        elif kind == "approval_pending":
+            lines.append(
+                f"[待审批] {r['tool']}（{r.get('risk', '')}）"
+                f"{_shorten(json.dumps(r.get('arguments', {}), ensure_ascii=False), 200)}"
+                " —— 等待人工决策"
+            )
+        elif kind == "approval_resolved":
+            mark = "✓ 批准" if r.get("approved") else "✗ 拒绝"
+            reason = f"：{r['reason']}" if r.get("reason") else ""
+            lines.append(f"[审批{mark}] {r['tool']}{reason}")
         elif kind == "run_end":
             usage = r.get("usage") or {}
             cost = r.get("cost")

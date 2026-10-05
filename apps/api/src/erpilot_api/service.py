@@ -10,7 +10,9 @@ import asyncio
 import os
 from collections.abc import AsyncIterator, Callable, Sequence
 from pathlib import Path
+from typing import Any
 
+from agent_core.approval import ApprovalDecision
 from agent_core.demo_tools import SYSTEM_PROMPT
 from agent_core.llm import LLMClient
 from agent_core.loop import AgentEvent, AgentLoop, LoopConfig
@@ -20,9 +22,7 @@ from agent_core.trace import JsonlTraceRecorder, TraceSink, new_trace_path
 
 def _sinks_from_env() -> list[TraceSink]:
     """Langfuse keys 齐全 → 双写远程 sink；否则本地 JSONL 独挑（ADR-0003）。"""
-    if not (
-        os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_SECRET_KEY")
-    ):
+    if not (os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_SECRET_KEY")):
         return []
     try:
         from agent_core.observability import LangfuseTraceSink
@@ -42,12 +42,14 @@ class ChatService:
         trace_dir: Path,
         tools: Sequence[Tool],
         loop_config: LoopConfig | None = None,
+        approval_gate: Any | None = None,
     ) -> None:
         self._client_factory = client_factory
         self._model = model
         self._trace_dir = trace_dir
         self._tools = list(tools)
         self._loop_config = loop_config or LoopConfig()
+        self._approval_gate = approval_gate
         self._sinks = _sinks_from_env()
         self._client: LLMClient | None = None
         self._sessions: dict[str, list] = {}
@@ -57,6 +59,12 @@ class ChatService:
     @property
     def model(self) -> str:
         return self._model
+
+    def respond_approval(self, pending_id: str, decision: ApprovalDecision) -> bool:
+        """回填一次审批决策；无门或 pending_id 无效返回 False（不抛异常）。"""
+        if self._approval_gate is None:
+            return False
+        return self._approval_gate.respond(pending_id, decision)
 
     def lock(self, session_id: str) -> asyncio.Lock:
         """每会话一把锁：同一会话的多次 run 串行，历史才不会交错。"""
@@ -81,9 +89,7 @@ class ChatService:
         recorder = JsonlTraceRecorder(trace_path, self._model, sinks=self._sinks)
         return agent, messages, recorder
 
-    async def stream_run(
-        self, session_id: str, message: str
-    ) -> AsyncIterator[AgentEvent]:
+    async def stream_run(self, session_id: str, message: str) -> AsyncIterator[AgentEvent]:
         """带会话锁地跑一轮：调用方直接迭代事件，串行与历史维护都在这层。"""
         async with self.lock(session_id):
             agent, messages, recorder = self.start_run(session_id, message)

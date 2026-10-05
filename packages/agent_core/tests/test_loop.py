@@ -78,17 +78,19 @@ def _handler_pair(requests: list[httpx2.Request], *, first_args: str):
         has_tool_result = any(m["role"] == "tool" for m in body["messages"])
         if not has_tool_result:
             return sse_response(tool_call_chunks("call_1", "get_order_status", first_args))
-        return sse_response([
-            chunk(delta={"content": "订单 123 已发货"}),
-            chunk(usage=USAGE),
-        ])
+        return sse_response(
+            [
+                chunk(delta={"content": "订单 123 已发货"}),
+                chunk(usage=USAGE),
+            ]
+        )
 
     return handler
 
 
 @pytest.mark.asyncio
 async def test_single_tool_task_round_trip() -> None:
-    """"查订单 123"单工具任务：请求注入 schema → 执行 → 回填 → 最终回答。"""
+    """ "查订单 123"单工具任务：请求注入 schema → 执行 → 回填 → 最终回答。"""
     requests: list[httpx2.Request] = []
     agent = AgentLoop(
         make_client(_handler_pair(requests, first_args='{"order_id": "123"}')),
@@ -162,9 +164,7 @@ async def test_tool_timeout_returns_error_backfill() -> None:
     agent = AgentLoop(
         make_client(handler),
         tools=[slow_tool],
-        config=LoopConfig(
-            max_steps=1, tool_timeout=0.05, retry=ToolRetryPolicy(retries=0)
-        ),
+        config=LoopConfig(max_steps=1, tool_timeout=0.05, retry=ToolRetryPolicy(retries=0)),
     )
 
     events = await _run(agent)
@@ -281,10 +281,14 @@ async def test_parallel_tool_calls_complete_out_of_order() -> None:
         requests.append(body)
         if any(m["role"] == "tool" for m in body["messages"]):
             return sse_response([chunk(delta={"content": "汇总完成"}), chunk(usage=USAGE)])
-        return sse_response(multi_tool_chunks([
-            ("call_1", "slow_report", "{}"),
-            ("call_2", "fast_report", "{}"),
-        ]))
+        return sse_response(
+            multi_tool_chunks(
+                [
+                    ("call_1", "slow_report", "{}"),
+                    ("call_2", "fast_report", "{}"),
+                ]
+            )
+        )
 
     agent = AgentLoop(make_client(handler), tools=[slow_report, fast_report])
 
@@ -318,9 +322,7 @@ async def test_context_compression_applied_in_place() -> None:
     agent = AgentLoop(
         make_client(handler),
         tools=[get_order_status],
-        config=LoopConfig(
-            max_steps=2, context=ContextPolicy(max_tokens=30, keep_last_messages=2)
-        ),
+        config=LoopConfig(max_steps=2, context=ContextPolicy(max_tokens=30, keep_last_messages=2)),
     )
     messages: list = [{"role": "user", "content": "问" * 300}]  # ≈101 tokens，超 30 预算
 
@@ -330,3 +332,198 @@ async def test_context_compression_applied_in_place() -> None:
     assert [m["role"] for m in messages] == ["system", "assistant", "tool", "assistant"]
     assert any(m.get("content") == DROPPED_NOTE for m in messages)
     assert events[-1].completed is True and events[-1].steps == 2
+
+
+# ---- 挂起式审批流（M4 第 2 周，ADR-0006） ----
+
+from agent_core.approval import (  # noqa: E402
+    RISK_SINGLE_CONFIRM,
+    ApprovalDecision,
+    StreamApprovalGate,
+    guarded,
+)
+from agent_core.loop import ApprovalPending, ApprovalResolved  # noqa: E402
+
+
+class WriteInput(BaseModel):
+    sku: str
+
+
+@tool(
+    name="create_order_t",
+    description="建单（需审批）",
+    params=WriteInput,
+    risk=RISK_SINGLE_CONFIRM,
+)
+async def create_order_t(params: WriteInput) -> dict[str, str]:
+    return {"created": params.sku}
+
+
+async def _run_with_approval(
+    agent: AgentLoop,
+    gate: StreamApprovalGate,
+    decision: ApprovalDecision,
+    prompt: str = "hi",
+    respond_after: float = 0.0,
+) -> list:
+    events: list = []
+
+    async def respond_later(pending_id: str) -> None:
+        if respond_after:
+            await asyncio.sleep(respond_after)
+        assert gate.respond(pending_id, decision)
+
+    async for event in agent.run([{"role": "user", "content": prompt}]):
+        events.append(event)
+        if isinstance(event, ApprovalPending):
+            asyncio.create_task(respond_later(event.pending_id))
+    return events
+
+
+def _write_handler_pair(requests: list[httpx2.Request], *, call_id: str = "call_w"):
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        body = json.loads(request.content)
+        requests.append(body)
+        if any(m["role"] == "tool" for m in body["messages"]):
+            return sse_response([chunk(delta={"content": "处理完成"}), chunk(usage=USAGE)])
+        return sse_response(tool_call_chunks(call_id, "create_order_t", '{"sku": "A1001"}'))
+
+    return handler
+
+
+@pytest.mark.asyncio
+async def test_suspended_approval_approved_executes_and_backfills() -> None:
+    requests: list[httpx2.Request] = []
+    gate = StreamApprovalGate()
+    agent = AgentLoop(
+        make_client(_write_handler_pair(requests)), tools=[guarded(create_order_t, gate)]
+    )
+
+    messages: list = [{"role": "user", "content": "下单"}]
+    events = []
+    async for event in agent.run(messages):
+        events.append(event)
+        if isinstance(event, ApprovalPending):
+            assert event.tool == "create_order_t"
+            assert event.risk == RISK_SINGLE_CONFIRM
+            assert event.arguments == {"sku": "A1001"}
+            assert gate.respond(event.pending_id, ApprovalDecision(approved=True))
+
+    names = [type(e).__name__ for e in events]
+    assert names == [
+        "StepStarted",
+        "StepEnd",
+        "ToolCallStarted",
+        "ApprovalPending",
+        "ApprovalResolved",
+        "ToolCallFinished",
+        "StepStarted",
+        "TextDelta",
+        "StepEnd",
+        "LoopEnd",
+    ]
+    resolved = next(e for e in events if isinstance(e, ApprovalResolved))
+    assert resolved.approved is True
+    finished = next(e for e in events if isinstance(e, ToolCallFinished))
+    assert finished.ok and json.loads(finished.content) == {"created": "A1001"}
+    # 决策后的真实结果按协议回填进消息历史
+    tool_msgs = [m for m in messages if m.get("role") == "tool"]
+    assert json.loads(tool_msgs[0]["content"]) == {"created": "A1001"}
+
+
+@pytest.mark.asyncio
+async def test_suspended_approval_denied_backfills_not_executed() -> None:
+    requests: list[httpx2.Request] = []
+    gate = StreamApprovalGate()
+    agent = AgentLoop(
+        make_client(_write_handler_pair(requests)), tools=[guarded(create_order_t, gate)]
+    )
+
+    async for event in agent.run([{"role": "user", "content": "下单"}]):
+        if isinstance(event, ApprovalPending):
+            assert gate.respond(
+                event.pending_id, ApprovalDecision(approved=False, reason="额度不足")
+            )
+
+    finished = None
+    # 重新跑一轮拿事件（上一轮迭代未收集，仅验证回填内容）：
+    agent = AgentLoop(
+        make_client(_write_handler_pair(requests)), tools=[guarded(create_order_t, gate)]
+    )
+    async for event in agent.run([{"role": "user", "content": "下单"}]):
+        if isinstance(event, ToolCallFinished):
+            finished = event
+        if isinstance(event, ApprovalPending):
+            assert gate.respond(
+                event.pending_id, ApprovalDecision(approved=False, reason="额度不足")
+            )
+    assert finished is not None
+    assert finished.ok  # 拒绝不是错误，是治理结果
+    payload = json.loads(finished.content)
+    assert payload["approval"] == "denied" and "额度不足" in payload["message"]
+    # 回填给模型的 tool 消息里是"未执行"
+    tool_msg = next(m for m in requests[1]["messages"] if m["role"] == "tool")
+    assert json.loads(tool_msg["content"])["approval"] == "denied"
+
+
+@pytest.mark.asyncio
+async def test_approval_wait_time_does_not_burn_tool_timeout() -> None:
+    """人的思考时间不计 tool_timeout：决策慢到超过超时上限，执行照样成功。"""
+    requests: list[httpx2.Request] = []
+    gate = StreamApprovalGate()
+    agent = AgentLoop(
+        make_client(_write_handler_pair(requests)),
+        tools=[guarded(create_order_t, gate)],
+        config=LoopConfig(tool_timeout=0.1),
+    )
+
+    finished = None
+    async for event in agent.run([{"role": "user", "content": "下单"}]):
+        if isinstance(event, ToolCallFinished):
+            finished = event
+        if isinstance(event, ApprovalPending):
+            asyncio.create_task(_respond_slowly(gate, event.pending_id))
+    assert finished is not None and finished.ok
+
+
+async def _respond_slowly(gate: StreamApprovalGate, pending_id: str) -> None:
+    await asyncio.sleep(0.4)  # 远超 tool_timeout=0.1
+    assert gate.respond(pending_id, ApprovalDecision(approved=True))
+
+
+@pytest.mark.asyncio
+async def test_parallel_round_mixes_read_and_suspended_write() -> None:
+    """读工具照常完成（先出 Finished），写工具进挂起段，两者互不阻塞。"""
+    requests: list[httpx2.Request] = []
+    gate = StreamApprovalGate()
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        body = json.loads(request.content)
+        requests.append(body)
+        if any(m["role"] == "tool" for m in body["messages"]):
+            return sse_response([chunk(delta={"content": "完成"}), chunk(usage=USAGE)])
+        return sse_response(
+            multi_tool_chunks(
+                [
+                    ("call_r", "fast_report", "{}"),
+                    ("call_w", "create_order_t", '{"sku": "A1001"}'),
+                ]
+            )
+        )
+
+    agent = AgentLoop(make_client(handler), tools=[fast_report, guarded(create_order_t, gate)])
+    events: list = []
+    async for event in agent.run([{"role": "user", "content": "hi"}]):
+        events.append(event)
+        if isinstance(event, ApprovalPending):
+            assert gate.respond(event.pending_id, ApprovalDecision(approved=True))
+
+    finished = [e for e in events if isinstance(e, ToolCallFinished)]
+    assert finished[0].name == "fast_report"  # 只读完成先于审批段
+    assert finished[1].name == "create_order_t"
+    pending_events = [e for e in events if isinstance(e, ApprovalPending)]
+    assert len(pending_events) == 1
+    assert pending_events[0].call_id == "call_w"  # 与 Started 配对
+    # 历史按调用顺序回填：fast_report 是 call_r，写结果跟在后面
+    tool_msgs = [m for m in requests[1]["messages"] if m["role"] == "tool"]
+    assert len(tool_msgs) == 2

@@ -7,23 +7,42 @@ M3 第 2 周起 CLI 默认经 MCP 桥消费真数据（mcp_erp.server）；--too
 用法：
     uv run erpilot chat "订单 123 里买了什么？还有货吗？有货的话报个价"
     uv run erpilot chat --tools demo                 # 假数据演示
+    uv run erpilot chat --writes "给客户 拾光杂货 下单 2 件 A1001"
+                                                 # 写工具面：写调用前终端审批（y/n）
     uv run erpilot replay traces/xxx.jsonl
 """
 
 import asyncio
+import json
 import os
 from pathlib import Path
 
 import typer
+from agent_core.approval import ApprovalDecision, StreamApprovalGate
 from agent_core.demo_tools import DEFAULT_PROMPT, DEMO_TOOLS, SYSTEM_PROMPT
 from agent_core.dotenv import find_dotenv, load_dotenv
 from agent_core.llm import LLMClient, LLMConfig, TextDelta
-from agent_core.loop import AgentLoop, LoopEnd, StepStarted, ToolCallFinished, ToolCallStarted
+from agent_core.loop import (
+    AgentLoop,
+    ApprovalPending,
+    ApprovalResolved,
+    LoopEnd,
+    StepStarted,
+    ToolCallFinished,
+    ToolCallStarted,
+)
 from agent_core.prices import cost_of
 from agent_core.tools import Tool
-from agent_core.trace import JsonlTraceRecorder, format_transcript, load_records, new_trace_path
+from agent_core.trace import (
+    JsonlTraceRecorder,
+    format_transcript,
+    load_records,
+    new_trace_path,
+)
 from mcp_erp import build_agent_tools
 from rich.console import Console
+from rich.panel import Panel
+from rich.prompt import Confirm
 from rich.table import Table
 
 app = typer.Typer(help="Erpilot 掌柜助手", no_args_is_help=True)
@@ -34,12 +53,21 @@ _TOOL_CONTENT_LIMIT = 300  # 终端里工具结果只展示片段，全文在 tr
 _DEFAULT_TRACE_DIR = Path("traces")
 
 
-def _resolve_tools(mode: str) -> list[Tool]:
-    """mcp：经 MCP 桥取真数据工具（需先 seed）；demo：内置假工具。"""
+def _resolve_tools(
+    mode: str,
+    *,
+    writes: bool = False,
+    gate: StreamApprovalGate | None = None,
+) -> list[Tool]:
+    """mcp：经 MCP 桥取真数据工具（需先 seed）；demo：内置假工具。
+
+    writes=True 时写工具进入工具面并挂终端审批门（桥的硬约束：writes=True
+    而 gate 缺失会直接 raise）。
+    """
     if mode == "demo":
         return list(DEMO_TOOLS)
     try:
-        return build_agent_tools()
+        return build_agent_tools(writes=writes, approval_gate=gate)
     except FileNotFoundError as exc:
         err_console.print(f"[red]错误：{exc}[/red]")
         raise typer.Exit(1) from None
@@ -47,9 +75,7 @@ def _resolve_tools(mode: str) -> list[Tool]:
 
 def _trace_sinks() -> list:
     """Langfuse 双写（ADR-0003 收尾）：keys 齐全才启用，失败只告警不阻断。"""
-    if not (
-        os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_SECRET_KEY")
-    ):
+    if not (os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_SECRET_KEY")):
         return []
     try:
         from agent_core.observability import LangfuseTraceSink
@@ -68,6 +94,9 @@ def chat(
     tools_mode: str = typer.Option(
         "mcp", "--tools", help="工具来源：mcp（真数据，默认）或 demo（内置假数据）"
     ),  # noqa: B008
+    writes: bool = typer.Option(
+        False, "--writes", help="启用写工具面：写调用先过终端审批（y/n），批准才执行"
+    ),  # noqa: B008
 ) -> None:
     """流式跑一轮 agent 对话：rich 渲染 + trace 落盘 JSONL。"""
     text = " ".join(prompt) if prompt else DEFAULT_PROMPT
@@ -77,7 +106,10 @@ def chat(
         err_console.print(f"[red]错误：{exc}[/red]")
         raise typer.Exit(1) from None
 
-    tools = _resolve_tools(tools_mode)
+    gate: StreamApprovalGate | None = None
+    if writes:
+        gate = StreamApprovalGate()
+    tools = _resolve_tools(tools_mode, writes=writes, gate=gate)
     agent = AgentLoop(LLMClient(config), tools=tools)
     messages: list = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -89,20 +121,38 @@ def chat(
 
     console.print(
         f"[dim]模型 {config.model} · 工具 {'MCP 真数据' if tools_mode == 'mcp' else 'demo'}"
-        f" × {len(tools)} · trace {trace_path}"
+        f" × {len(tools)}"
+        + (" · 写工具面（终端审批）" if writes else "")
+        + f" · trace {trace_path}"
         + (" · Langfuse 双写" if sinks else "")
         + "[/dim]\n"
     )
     console.print(text, style="bold cyan", markup=False, soft_wrap=True)
     console.print()
-    end = asyncio.run(_stream_chat(agent, messages, recorder))
+    end = asyncio.run(_stream_chat(agent, messages, recorder, gate=gate))
     if end is None:  # pragma: no cover —— run() 保证产出 LoopEnd
         return
     _print_summary(config.model, end)
 
 
+def _render_approval_card(event: ApprovalPending) -> None:
+    """终端审批卡片：要执行什么、什么风险等级、参数原样展示。"""
+    arguments = json.dumps(event.arguments, ensure_ascii=False, indent=2)
+    console.print(
+        Panel(
+            f"[bold]{event.tool}[/bold] · 风险等级 [yellow]{event.risk}[/yellow]\n\n{arguments}",
+            title="待审批写操作",
+            border_style="yellow",
+        )
+    )
+
+
 async def _stream_chat(
-    agent: AgentLoop, messages: list, recorder: JsonlTraceRecorder
+    agent: AgentLoop,
+    messages: list,
+    recorder: JsonlTraceRecorder,
+    *,
+    gate: StreamApprovalGate | None = None,
 ) -> LoopEnd | None:
     end: LoopEnd | None = None
     async for event in recorder.run(agent, messages):
@@ -113,6 +163,18 @@ async def _stream_chat(
                 console.print()  # 新一轮生成另起一行
             case ToolCallStarted(call=call):
                 console.print(f"\n[dim]▶ {call.name}({call.arguments})[/dim]")
+            case ApprovalPending() as pending:
+                _render_approval_card(pending)
+                if gate is None:  # pragma: no cover —— 有挂起必有门
+                    continue
+                approved = Confirm.ask("批准执行？", default=False)
+                reason = "" if approved else "用户在终端拒绝"
+                gate.respond(pending.pending_id, ApprovalDecision(approved, reason))
+            case ApprovalResolved(tool=name, approved=approved, reason=reason):
+                if approved:
+                    console.print("[green]已批准，执行中…[/green]")
+                else:
+                    console.print(f"[red]已拒绝：{reason}[/red]")
             case ToolCallFinished(name=name, content=content, ok=ok):
                 mark = "[green]✓[/green]" if ok else "[red]✗[/red]"
                 brief = (

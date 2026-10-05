@@ -15,9 +15,7 @@ import os
 import sys
 from typing import Any
 
-_INSTALL_HINT = (
-    "Langfuse 已配置但 SDK 未安装：uv sync --package agent-core --extra langfuse"
-)
+_INSTALL_HINT = "Langfuse 已配置但 SDK 未安装：uv sync --package agent-core --extra langfuse"
 
 
 class LangfuseTraceSink:
@@ -38,20 +36,21 @@ class LangfuseTraceSink:
         self._trace: Any = None
         self._step_span: Any = None
         self._model: str | None = None
+        self._approval_spans: dict[str, Any] = {}  # pending_id → span（审批段）
 
     def write(self, record: dict) -> None:
         try:
             self._dispatch(record)
         except Exception as exc:  # 上报失败不反噬业务（docstring 约定）
-            print(f"[langfuse-sink] 上报失败（忽略）: {type(exc).__name__}: {exc}",
-                  file=sys.stderr)
+            print(f"[langfuse-sink] 上报失败（忽略）: {type(exc).__name__}: {exc}", file=sys.stderr)
 
     def close(self) -> None:
         try:
             self._client.flush()
         except Exception as exc:  # pragma: no cover
-            print(f"[langfuse-sink] flush 失败（忽略）: {type(exc).__name__}: {exc}",
-                  file=sys.stderr)
+            print(
+                f"[langfuse-sink] flush 失败（忽略）: {type(exc).__name__}: {exc}", file=sys.stderr
+            )
 
     # ---- 记录 → Langfuse 对象的映射 ----
 
@@ -81,6 +80,21 @@ class LangfuseTraceSink:
                 },
             )
             span.end()
+        elif kind == "approval_pending" and self._trace is not None:
+            span = self._trace.span(
+                name=f"approval:{record.get('tool')}",
+                input=record.get("arguments"),
+                metadata={"risk": record.get("risk"), "call_id": record.get("call_id")},
+            )
+            self._approval_spans[record["pending_id"]] = span
+        elif kind == "approval_resolved" and self._trace is not None:
+            span = self._approval_spans.pop(record.get("pending_id"), None)
+            if span is not None:
+                span.update(
+                    output="approved" if record.get("approved") else "denied",
+                    metadata={"reason": record.get("reason", "")},
+                )
+                span.end()
         elif kind == "step_end" and self._trace is not None:
             usage = record.get("usage") or {}
             gen = self._trace.generation(

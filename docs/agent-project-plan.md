@@ -1,8 +1,8 @@
 # Agent 求职项目 · 启动计划
 
-> 状态：v7（2026-10-05）——M1–M3 已收口（评测常态运维：29 条 case + 瞬态重试 +
-> 提示词加固）；M4 启动：写操作 + HITL 前置设计（第 1 周写操作地基当日完成，
-> 见 §6b；ADR-0005）
+> 状态：v8（2026-10-05）——M1–M3 已收口；M4 进行中：第 1 周写操作地基 +
+> 第 2 周挂起式审批流当日完成（ApprovalPending 事件三端同源 + CLI/API 审批
+> 交互 + 脚本化审批策略评测，见 §6b；ADR-0005/0006）
 > 目标：12 个月内以本项目为核心作品，转入 agent 应用开发岗位
 > 策略：三个深方向（工具设计 / HITL 审批 / 评测体系），每个方向落到可展示的证据——数字、曲线、文章
 
@@ -260,15 +260,29 @@ Python 侧用 uv workspace 管理四个包；依赖方向：`apps` → `packages
 - 产出：写路径全链路（loop → gate → MCP → mutations → SQLite）单测覆盖；
   工具卡 +4 张（同步测试同步扩到双工具面口径）；全仓 130 项离线单测全绿
 
-### 第 2 周 — 审批流原型（CLI/API 可见的待审批交互）
-- [ ] 审批决策从"同步回调"升级为"待审批事件"：ApprovalPending 事件进事件流
-      （trace / SSE / 前端审批卡片同源），会话挂起等待决定
-- [ ] CLI 审批交互：写调用前终端确认（y/n + 展示将要执行的操作与参数）；
-      API 侧审批卡片（前端最小实现）
-- [ ] 拒绝与批准的回填路径：批准 → 执行 → 结果回填；拒绝 → 结构化未执行
-      结果回填，模型如实向用户转述
-- [ ] 评测：批准确率类 case 起步（该批的批、不该批的拒——用脚本化审批策略
-      参评，如"金额超阈值拒绝"）
+### 第 2 周 — 审批流原型（2026-10-05 当日完成；ADR-0006）
+- [x] 审批决策从"同步回调"升级为"待审批事件"：守门 handler 抛 ApprovalSuspended
+      控制流信号，loop 转译为 ApprovalPending / ApprovalResolved 事件进事件流
+      （trace JSONL / SSE / 前端审批卡片三端同源），run 在决策 future 处挂起；
+      其余并行工具调用照常完成不互相阻塞
+- [x] CLI 审批交互（erpilot chat --writes）：rich Panel 展示工具/风险等级/参数
+      + 终端 y/n；API 侧 POST /api/chat/approve 回填决策（SSE 流在 approval_pending
+      处挂起、决策后继续推进）+ 前端审批卡片（批准/拒绝按钮，按 call_id 挂到
+      对应工具调用，protocol.ts 镜像同步）
+- [x] 拒绝与批准的回填路径：批准 → resume 闭包执行真 handler → 结果回填；
+      拒绝 → 结构化未执行结果回填——与第 1 周语义一致，但**等待发生在工具
+      超时保护之外**：人的思考时间不再烧 tool_timeout，续段执行照常享受
+      超时 + 瞬态重试
+- [x] 评测：脚本化审批策略门（ScriptedPolicyGate：低风险额度内秒批、超额度/
+      资金操作秒拒）+ 策略集 3 条（app-01/02 放行路径钉住执行、app-03 拒绝
+      路径防假装）独立 live 模块 + 标注标准 §7.1——**首跑即抓到第 1 周真实
+      缺陷**：桥接层调用 handler 固定 include_writes=False，写工具"能发现
+      不能调用"（AutoDeny 评测到不了执行段所以无感），已修 + 桥接端到端
+      放行回归测试
+- 真实链路预跑：策略集 3/3 + AutoDeny 写集回归 3/3（reports/evals/
+  20261005-124642*.md、20261005-124742*.md，合计成本 ≈¥0.005）
+- 产出：agent_core 挂起协议（ApprovalSuspended + StreamApprovalGate）+ 事件
+  流三端贯通 + 评测策略集；全仓离线单测 152 项全绿，tsc 通过
 
 ### 第 3 周 — 写路径错误自愈 + 幂等
 - [ ] 写路径错误自愈观察开档（error-recovery-log 写路径篇）：invalid_transition /
@@ -310,6 +324,7 @@ Python 侧用 uv workspace 管理四个包；依赖方向：`apps` → `packages
 - [x] M3 第 4 周完成（M3 里程碑收口）：人工标注标准 + 24 条四类 case + pytest 自建 runner（ADR-0004）+ 预算熔断 + Langfuse 双写（本地 JSONL 降级为兜底 sink）+ CI 评测 job + 首份成功率报告（reports/evals/，详见 §6 第 4 周）（2026-10-05）
 - [x] 评测常态运维第 5 周批次（2026-10-05）：runner 瞬态重试 + 系统提示词加固（adv-05 复测通过）+ 补 5 条 case（评测集 24→29 条，详见 §6）
 - [x] M4 第 1 周完成（2026-10-05 当日）：ADR-0005（写操作分层 + 风险分级 + 审批门内建）+ erp_store 写 API ×4（快照价/库存同事务/状态机）+ agent_core 审批门原型（ApprovalGate + guarded）+ mcp_erp 写工具 ×4（默认关闭，writes=True 必须 gate）+ 写操作评测 3 条真实链路预跑通过（详见 §6b）
+- [x] M4 第 2 周完成（2026-10-05 当日）：ADR-0006（挂起式审批事件协议）+ ApprovalPending/Resolved 事件三端同源（trace/SSE/前端卡片）+ CLI 终端审批（--writes）+ API 审批端点 + 脚本化审批策略集 3 条（首跑抓到桥接写工具不可调用的第 1 周缺陷，已修）+ 真实链路预跑 6/6（详见 §6b）
 - [ ] assistant-ui 还是 CopilotKit（M6 前端成型时定；M1–M5 先手写最小 React UI，理解协议层）
 - [ ] Langfuse 真实端到端联调（sink 已就绪并有 fake 单测；待自托管部署后填 keys 验证）
 

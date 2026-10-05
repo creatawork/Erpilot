@@ -34,10 +34,21 @@ def repo(seeded_db) -> ErpRepository:
 # ---- MCP server 工具面 ----
 
 EXPECTED_TOOLS = {
-    "get_order", "list_orders", "get_orders_by_sku", "get_customer_purchases",
-    "get_product", "search_products", "list_products",
-    "get_stock", "compute_quote", "compare_quotes", "list_low_stock",
-    "sales_summary", "top_products", "daily_sales", "stock_valuation",
+    "get_order",
+    "list_orders",
+    "get_orders_by_sku",
+    "get_customer_purchases",
+    "get_product",
+    "search_products",
+    "list_products",
+    "get_stock",
+    "compute_quote",
+    "compare_quotes",
+    "list_low_stock",
+    "sales_summary",
+    "top_products",
+    "daily_sales",
+    "stock_valuation",
     "list_categories",
 }
 
@@ -96,9 +107,7 @@ async def test_get_customer_purchases_aggregates(seeded_db, repo) -> None:
     customer = repo.list_orders(limit=1)[0].customer
     async with Client(create_server(seeded_db)) as client:
         ok = await client.call_tool("get_customer_purchases", {"customer": customer})
-        missing = await client.call_tool(
-            "get_customer_purchases", {"customer": "不存在的客户xyz"}
-        )
+        missing = await client.call_tool("get_customer_purchases", {"customer": "不存在的客户xyz"})
     assert ok.data["order_count"] == repo.count_orders(customer=customer)
     assert ok.data["by_status"] and ok.data["items"]
     assert missing.data["error"]["code"] == "not_found"
@@ -128,17 +137,20 @@ async def test_get_customer_purchases_truncates_items_at_40(tmp_path) -> None:
     init_db(engine)
     with Session(engine) as session:
         for j in range(3):  # 45 个不同 SKU 分三单，全部归到独立客户名下
-            session.add(OrderRow(
-                order_id=f"SO20260101-{j + 1:04d}",
-                customer="测试大户",
-                status=OrderStatus.PENDING_SHIPMENT.value,
-                created_at=datetime(2026, 1, 1) + timedelta(days=j),
-                items=[
-                    OrderItemRow(sku=f"X{i:03d}", name=f"测试品{i:03d}",
-                                 quantity=1, unit_price=10.0 + i)
-                    for i in range(j * 15, (j + 1) * 15)
-                ],
-            ))
+            session.add(
+                OrderRow(
+                    order_id=f"SO20260101-{j + 1:04d}",
+                    customer="测试大户",
+                    status=OrderStatus.PENDING_SHIPMENT.value,
+                    created_at=datetime(2026, 1, 1) + timedelta(days=j),
+                    items=[
+                        OrderItemRow(
+                            sku=f"X{i:03d}", name=f"测试品{i:03d}", quantity=1, unit_price=10.0 + i
+                        )
+                        for i in range(j * 15, (j + 1) * 15)
+                    ],
+                )
+            )
         session.commit()
 
     async with Client(create_server(db)) as client:
@@ -172,9 +184,7 @@ def test_bridge_handler_calls_through_mcp(seeded_db, repo) -> None:
     tools = {t.name: t for t in build_agent_tools(seeded_db)}
     order_id = repo.list_orders(limit=1)[0].order_id
 
-    args = tools["get_order"].params_model.model_validate_json(
-        json.dumps({"order_id": order_id})
-    )
+    args = tools["get_order"].params_model.model_validate_json(json.dumps({"order_id": order_id}))
     result = _run(tools["get_order"].handler(args))
 
     assert result["order_id"] == order_id
@@ -232,9 +242,7 @@ async def test_write_error_contract_via_mcp(seeded_db, repo) -> None:
 
     delivered = repo.list_orders(status=OrderStatus.DELIVERED, limit=1)[0]
     async with Client(create_server(seeded_db, include_writes=True)) as client:
-        bad = await client.call_tool(
-            "cancel_order", {"order_id": delivered.order_id}
-        )
+        bad = await client.call_tool("cancel_order", {"order_id": delivered.order_id})
         missing = await client.call_tool(
             "create_order", {"customer": "张三", "items": [{"sku": "ZZZ999", "quantity": 1}]}
         )
@@ -255,8 +263,7 @@ def test_bridge_writes_with_gate_marks_risk_and_guards(seeded_db, repo) -> None:
     from agent_core.approval import RISK_BATCH_CONFIRM, RISK_SINGLE_CONFIRM, AutoDenyGate
 
     tools = {
-        t.name: t
-        for t in build_agent_tools(seeded_db, writes=True, approval_gate=AutoDenyGate())
+        t.name: t for t in build_agent_tools(seeded_db, writes=True, approval_gate=AutoDenyGate())
     }
     assert set(tools) == EXPECTED_TOOLS | WRITE_TOOLS
     assert tools["create_order"].risk == RISK_SINGLE_CONFIRM
@@ -331,10 +338,12 @@ async def test_agent_loop_queries_real_data_over_mcp(seeded_db, repo) -> None:
         body = json.loads(request.content)
         requests.append(body)
         if any(m["role"] == "tool" for m in body["messages"]):
-            return sse_response([
-                chunk(delta={"content": f"已查到订单 {order.order_id}"}),
-                chunk(usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}),
-            ])
+            return sse_response(
+                [
+                    chunk(delta={"content": f"已查到订单 {order.order_id}"}),
+                    chunk(usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}),
+                ]
+            )
         return sse_response(
             tool_call_chunks("call_1", "get_order", json.dumps({"order_id": order.order_id}))
         )
@@ -349,3 +358,28 @@ async def test_agent_loop_queries_real_data_over_mcp(seeded_db, repo) -> None:
     # 回填进历史的工具结果是真库数据
     tool_msg = next(m for m in requests[1]["messages"] if m["role"] == "tool")
     assert json.loads(tool_msg["content"])["customer"] == order.customer
+
+
+def test_bridge_write_tool_executes_on_approval(tmp_path, seeded_db, repo) -> None:
+    """批准路径端到端：门放行 → 桥接调用 → 真实建单（回归 app-01 缺陷：
+    调用侧 server 未带 include_writes，写工具"能发现不能调用"）。"""
+    from agent_core.approval import AutoApproveGate
+
+    tools = {
+        t.name: t
+        for t in build_agent_tools(seeded_db, writes=True, approval_gate=AutoApproveGate())
+    }
+    sku = repo.list_products(limit=1)[0].sku
+    args = tools["create_order"].params_model.model_validate_json(
+        json.dumps({"customer": "测试客户", "items": [{"sku": sku, "quantity": 2}]})
+    )
+    result = _run(tools["create_order"].handler(args))
+
+    assert "error" not in result
+    assert result["status"] == "pending_payment" or result["status"] == "待付款"
+    assert result["result_note"]
+    # 库存同事务扣减
+    stock = _run(tools["get_stock"].handler(
+        tools["get_stock"].params_model.model_validate_json(json.dumps({"sku": sku}))
+    ))
+    assert stock["quantity"] >= 0

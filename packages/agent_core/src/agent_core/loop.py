@@ -17,16 +17,23 @@
   供 trace 逐轮记录与 SSE/前端的"第 n 轮"展示；ToolCallFinished 补 call_id，
   消费方可把 started/finished 精确配对
 - 事件消费：trace.py（JSONL 落盘）、cli.py（rich 渲染）、apps/api（SSE 转发）
+
+M4 第 2 周增强（计划 §6b，ADR-0006）：
+- 挂起式审批：守门工具抛出的 ApprovalSuspended 控制流信号在本层转成
+  ApprovalPending / ApprovalResolved 事件——事件流消费方（CLI 确认 / API
+  审批卡片）经审批门 respond() 回填决策前，run 在此挂起；决策等待不占
+  tool_timeout，续段执行照常享受超时与瞬态重试保护
 """
 
 import asyncio
 import json
 import time
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 
 from openai.types.chat import ChatCompletionMessageParam
 
+from agent_core.approval import ApprovalDecision, ApprovalSuspended
 from agent_core.context import ContextPolicy, compress_messages
 from agent_core.llm import LLMClient, StreamEnd, TextDelta, ToolCall, Usage
 from agent_core.tools import Tool
@@ -47,9 +54,7 @@ class ToolRetryPolicy:
 
 def _error_payload(kind: str, message: str) -> str:
     """回填给模型的错误信息格式 v1：结构化 JSON，模型可稳定解析。"""
-    return json.dumps(
-        {"error": {"type": kind, "message": message}}, ensure_ascii=False
-    )
+    return json.dumps({"error": {"type": kind, "message": message}}, ensure_ascii=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,8 +103,42 @@ class LoopEnd:
     completed: bool = True
 
 
+@dataclass(frozen=True, slots=True)
+class ApprovalPending:
+    """一次写调用等待人工审批（M4 第 2 周，ADR-0005/0006）。
+
+    事件产出后本轮 run 在此挂起：决策经审批门 respond(pending_id, decision)
+    回填前，后续事件不再产出。call_id 与 ToolCallStarted.call.id 配对；
+    pending_id 是消费方回填决策的凭据。
+    """
+
+    call_id: str
+    pending_id: str
+    tool: str
+    risk: str
+    arguments: dict
+
+
+@dataclass(frozen=True, slots=True)
+class ApprovalResolved:
+    """审批决策已回填：批准 → 工具即将执行；拒绝 → 回填未执行结果。"""
+
+    call_id: str
+    pending_id: str
+    tool: str
+    approved: bool
+    reason: str = ""
+
+
 AgentEvent = (
-    TextDelta | StepStarted | StepEnd | ToolCallStarted | ToolCallFinished | LoopEnd
+    TextDelta
+    | StepStarted
+    | StepEnd
+    | ToolCallStarted
+    | ToolCallFinished
+    | ApprovalPending
+    | ApprovalResolved
+    | LoopEnd
 )
 
 
@@ -156,9 +195,7 @@ class AgentLoop:
         self._tools = {t.name: t for t in tools}
         self._config = config or LoopConfig()
 
-    async def run(
-        self, messages: list[ChatCompletionMessageParam]
-    ) -> AsyncIterator[AgentEvent]:
+    async def run(self, messages: list[ChatCompletionMessageParam]) -> AsyncIterator[AgentEvent]:
         """跑一轮 agent 循环，逐个产出 AgentEvent。
 
         中间产生的 assistant / tool 消息会**就地追加**进传入的 messages；
@@ -197,35 +234,94 @@ class AgentLoop:
 
             messages.append(_assistant_toolcall_message("".join(parts), calls))
             # 本轮所有工具调用并行执行：Started 按调用顺序产出，Finished 按**完成
-            # 顺序**产出（asyncio.as_completed），结果消息按调用顺序回填历史
+            # 顺序**产出，结果消息按调用顺序回填历史。守门工具可能抛出
+            # ApprovalSuspended（挂起式审批，ADR-0006）：此类调用不计 Finished，
+            # 待其余调用收尾后逐个进审批挂起段（发 Pending 事件 → 等决策 → 发
+            # Resolved → 在超时保护下执行续段 → 补 Finished）
             for call in calls:
                 yield ToolCallStarted(call=call)
             outcomes: list[tuple[str, bool]] = [("", True)] * len(calls)
-            pending = [self._execute_indexed(i, c) for i, c in enumerate(calls)]
-            for done in asyncio.as_completed(pending):
-                index, content, ok = await done
+            suspended: dict[int, ApprovalSuspended] = {}
+
+            results = [self._execute_tagged(i, c) for i, c in enumerate(calls)]
+            for done in asyncio.as_completed(results):
+                index, content, ok, signal = await done
+                if signal is not None:  # 挂起段统一在所有调用收尾后处理
+                    suspended[index] = signal
+                    continue
                 outcomes[index] = (content, ok)
                 yield ToolCallFinished(
-                    call_id=calls[index].id, name=calls[index].name, content=content, ok=ok
+                    call_id=calls[index].id,
+                    name=calls[index].name,
+                    content=content,
+                    ok=ok,
+                )
+            for index in sorted(suspended):  # 挂起段：会话在此等待人工决策
+                signal = suspended[index]
+                signal.call_id = calls[index].id
+                assert signal.decision is not None  # StreamApprovalGate.suspend 保证
+                yield ApprovalPending(
+                    call_id=calls[index].id,
+                    pending_id=signal.pending_id,
+                    tool=signal.request.tool,
+                    risk=signal.request.risk,
+                    arguments=signal.request.arguments,
+                )
+                decision = await self._await_decision(signal)
+                yield ApprovalResolved(
+                    call_id=calls[index].id,
+                    pending_id=signal.pending_id,
+                    tool=signal.request.tool,
+                    approved=decision.approved,
+                    reason=decision.reason,
+                )
+                # 续段执行与普通工具调用同一套超时 + 瞬态重试；人的思考时间在
+                # 挂起等待里，不占 tool_timeout（ADR-0006）
+                content, ok = await self._guarded_exec(
+                    lambda: signal.resume(decision)  # noqa: B023 —— 迭代内立即 await 消费
+                )
+                outcomes[index] = (content, ok)
+                yield ToolCallFinished(
+                    call_id=calls[index].id,
+                    name=calls[index].name,
+                    content=content,
+                    ok=ok,
                 )
             for call, (content, _ok) in zip(calls, outcomes, strict=True):
-                messages.append(
-                    {"role": "tool", "tool_call_id": call.id, "content": content}
-                )
+                messages.append({"role": "tool", "tool_call_id": call.id, "content": content})
         yield LoopEnd(steps=self._config.max_steps, usage=total_usage, completed=False)
 
-    async def _execute_indexed(
+    async def _await_decision(self, signal: ApprovalSuspended) -> ApprovalDecision:
+        """等待审批决策回填；run 被取消时一并取消 future，不留悬空 waiter。"""
+        assert signal.decision is not None
+        try:
+            return await signal.decision
+        except asyncio.CancelledError:
+            if not signal.decision.done():
+                signal.decision.cancel()
+            raise
+
+    async def _execute_tagged(
         self, index: int, call: ToolCall
-    ) -> tuple[int, str, bool]:
+    ) -> tuple[int, str, bool, ApprovalSuspended | None]:
+        """挂起信号转普通返回值——as_completed 的完成序语义得以保留。"""
+        try:
+            i, content, ok = await self._execute_indexed(index, call)
+            return i, content, ok, None
+        except ApprovalSuspended as signal:
+            return index, "", False, signal
+
+    async def _execute_indexed(self, index: int, call: ToolCall) -> tuple[int, str, bool]:
         content, ok = await self._execute(call)
         return index, content, ok
 
     async def _execute(self, call: ToolCall) -> tuple[str, bool]:
-        """执行一次工具调用，永不抛出：异常按策略重试，最终转成结构化错误回填。
+        """执行一次工具调用，永不抛出（挂起信号除外）：异常按策略重试后回填。
 
         错误格式 v1：{"error": {"type": "validation|unknown_tool|timeout|execution",
         "message": ...}}。validation / unknown_tool 是确定性错误，立即回填让模型
         修正参数或改道；timeout / execution 视为瞬态，按 ToolRetryPolicy 重试。
+        ApprovalSuspended 是控制流信号不是错误：向上抛给 run() 进审批挂起段。
         """
         tool = self._tools.get(call.name)
         if tool is None:
@@ -234,7 +330,13 @@ class AgentLoop:
             args = tool.params_model.model_validate_json(call.arguments)
         except Exception as exc:
             return _error_payload("validation", f"参数校验失败，请修正参数后重试：{exc}"), False
+        return await self._guarded_exec(lambda: tool.handler(args))
 
+    async def _guarded_exec(self, fn: Callable[[], Awaitable[object]]) -> tuple[str, bool]:
+        """执行一次可等待调用：结果转字符串，超时/异常按重试策略处理。
+
+        ApprovalSuspended 原样上抛——它是审批挂起的控制流信号，不是工具错误。
+        """
         policy = self._config.retry
         last_error = ""
         for attempt in range(policy.retries + 1):
@@ -242,7 +344,9 @@ class AgentLoop:
                 await asyncio.sleep(policy.backoff * attempt)
             kind = ""
             try:
-                result = await asyncio.wait_for(tool.handler(args), self._config.tool_timeout)
+                result = await asyncio.wait_for(fn(), self._config.tool_timeout)
+            except ApprovalSuspended:
+                raise
             except TimeoutError:
                 kind = "timeout"
                 retried = f"已重试 {attempt} 次" if attempt else "未重试"

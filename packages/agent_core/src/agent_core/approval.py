@@ -1,15 +1,29 @@
 """审批门（HITL 前置，ADR-0005）：写工具执行前的硬约束拦截点。
 
-两条不变量（第 2–3 周把 review 从同步回调升级为待审批事件时不动）：
+两条不变量（第 2 周把 review 从同步回调升级为待审批事件时不动）：
 
-1. 带 risk 的工具必须过门——guarded() 在工具层包装，agent loop 与组合层
-   零改动；"是否执行"不交给模型裁量，提示词是软约束，门是硬约束
+1. 带 risk 的工具必须过门——guarded() 在工具层包装，loop 与组合层不产生
+   第二个拦截点；"是否执行"不交给模型裁量，提示词是软约束，门是硬约束
 2. 拒绝时回填结构化"未执行"结果——模型据此如实转述，绝不假装已执行
+
+两种门形态（guarded 按 gate 能力自动分派，对调用方透明）：
+
+- 同步回调门（review）：AutoDenyGate / AutoApproveGate / 脚本化策略门——
+  决策立即返回，适合无真人的评测与自动化环境
+- 挂起式事件门（suspend，M4 第 2 周）：StreamApprovalGate 把待审批请求
+  打包成 ApprovalSuspended 控制流信号抛给 loop，loop 转成 ApprovalPending
+  事件进事件流（trace / SSE / 前端审批卡片同源）并挂起等待；消费方拿到
+  事件后经门 respond() 回填决策，批准则执行、拒绝则回填"未执行"。
+  决策等待发生在 loop 层、工具超时之外——人的思考时间不该烧掉
+  tool_timeout，超时只计量真正的执行段
 """
 
+import asyncio
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
+from uuid import uuid4
 
 from pydantic import BaseModel
 
@@ -38,7 +52,45 @@ class ApprovalDecision:
 
 
 class ApprovalGate(Protocol):
+    """同步回调门协议：review 立即返回决策（评测/自动化环境）。"""
+
     async def review(self, request: ApprovalRequest) -> ApprovalDecision: ...
+
+
+class SuspendingGate(Protocol):
+    """挂起式事件门协议（M4 第 2 周）：真人审批走的形态。
+
+    suspend 由 guarded 的守门 handler 调用：门登记待审批请求并返回控制流
+    信号（handler 将其抛出）；resume 封装了"决策到达后的续段"——批准则
+    执行真 handler，拒绝则回填未执行结果，由 loop 在工具超时保护下调用。
+    """
+
+    def suspend(
+        self,
+        request: ApprovalRequest,
+        resume: Callable[[ApprovalDecision], Awaitable[object]],
+    ) -> "ApprovalSuspended": ...
+
+
+class ApprovalSuspended(Exception):
+    """守门工具等待人工决策的控制流信号：handler 抛出，loop 捕获后挂起会话。
+
+    pending_id 由门生成，是消费方回填决策的凭据（gate.respond(pending_id)）；
+    call_id 由 loop 捕获时回填，供事件流消费方与 ToolCallStarted 配对。
+    """
+
+    def __init__(
+        self,
+        request: ApprovalRequest,
+        resume: Callable[[ApprovalDecision], Awaitable[object]],
+        pending_id: str,
+    ) -> None:
+        super().__init__(request.tool)
+        self.request = request
+        self.resume = resume
+        self.pending_id = pending_id
+        self.call_id = ""
+        self.decision: asyncio.Future[ApprovalDecision] | None = None
 
 
 def _denial_payload(decision: ApprovalDecision) -> str:
@@ -50,20 +102,42 @@ def _denial_payload(decision: ApprovalDecision) -> str:
     )
 
 
-def guarded(tool: Tool, gate: ApprovalGate) -> Tool:
+def guarded(tool: Tool, gate: ApprovalGate | SuspendingGate) -> Tool:
     """给带 risk 的工具包上审批门；risk=None 的只读工具原样返回。
 
-    同名同 schema——对模型透明，对 loop 透明：拦截发生在 handler 内，
-    先 review 后执行；拒绝时返回未执行结果而不抛异常。
+    同名同 schema——对模型透明，对 loop 透明：同步门在 handler 内先 review
+    后执行；挂起门抛 ApprovalSuspended 由 loop 接管。拒绝一律返回未执行
+    结果而不抛异常（挂起门的拒绝回填在 resume 闭包里，同样不抛）。
     """
     if tool.risk is None:
         return tool
 
-    async def handler(args: BaseModel) -> object:
-        request = ApprovalRequest(
-            tool=tool.name, risk=tool.risk or "", arguments=args.model_dump()
+    suspend = getattr(gate, "suspend", None)
+    if suspend is not None:  # 挂起式事件门：等待决策发生在 loop 层
+
+        async def suspending_handler(args: BaseModel) -> object:
+            request = ApprovalRequest(
+                tool=tool.name, risk=tool.risk or "", arguments=args.model_dump()
+            )
+
+            async def resume(decision: ApprovalDecision) -> object:
+                if not decision.approved:
+                    return _denial_payload(decision)
+                return await tool.handler(args)
+
+            raise suspend(request, resume)
+
+        return Tool(
+            name=tool.name,
+            description=tool.description,
+            params_model=tool.params_model,
+            handler=suspending_handler,
+            risk=tool.risk,
         )
-        decision = await gate.review(request)
+
+    async def handler(args: BaseModel) -> object:
+        request = ApprovalRequest(tool=tool.name, risk=tool.risk or "", arguments=args.model_dump())
+        decision = await gate.review(request)  # type: ignore[attr-defined]
         if not decision.approved:
             return _denial_payload(decision)
         return await tool.handler(args)
@@ -75,6 +149,43 @@ def guarded(tool: Tool, gate: ApprovalGate) -> Tool:
         handler=handler,
         risk=tool.risk,
     )
+
+
+class StreamApprovalGate:
+    """挂起式人工审批门（M4 第 2 周）：待审批请求进事件流，决策由消费方回填。
+
+    生命周期：suspend 登记 waiter 并把信号抛给 loop → loop 发 ApprovalPending
+    事件后 await 信号上的 future（会话挂起）→ 消费方（CLI 确认 / API 审批
+    卡片）拿 pending_id 调 respond() 落定决策 → loop 醒来按决策执行或回填。
+    respond 对未知/已决的 pending_id 返回 False，不抛异常。
+    """
+
+    def __init__(self) -> None:
+        self._waiters: dict[str, asyncio.Future[ApprovalDecision]] = {}
+
+    def suspend(
+        self,
+        request: ApprovalRequest,
+        resume: Callable[[ApprovalDecision], Awaitable[object]],
+    ) -> ApprovalSuspended:
+        pending_id = uuid4().hex[:12]
+        future: asyncio.Future[ApprovalDecision] = asyncio.get_running_loop().create_future()
+        self._waiters[pending_id] = future
+        signal = ApprovalSuspended(request=request, resume=resume, pending_id=pending_id)
+        signal.decision = future
+        return signal
+
+    def respond(self, pending_id: str, decision: ApprovalDecision) -> bool:
+        """回填一次审批决策；返回 False 表示 pending_id 不存在或已决。"""
+        future = self._waiters.get(pending_id)
+        if future is None or future.done():
+            return False
+        future.set_result(decision)
+        return True
+
+    def discard(self, pending_id: str) -> None:
+        """消费方放弃等待（会话取消/断连）时清理 waiter，防字典泄漏。"""
+        self._waiters.pop(pending_id, None)
 
 
 class AutoDenyGate:
@@ -94,6 +205,6 @@ class AutoApproveGate:
         return ApprovalDecision(approved=True)
 
 
-def guard_tools(tools: list[Tool], gate: ApprovalGate) -> list[Tool]:
+def guard_tools(tools: list[Tool], gate: ApprovalGate | SuspendingGate) -> list[Tool]:
     """按工具遍历包门：只读原样、带 risk 的过门（组合层装配入口）。"""
     return [guarded(t, gate) for t in tools]

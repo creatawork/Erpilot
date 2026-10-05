@@ -74,9 +74,7 @@ async def build_agent_tools_async(
     （无 gate 不给写工具，ADR-0005 决策 4）。
     """
     if writes and approval_gate is None:
-        raise ValueError(
-            "writes=True 必须提供 approval_gate：写工具不过审批门就不该存在"
-        )
+        raise ValueError("writes=True 必须提供 approval_gate：写工具不过审批门就不该存在")
     db_path = Path(db_path)
     if not db_path.is_file():
         raise FileNotFoundError(
@@ -86,7 +84,10 @@ async def build_agent_tools_async(
     server = create_server(db_path, include_writes=writes)
     async with Client(server) as client:
         mcp_tools = await client.list_tools()
-    tools = [_convert(t.name, t.description or "", t.input_schema, db_path) for t in mcp_tools]
+    tools = [
+        _convert(t.name, t.description or "", t.input_schema, db_path, writes)
+        for t in mcp_tools
+    ]
     if writes:
         tools = [_with_risk_and_gate(t, approval_gate) for t in tools]  # type: ignore[arg-type]
     return tools
@@ -108,15 +109,21 @@ def _with_risk_and_gate(tool: Tool, gate: ApprovalGate | None) -> Tool:
     return guarded(marked, gate)
 
 
-def _convert(name: str, description: str, schema: dict[str, Any], db_path: Path) -> Tool:
+def _convert(
+    name: str, description: str, schema: dict[str, Any], db_path: Path, writes: bool
+) -> Tool:
+    """把一个 MCP 工具转成 agent Tool；调用侧必须以同一 writes 口径建 server。
+
+    （缺陷修复，M4 第 2 周 app-01 评测发现）：工具发现用 include_writes=writes，
+    调用 handler 此前却固定 include_writes=False——写工具"能发现不能调用"
+    （Unknown tool），AutoDeny 评测永远到不了执行段所以没暴露。
+    """
     params_model = _params_model(name, schema)
 
     async def handler(args: BaseModel, _name: str = name) -> object:
-        server = create_server(db_path)
+        server = create_server(db_path, include_writes=writes)
         async with Client(server) as client:
-            result = await client.call_tool(
-                _name, args.model_dump(mode="json", exclude_none=True)
-            )
+            result = await client.call_tool(_name, args.model_dump(mode="json", exclude_none=True))
         return _extract(result)
 
     return Tool(name=name, description=description, params_model=params_model, handler=handler)

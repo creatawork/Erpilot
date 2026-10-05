@@ -27,6 +27,22 @@ export interface UsagePayload {
   total_tokens: number;
 }
 
+export interface ApprovalPendingPayload {
+  call_id: string;
+  pending_id: string;
+  tool: string;
+  risk: string;
+  arguments: Record<string, unknown>;
+}
+
+export interface ApprovalResolvedPayload {
+  call_id: string;
+  pending_id: string;
+  tool: string;
+  approved: boolean;
+  reason: string;
+}
+
 export interface DonePayload {
   steps: number;
   completed: boolean;
@@ -42,6 +58,8 @@ export type SSEEvent =
   | { event: "delta"; data: { text: string } }
   | { event: "tool_started"; data: ToolStartedPayload }
   | { event: "tool_finished"; data: ToolFinishedPayload }
+  | { event: "approval_pending"; data: ApprovalPendingPayload }
+  | { event: "approval_resolved"; data: ApprovalResolvedPayload }
   | { event: "done"; data: DonePayload }
   | { event: "error"; data: { message: string } };
 
