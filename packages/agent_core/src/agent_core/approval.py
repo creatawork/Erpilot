@@ -91,6 +91,7 @@ class ApprovalSuspended(Exception):
         self.pending_id = pending_id
         self.call_id = ""
         self.decision: asyncio.Future[ApprovalDecision] | None = None
+        self.cleanup: Callable[[], None] | None = None
 
 
 def _denial_payload(decision: ApprovalDecision) -> str:
@@ -133,6 +134,7 @@ def guarded(tool: Tool, gate: ApprovalGate | SuspendingGate) -> Tool:
             params_model=tool.params_model,
             handler=suspending_handler,
             risk=tool.risk,
+            retry_safe=tool.retry_safe,
         )
 
     async def handler(args: BaseModel) -> object:
@@ -148,6 +150,7 @@ def guarded(tool: Tool, gate: ApprovalGate | SuspendingGate) -> Tool:
         params_model=tool.params_model,
         handler=handler,
         risk=tool.risk,
+        retry_safe=tool.retry_safe,
     )
 
 
@@ -173,6 +176,7 @@ class StreamApprovalGate:
         self._waiters[pending_id] = future
         signal = ApprovalSuspended(request=request, resume=resume, pending_id=pending_id)
         signal.decision = future
+        signal.cleanup = lambda: self.discard(pending_id)
         return signal
 
     def respond(self, pending_id: str, decision: ApprovalDecision) -> bool:
@@ -181,11 +185,14 @@ class StreamApprovalGate:
         if future is None or future.done():
             return False
         future.set_result(decision)
+        self._waiters.pop(pending_id, None)
         return True
 
     def discard(self, pending_id: str) -> None:
         """消费方放弃等待（会话取消/断连）时清理 waiter，防字典泄漏。"""
-        self._waiters.pop(pending_id, None)
+        future = self._waiters.pop(pending_id, None)
+        if future is not None and not future.done():
+            future.cancel()
 
 
 class AutoDenyGate:

@@ -235,6 +235,9 @@ async def test_approval_flow_via_chat_service(tmp_path) -> None:
     assert names[-1] == "LoopEnd"
     finished = next(e for e in events if type(e).__name__ == "ToolCallFinished")
     assert json.loads(finished.content) == {"created": "A1001"}
+    from agent_core.demo_tools import WRITES_PROMPT
+
+    assert requests[0]["messages"][0]["content"] == WRITES_PROMPT
 
 
 async def test_encode_approval_events() -> None:
@@ -289,3 +292,22 @@ async def test_approve_unknown_pending_id_returns_ok_false(tmp_path) -> None:
     async with httpx2.AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.post("/api/chat/approve", json={"pending_id": "nope", "approved": True})
     assert resp.json() == {"ok": False}
+
+
+async def test_closing_service_stream_releases_approval_and_repairs_history(tmp_path):
+    from agent_core.loop import ApprovalPending
+    from erpilot_api.service import ChatService
+
+    gate = StreamApprovalGate()
+    service = ChatService(
+        client_factory=lambda: make_client(_write_handler([])),
+        model="glm-5.3-flash", trace_dir=tmp_path,
+        tools=[guarded(_create_order_api, gate)], approval_gate=gate,
+    )
+    stream = service.stream_run("s1", "write")
+    async for event in stream:
+        if isinstance(event, ApprovalPending):
+            await stream.aclose()
+            break
+    assert not gate._waiters
+    assert [m["role"] for m in service._sessions["s1"]] == ["system"]

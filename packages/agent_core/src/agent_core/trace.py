@@ -116,8 +116,9 @@ class JsonlTraceRecorder:
             step = 0
             step_text: list[str] = []
             pending: dict[str, tuple[float, ToolCall]] = {}
+            stream = agent.run(messages)
             try:
-                async for event in agent.run(messages):
+                async for event in stream:
                     match event:
                         case StepStarted(step=s):
                             step = s
@@ -218,6 +219,7 @@ class JsonlTraceRecorder:
                 )
                 raise
             finally:
+                await stream.aclose()
                 for sink in self._sinks:
                     sink.close()
 

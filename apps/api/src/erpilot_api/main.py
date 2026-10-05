@@ -98,8 +98,9 @@ def create_app(
         async def generate() -> AsyncIterator[dict[str, str]]:
             yield sse_frame("start", {"session_id": session_id, "model": service.model})
             t0 = time.perf_counter()
+            stream = service.stream_run(session_id, req.message)
             try:
-                async for event in service.stream_run(session_id, req.message):
+                async for event in stream:
                     encoded = encode_event(event)
                     if encoded is not None:
                         yield sse_frame(*encoded)
@@ -117,6 +118,8 @@ def create_app(
                         )
             except Exception as exc:  # LLM 网络错误 / 缺 API key 等：流内报错后收口
                 yield sse_frame("error", {"message": str(exc)})
+            finally:
+                await stream.aclose()
 
         return EventSourceResponse(generate())
 

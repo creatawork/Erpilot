@@ -29,6 +29,7 @@ import asyncio
 import json
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from contextlib import aclosing
 from dataclasses import dataclass, field
 
 from openai.types.chat import ChatCompletionMessageParam
@@ -240,56 +241,64 @@ class AgentLoop:
             # Resolved → 在超时保护下执行续段 → 补 Finished）
             for call in calls:
                 yield ToolCallStarted(call=call)
-            outcomes: list[tuple[str, bool]] = [("", True)] * len(calls)
-            suspended: dict[int, ApprovalSuspended] = {}
+            async with aclosing(self._tool_round(calls, messages)) as events:
+                async for event in events:
+                    yield event
+        yield LoopEnd(steps=self._config.max_steps, usage=total_usage, completed=False)
 
-            results = [self._execute_tagged(i, c) for i, c in enumerate(calls)]
-            for done in asyncio.as_completed(results):
+    async def _tool_round(self, calls: list[ToolCall], messages: list) -> AsyncIterator[AgentEvent]:
+        outcomes: list[tuple[str, bool]] = [("", True)] * len(calls)
+        suspended: dict[int, ApprovalSuspended] = {}
+        tasks = [asyncio.create_task(self._execute_tagged(i, c)) for i, c in enumerate(calls)]
+        try:
+            for done in asyncio.as_completed(tasks):
                 index, content, ok, signal = await done
-                if signal is not None:  # 挂起段统一在所有调用收尾后处理
+                if signal is not None:
                     suspended[index] = signal
                     continue
                 outcomes[index] = (content, ok)
-                yield ToolCallFinished(
-                    call_id=calls[index].id,
-                    name=calls[index].name,
-                    content=content,
-                    ok=ok,
-                )
-            for index in sorted(suspended):  # 挂起段：会话在此等待人工决策
+                yield ToolCallFinished(calls[index].id, calls[index].name, content, ok)
+            for index in sorted(suspended):
                 signal = suspended[index]
                 signal.call_id = calls[index].id
-                assert signal.decision is not None  # StreamApprovalGate.suspend 保证
+                assert signal.decision is not None
                 yield ApprovalPending(
-                    call_id=calls[index].id,
-                    pending_id=signal.pending_id,
-                    tool=signal.request.tool,
-                    risk=signal.request.risk,
+                    call_id=signal.call_id, pending_id=signal.pending_id,
+                    tool=signal.request.tool, risk=signal.request.risk,
                     arguments=signal.request.arguments,
                 )
                 decision = await self._await_decision(signal)
                 yield ApprovalResolved(
-                    call_id=calls[index].id,
-                    pending_id=signal.pending_id,
-                    tool=signal.request.tool,
-                    approved=decision.approved,
-                    reason=decision.reason,
+                    call_id=signal.call_id, pending_id=signal.pending_id,
+                    tool=signal.request.tool, approved=decision.approved, reason=decision.reason,
                 )
-                # 续段执行与普通工具调用同一套超时 + 瞬态重试；人的思考时间在
-                # 挂起等待里，不占 tool_timeout（ADR-0006）
                 content, ok = await self._guarded_exec(
-                    lambda: signal.resume(decision)  # noqa: B023 —— 迭代内立即 await 消费
+                    lambda: signal.resume(decision),  # noqa: B023
+                    retry_safe=self._tools[calls[index].name].retry_safe,
                 )
                 outcomes[index] = (content, ok)
-                yield ToolCallFinished(
-                    call_id=calls[index].id,
-                    name=calls[index].name,
-                    content=content,
-                    ok=ok,
-                )
+                yield ToolCallFinished(calls[index].id, calls[index].name, content, ok)
             for call, (content, _ok) in zip(calls, outcomes, strict=True):
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": content})
-        yield LoopEnd(steps=self._config.max_steps, usage=total_usage, completed=False)
+        finally:
+            # 包括尚未产出 Pending 的同轮请求，以及消费方在 yield 处关闭生成器。
+            for task in tasks:
+                if task.done():
+                    self._release_task_approval(task)
+                else:
+                    task.add_done_callback(self._release_task_approval)
+                    task.cancel()
+            # AnyIO 的断连取消会反复打断 await；审批清理必须先同步完成，
+            # 未收尾任务由 done callback 兜底，不能依赖 gather 后的代码。
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    @staticmethod
+    def _release_task_approval(task: asyncio.Task) -> None:
+        if task.cancelled() or task.exception() is not None:
+            return
+        signal = task.result()[3]
+        if signal is not None and signal.cleanup is not None:
+            signal.cleanup()
 
     async def _await_decision(self, signal: ApprovalSuspended) -> ApprovalDecision:
         """等待审批决策回填；run 被取消时一并取消 future，不留悬空 waiter。"""
@@ -330,16 +339,20 @@ class AgentLoop:
             args = tool.params_model.model_validate_json(call.arguments)
         except Exception as exc:
             return _error_payload("validation", f"参数校验失败，请修正参数后重试：{exc}"), False
-        return await self._guarded_exec(lambda: tool.handler(args))
+        return await self._guarded_exec(
+            lambda: tool.handler(args), retry_safe=tool.risk is None or tool.retry_safe,
+        )
 
-    async def _guarded_exec(self, fn: Callable[[], Awaitable[object]]) -> tuple[str, bool]:
+    async def _guarded_exec(
+        self, fn: Callable[[], Awaitable[object]], *, retry_safe: bool = True
+    ) -> tuple[str, bool]:
         """执行一次可等待调用：结果转字符串，超时/异常按重试策略处理。
 
         ApprovalSuspended 原样上抛——它是审批挂起的控制流信号，不是工具错误。
         """
         policy = self._config.retry
         last_error = ""
-        for attempt in range(policy.retries + 1):
+        for attempt in range((policy.retries if retry_safe else 0) + 1):
             if attempt:
                 await asyncio.sleep(policy.backoff * attempt)
             kind = ""

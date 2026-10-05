@@ -7,15 +7,16 @@ trace 本地 JSONL。持久化（Postgres checkpointer）与远程可观测（La
 """
 
 import asyncio
+import copy
 import os
 from collections.abc import AsyncIterator, Callable, Sequence
 from pathlib import Path
 from typing import Any
 
 from agent_core.approval import ApprovalDecision
-from agent_core.demo_tools import SYSTEM_PROMPT
+from agent_core.demo_tools import system_prompt
 from agent_core.llm import LLMClient
-from agent_core.loop import AgentEvent, AgentLoop, LoopConfig
+from agent_core.loop import AgentEvent, AgentLoop, LoopConfig, LoopEnd
 from agent_core.tools import Tool
 from agent_core.trace import JsonlTraceRecorder, TraceSink, new_trace_path
 
@@ -72,7 +73,9 @@ class ChatService:
 
     def _session_messages(self, session_id: str) -> list:
         if session_id not in self._sessions:
-            self._sessions[session_id] = [{"role": "system", "content": SYSTEM_PROMPT}]
+            self._sessions[session_id] = [
+                {"role": "system", "content": system_prompt(any(t.risk for t in self._tools))}
+            ]
         return self._sessions[session_id]
 
     def start_run(
@@ -92,6 +95,17 @@ class ChatService:
     async def stream_run(self, session_id: str, message: str) -> AsyncIterator[AgentEvent]:
         """带会话锁地跑一轮：调用方直接迭代事件，串行与历史维护都在这层。"""
         async with self.lock(session_id):
+            previous = copy.deepcopy(self._session_messages(session_id))
             agent, messages, recorder = self.start_run(session_id, message)
-            async for event in recorder.run(agent, messages):
-                yield event
+            stream = recorder.run(agent, messages)
+            finished = False
+            try:
+                async for event in stream:
+                    if isinstance(event, LoopEnd):
+                        finished = True
+                    yield event
+            finally:
+                await stream.aclose()
+                if not finished:
+                    # 不保留缺少 tool 回填的半轮历史，后续请求仍符合模型协议。
+                    messages[:] = previous

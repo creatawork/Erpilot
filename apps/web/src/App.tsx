@@ -7,6 +7,7 @@ import {
   type ToolFinishedPayload,
   type ToolStartedPayload,
   streamChat,
+  submitApproval,
 } from "./protocol";
 
 interface ToolItem {
@@ -46,6 +47,8 @@ export default function App() {
   const [status, setStatus] = useState<string>("");
   const [error, setError] = useState<string>("");
   const [busy, setBusy] = useState(false);
+  const [submittingApprovals, setSubmittingApprovals] = useState<Set<string>>(new Set());
+  const approvalInFlight = useRef(new Set<string>());
   const listRef = useRef<HTMLDivElement>(null);
 
   const scrollToEnd = () => {
@@ -56,12 +59,18 @@ export default function App() {
 
   const respondApproval = useCallback(
     async (pendingId: string, approved: boolean) => {
-      const resp = await fetch("/api/chat/approve", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ pending_id: pendingId, approved }),
-      });
-      if (!resp.ok) setError(`审批回填失败：HTTP ${resp.status}`);
+      if (approvalInFlight.current.has(pendingId)) return;
+      approvalInFlight.current.add(pendingId);
+      setSubmittingApprovals(new Set(approvalInFlight.current));
+      setError("");
+      try {
+        await submitApproval(pendingId, approved);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "审批提交失败，请重试。");
+      } finally {
+        approvalInFlight.current.delete(pendingId);
+        setSubmittingApprovals(new Set(approvalInFlight.current));
+      }
     },
     [],
   );
@@ -208,12 +217,14 @@ export default function App() {
                           </span>
                           <button
                             className="approve"
+                            disabled={submittingApprovals.has(tool.approval.pending_id)}
                             onClick={() => void respondApproval(tool.approval!.pending_id, true)}
                           >
                             批准
                           </button>
                           <button
                             className="deny"
+                            disabled={submittingApprovals.has(tool.approval.pending_id)}
                             onClick={() => void respondApproval(tool.approval!.pending_id, false)}
                           >
                             拒绝

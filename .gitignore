@@ -26,3 +26,4 @@ node_modules/
 
 # 工具生成（ZCode 环境的忽略规则镜像）
 .zcodeignore
+apps/web/.test-build/

@@ -19,7 +19,7 @@ from pathlib import Path
 
 import typer
 from agent_core.approval import ApprovalDecision, StreamApprovalGate
-from agent_core.demo_tools import DEFAULT_PROMPT, DEMO_TOOLS, SYSTEM_PROMPT
+from agent_core.demo_tools import DEFAULT_PROMPT, DEMO_TOOLS, system_prompt
 from agent_core.dotenv import find_dotenv, load_dotenv
 from agent_core.llm import LLMClient, LLMConfig, TextDelta
 from agent_core.loop import (
@@ -112,7 +112,7 @@ def chat(
     tools = _resolve_tools(tools_mode, writes=writes, gate=gate)
     agent = AgentLoop(LLMClient(config), tools=tools)
     messages: list = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt(any(t.risk for t in tools))},
         {"role": "user", "content": text},
     ]
     trace_path = new_trace_path(trace_dir, config.model)

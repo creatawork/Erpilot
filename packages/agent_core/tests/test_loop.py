@@ -527,3 +527,84 @@ async def test_parallel_round_mixes_read_and_suspended_write() -> None:
     # 历史按调用顺序回填：fast_report 是 call_r，写结果跟在后面
     tool_msgs = [m for m in requests[1]["messages"] if m["role"] == "tool"]
     assert len(tool_msgs) == 2
+
+
+@pytest.mark.parametrize("close_early", [False, True])
+async def test_approval_waiters_released_on_completion_and_close(close_early):
+    gate = StreamApprovalGate()
+    agent = AgentLoop(
+        make_client(_write_handler_pair([])), tools=[guarded(create_order_t, gate)]
+    )
+    stream = agent.run([{"role": "user", "content": "write"}])
+    async for event in stream:
+        if isinstance(event, ApprovalPending):
+            if close_early:
+                await stream.aclose()
+                break
+            gate.respond(event.pending_id, ApprovalDecision(True))
+    assert not gate._waiters
+
+
+async def test_non_replayable_write_does_not_retry_uncertain_result():
+    from agent_core.llm import ToolCall
+    from agent_core.tools import Tool
+
+    calls = []
+
+    async def write(args):
+        calls.append(args.sku)
+        raise ConnectionError("result lost after commit")
+
+    original = create_order_t
+    write_tool = Tool(
+        "write", "write", original.params_model, write, risk=RISK_SINGLE_CONFIRM,
+    )
+    loop = AgentLoop(None, tools=[write_tool], config=LoopConfig(
+        retry=ToolRetryPolicy(retries=2, backoff=0),
+    ))
+    _, ok = await loop._execute(ToolCall(id="w1", name="write", arguments='{"sku":"A1"}'))
+    assert not ok
+    assert calls == ["A1"]
+
+
+async def test_anyio_disconnect_releases_approval_while_slow_tool_is_pending():
+    import anyio
+    from agent_core.llm import ToolCall
+
+    gate = StreamApprovalGate()
+    agent = AgentLoop(None, tools=[guarded(create_order_t, gate), slow_report])
+
+    async def consume():
+        async for _ in agent._tool_round([
+            ToolCall(id="w1", name="create_order_t", arguments='{"sku":"A1"}'),
+            ToolCall(id="r1", name="slow_report", arguments="{}"),
+        ], []):
+            pass
+
+    async with anyio.create_task_group() as group:
+        group.start_soon(consume)
+        await anyio.sleep(0.01)
+        group.cancel_scope.cancel()
+    assert not gate._waiters
+
+
+async def test_cancellation_releases_all_parallel_approvals():
+    gate = StreamApprovalGate()
+
+    def handler(request):
+        return sse_response(multi_tool_chunks([
+            ("w1", "create_order_t", '{"sku":"A1001"}'),
+            ("w2", "create_order_t", '{"sku":"B2002"}'),
+        ]))
+
+    agent = AgentLoop(make_client(handler), tools=[guarded(create_order_t, gate)])
+    stream = agent.run([{"role": "user", "content": "write"}])
+    async for event in stream:
+        if isinstance(event, ApprovalPending):
+            waiting = asyncio.create_task(anext(stream))
+            await asyncio.sleep(0)
+            waiting.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await waiting
+            break
+    assert not gate._waiters

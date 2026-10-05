@@ -30,6 +30,7 @@ class Tool:
     # 风险等级（ADR-0005）：None = 只读放行；写工具由 mcp_erp 标注
     # batch_confirm / single_confirm，审批门（approval.guarded）据此拦截
     risk: str | None = None
+    retry_safe: bool = False  # 写工具必须由适配层提供稳定幂等键，才能自动重试
 
     def openai_schema(self) -> dict[str, Any]:
         """OpenAI tools 参数格式：{"type": "function", "function": {...}}。"""

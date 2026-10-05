@@ -63,6 +63,19 @@ export type SSEEvent =
   | { event: "done"; data: DonePayload }
   | { event: "error"; data: { message: string } };
 
+export async function submitApproval(pendingId: string, approved: boolean): Promise<void> {
+  const resp = await fetch("/api/chat/approve", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ pending_id: pendingId, approved }),
+  });
+  if (!resp.ok) throw new Error(`审批提交失败：HTTP ${resp.status}`);
+  const result: unknown = await resp.json();
+  if (!result || typeof result !== "object" || !("ok" in result) || result.ok !== true) {
+    throw new Error("审批请求已失效或已处理，请重新发起操作。");
+  }
+}
+
 function parseBlock(block: string): SSEEvent | null {
   let event: string | null = null;
   let data: string | null = null;
