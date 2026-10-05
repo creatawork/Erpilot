@@ -52,7 +52,16 @@ cd apps/web && npm install && npm run dev      # http://localhost:5173
 
 # MCP server 独立进程（stdio，给外部 MCP 客户端）
 uv run --package mcp-erp python -m mcp_erp serve
+
+# 真实链路评测（24 条 case：单工具/多步/边界/对抗；烧 token，默认排除）
+uv run pytest packages/evals -m eval
+ERPILOT_EVAL_BUDGET=0.05 uv run pytest packages/evals -m eval   # 限定预算（元）
+# 报告落 reports/evals/；标注标准见 docs/eval-annotation-guide.md
 ```
+
+Langfuse 双写（可选）：`.env` 配置 `LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY /
+LANGFUSE_HOST` 后，CLI / API / 评测的 trace 在本地 JSONL 兜底之外同步上报远程
+（需 `uv sync --package agent-core --extra langfuse`）；未配置时零成本纯本地。
 
 M1 各周验收入口：第 1–3 周为 `python -m agent_core`（最简演示，多步任务 + 并行工具）；
 第 4 周为上述 `erpilot` CLI 与 API/前端链路。
@@ -69,7 +78,8 @@ M1 各周验收入口：第 1–3 周为 `python -m agent_core`（最简演示�
 
 ## 文章与决策
 
-- 所有架构决策记录在 `docs/adr/`（当前：0001 技术栈、0002 手写 loop 优先、0003 本地 JSONL trace 先行），范围冻结与启动计划见 [`docs/agent-project-plan.md`](docs/agent-project-plan.md)
+- 所有架构决策记录在 `docs/adr/`（当前：0001 技术栈、0002 手写 loop 优先、0003 本地 JSONL trace 先行、0004 pytest 自建评测 runner），范围冻结与启动计划见 [`docs/agent-project-plan.md`](docs/agent-project-plan.md)
+- 评测集：人工标注标准 [`docs/eval-annotation-guide.md`](docs/eval-annotation-guide.md) + 工具卡 [`docs/tool-cards.md`](docs/tool-cards.md) + 错误自愈记录 [`docs/error-recovery-log.md`](docs/error-recovery-log.md)
 - 系列文章发布于个人站点 [Vie](https://vie-vibe.cn)，文稿随仓库维护：
   1. 《手写 Agent Loop：从一次 API 调用到多步任务》—— [`docs/articles/01-handwritten-agent-loop.md`](docs/articles/01-handwritten-agent-loop.md)
 - 撰写规则见 [`docs/articles/writing-rules.md`](docs/articles/writing-rules.md)（禁虚构、客观口吻、技术正确性、发布前核对清单）

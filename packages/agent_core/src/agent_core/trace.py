@@ -19,6 +19,10 @@
     async for event in recorder.run(agent, messages):
         ...
 
+M3 起本模块是可观测双写中的**本地兜底 sink**（ADR-0003 收尾）：构造时可传
+额外 `sinks`（如 observability.LangfuseTraceSink），每条记录写入本地文件的
+同时转发给远程 sink，远程不可达时本地留档永远在。
+
 回放：`erpilot replay traces/xxx.jsonl`（cli.py），或直接读本模块的
 load_records / format_transcript。M1 验收线"一次完整任务的 trace 可回放，
 成本/延迟有数字"即由此承担。
@@ -31,6 +35,7 @@ from collections.abc import AsyncIterator, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Protocol
 from uuid import uuid4
 
 from openai.types.chat import ChatCompletionMessageParam
@@ -59,12 +64,26 @@ def _usage_dict(usage: Usage | None) -> dict | None:
     return asdict(usage) if usage is not None else None
 
 
-class JsonlTraceRecorder:
-    """把一次 agent.run 的事件流写成 JSONL；对事件只是旁观，不做任何改写。"""
+class TraceSink(Protocol):
+    """trace 记录的下游去向（如 Langfuse）；write 不抛异常是实现的自我要求。"""
 
-    def __init__(self, path: Path, model: str) -> None:
+    def write(self, record: dict) -> None: ...
+
+    def close(self) -> None: ...
+
+
+class JsonlTraceRecorder:
+    """把一次 agent.run 的事件流写成 JSONL；对事件只是旁观，不做任何改写。
+
+    sinks：额外的远程 sink（Langfuse 双写）；每条记录本地落盘的同时转发，
+    run 结束（含异常路径）后逐个 close。sink 抛异常只影响远程那一侧——
+    先写本地再转发，观测管道故障不反噬业务链路。
+    """
+
+    def __init__(self, path: Path, model: str, sinks: Sequence[TraceSink] = ()) -> None:
         self._path = path
         self._model = model
+        self._sinks = list(sinks)
 
     async def run(
         self, agent: AgentLoop, messages: list[ChatCompletionMessageParam]
@@ -77,6 +96,9 @@ class JsonlTraceRecorder:
             def write(record: dict) -> None:
                 f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
                 f.flush()
+                for sink in self._sinks:
+                    sink.write(record)
+
 
             write({
                 "type": "run_start",
@@ -149,6 +171,9 @@ class JsonlTraceRecorder:
                     "duration_ms": round((time.perf_counter() - started) * 1000, 1),
                 })
                 raise
+            finally:
+                for sink in self._sinks:
+                    sink.close()
 
 
 def new_trace_path(trace_dir: Path, model: str) -> Path:

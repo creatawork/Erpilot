@@ -7,6 +7,7 @@ trace 本地 JSONL。持久化（Postgres checkpointer）与远程可观测（La
 """
 
 import asyncio
+import os
 from collections.abc import AsyncIterator, Callable, Sequence
 from pathlib import Path
 
@@ -14,7 +15,22 @@ from agent_core.demo_tools import SYSTEM_PROMPT
 from agent_core.llm import LLMClient
 from agent_core.loop import AgentEvent, AgentLoop, LoopConfig
 from agent_core.tools import Tool
-from agent_core.trace import JsonlTraceRecorder, new_trace_path
+from agent_core.trace import JsonlTraceRecorder, TraceSink, new_trace_path
+
+
+def _sinks_from_env() -> list[TraceSink]:
+    """Langfuse keys 齐全 → 双写远程 sink；否则本地 JSONL 独挑（ADR-0003）。"""
+    if not (
+        os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_SECRET_KEY")
+    ):
+        return []
+    try:
+        from agent_core.observability import LangfuseTraceSink
+
+        return [LangfuseTraceSink()]
+    except Exception as exc:  # SDK 未装 / 配置错：本地兜底仍在，服务不因此起不来
+        print(f"[trace] Langfuse 双写未启用：{exc}")
+        return []
 
 
 class ChatService:
@@ -32,6 +48,7 @@ class ChatService:
         self._trace_dir = trace_dir
         self._tools = list(tools)
         self._loop_config = loop_config or LoopConfig()
+        self._sinks = _sinks_from_env()
         self._client: LLMClient | None = None
         self._sessions: dict[str, list] = {}
         self._locks: dict[str, asyncio.Lock] = {}
@@ -61,7 +78,7 @@ class ChatService:
         agent = AgentLoop(self._client, tools=self._tools, config=self._loop_config)
         trace_path = new_trace_path(self._trace_dir, self._model)
         self.last_trace = trace_path
-        recorder = JsonlTraceRecorder(trace_path, self._model)
+        recorder = JsonlTraceRecorder(trace_path, self._model, sinks=self._sinks)
         return agent, messages, recorder
 
     async def stream_run(

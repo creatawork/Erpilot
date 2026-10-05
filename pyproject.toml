@@ -29,6 +29,10 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["packages", "apps"]
-addopts = "-q"
+addopts = "-q -m 'not eval'"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+markers = [
+    # 真实链路评测（packages/evals/tests/test_evals_live.py）：显式 -m eval 运行，烧 token
+    "eval: 真实链路评测，需 API key，有预算熔断（ERPILOT_EVAL_BUDGET）",
+]

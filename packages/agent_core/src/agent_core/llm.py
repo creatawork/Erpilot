@@ -121,6 +121,11 @@ class LLMClient:
         self._config = config
         self._client = client or AsyncOpenAI(api_key=config.api_key, base_url=config.base_url)
 
+    @property
+    def config(self) -> LLMConfig:
+        """只读配置（evals runner 按 config.model 计量成本）。"""
+        return self._config
+
     async def stream_chat(
         self,
         messages: Sequence[ChatCompletionMessageParam],

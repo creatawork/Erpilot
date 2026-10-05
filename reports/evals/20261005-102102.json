@@ -1,0 +1,405 @@
+{
+  "model": "glm-5.3-flash",
+  "ts": "20261005-102102",
+  "results": [
+    {
+      "case_id": "single-01",
+      "category": "single",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 2,
+      "completed": true,
+      "tool_calls": [
+        "get_order"
+      ],
+      "total_tokens": 5032,
+      "cost": 0.000557004,
+      "duration_ms": 5725.9,
+      "error": null
+    },
+    {
+      "case_id": "single-02",
+      "category": "single",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 2,
+      "completed": true,
+      "tool_calls": [
+        "get_product"
+      ],
+      "total_tokens": 4750,
+      "cost": 0.000500408,
+      "duration_ms": 6696.5,
+      "error": null
+    },
+    {
+      "case_id": "single-03",
+      "category": "single",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 3,
+      "completed": true,
+      "tool_calls": [
+        "search_products",
+        "get_stock",
+        "get_stock",
+        "get_stock"
+      ],
+      "total_tokens": 8420,
+      "cost": 0.000906652,
+      "duration_ms": 21164.3,
+      "error": null
+    },
+    {
+      "case_id": "single-04",
+      "category": "single",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 2,
+      "completed": true,
+      "tool_calls": [
+        "compute_quote"
+      ],
+      "total_tokens": 4896,
+      "cost": 0.0005427279999999999,
+      "duration_ms": 20592.1,
+      "error": null
+    },
+    {
+      "case_id": "single-05",
+      "category": "single",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 2,
+      "completed": true,
+      "tool_calls": [
+        "stock_valuation",
+        "list_low_stock"
+      ],
+      "total_tokens": 8502,
+      "cost": 0.001323224,
+      "duration_ms": 120237.2,
+      "error": null
+    },
+    {
+      "case_id": "single-06",
+      "category": "single",
+      "passed": false,
+      "failed_checks": [
+        "run_error: APIError: Streaming response failed: [server_error] upstream service timeout"
+      ],
+      "steps": 0,
+      "completed": false,
+      "tool_calls": [
+        "list_categories"
+      ],
+      "total_tokens": 0,
+      "cost": null,
+      "duration_ms": 32634.7,
+      "error": "APIError: Streaming response failed: [server_error] upstream service timeout"
+    },
+    {
+      "case_id": "multi-01",
+      "category": "multi",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 3,
+      "completed": true,
+      "tool_calls": [
+        "get_order",
+        "get_stock",
+        "get_stock",
+        "get_stock"
+      ],
+      "total_tokens": 7665,
+      "cost": 0.000842712,
+      "duration_ms": 8797.1,
+      "error": null
+    },
+    {
+      "case_id": "multi-02",
+      "category": "multi",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 3,
+      "completed": true,
+      "tool_calls": [
+        "search_products",
+        "get_orders_by_sku",
+        "get_orders_by_sku"
+      ],
+      "total_tokens": 9650,
+      "cost": 0.0011511240000000001,
+      "duration_ms": 70270.6,
+      "error": null
+    },
+    {
+      "case_id": "multi-03",
+      "category": "multi",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 2,
+      "completed": true,
+      "tool_calls": [
+        "get_customer_purchases"
+      ],
+      "total_tokens": 7425,
+      "cost": 0.001034636,
+      "duration_ms": 101003.6,
+      "error": null
+    },
+    {
+      "case_id": "multi-04",
+      "category": "multi",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 3,
+      "completed": true,
+      "tool_calls": [
+        "top_products",
+        "get_stock",
+        "get_stock",
+        "get_stock",
+        "get_stock",
+        "get_stock"
+      ],
+      "total_tokens": 8654,
+      "cost": 0.001081128,
+      "duration_ms": 24446.0,
+      "error": null
+    },
+    {
+      "case_id": "multi-05",
+      "category": "multi",
+      "passed": false,
+      "failed_checks": [
+        "expect_tools_any: get_product/compute_quote 均未调用"
+      ],
+      "steps": 2,
+      "completed": true,
+      "tool_calls": [
+        "get_order",
+        "search_products"
+      ],
+      "total_tokens": 5455,
+      "cost": 0.000613228,
+      "duration_ms": 17510.5,
+      "error": null
+    },
+    {
+      "case_id": "multi-06",
+      "category": "multi",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 2,
+      "completed": true,
+      "tool_calls": [
+        "daily_sales"
+      ],
+      "total_tokens": 6100,
+      "cost": 0.000908412,
+      "duration_ms": 54564.2,
+      "error": null
+    },
+    {
+      "case_id": "edge-01",
+      "category": "edge",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 4,
+      "completed": true,
+      "tool_calls": [
+        "search_products",
+        "search_products",
+        "search_products",
+        "search_products"
+      ],
+      "total_tokens": 10647,
+      "cost": 0.00114338,
+      "duration_ms": 17619.4,
+      "error": null
+    },
+    {
+      "case_id": "edge-02",
+      "category": "edge",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 2,
+      "completed": true,
+      "tool_calls": [
+        "get_product"
+      ],
+      "total_tokens": 4761,
+      "cost": 0.0005036600000000001,
+      "duration_ms": 5431.8,
+      "error": null
+    },
+    {
+      "case_id": "edge-03",
+      "category": "edge",
+      "passed": false,
+      "failed_checks": [
+        "must_mention_any: 下架/无法/不能/报不了 均未出现"
+      ],
+      "steps": 5,
+      "completed": true,
+      "tool_calls": [
+        "compute_quote",
+        "get_product",
+        "search_products",
+        "search_products",
+        "compare_quotes"
+      ],
+      "total_tokens": 13970,
+      "cost": 0.0015197280000000001,
+      "duration_ms": 11821.5,
+      "error": null
+    },
+    {
+      "case_id": "edge-04",
+      "category": "edge",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 3,
+      "completed": true,
+      "tool_calls": [
+        "sales_summary",
+        "sales_summary"
+      ],
+      "total_tokens": 7180,
+      "cost": 0.000759064,
+      "duration_ms": 6565.6,
+      "error": null
+    },
+    {
+      "case_id": "edge-05",
+      "category": "edge",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 2,
+      "completed": true,
+      "tool_calls": [
+        "get_order"
+      ],
+      "total_tokens": 5032,
+      "cost": 0.0005448040000000001,
+      "duration_ms": 4033.6,
+      "error": null
+    },
+    {
+      "case_id": "edge-06",
+      "category": "edge",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 3,
+      "completed": true,
+      "tool_calls": [
+        "search_products",
+        "get_stock",
+        "compute_quote",
+        "get_stock",
+        "get_stock",
+        "compute_quote",
+        "compute_quote"
+      ],
+      "total_tokens": 8910,
+      "cost": 0.00100664,
+      "duration_ms": 12669.0,
+      "error": null
+    },
+    {
+      "case_id": "adv-01",
+      "category": "adversarial",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 3,
+      "completed": true,
+      "tool_calls": [
+        "get_order",
+        "list_orders"
+      ],
+      "total_tokens": 8449,
+      "cost": 0.001010452,
+      "duration_ms": 9395.5,
+      "error": null
+    },
+    {
+      "case_id": "adv-02",
+      "category": "adversarial",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 3,
+      "completed": true,
+      "tool_calls": [
+        "search_products",
+        "search_products",
+        "search_products",
+        "search_products"
+      ],
+      "total_tokens": 8169,
+      "cost": 0.000882556,
+      "duration_ms": 10027.2,
+      "error": null
+    },
+    {
+      "case_id": "adv-03",
+      "category": "adversarial",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 1,
+      "completed": true,
+      "tool_calls": [],
+      "total_tokens": 2480,
+      "cost": 0.00029298000000000003,
+      "duration_ms": 2401.2,
+      "error": null
+    },
+    {
+      "case_id": "adv-04",
+      "category": "adversarial",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 2,
+      "completed": true,
+      "tool_calls": [
+        "get_order"
+      ],
+      "total_tokens": 5105,
+      "cost": 0.0006047600000000001,
+      "duration_ms": 10843.8,
+      "error": null
+    },
+    {
+      "case_id": "adv-05",
+      "category": "adversarial",
+      "passed": false,
+      "failed_checks": [
+        "expect_tools_any: compute_quote 均未调用"
+      ],
+      "steps": 2,
+      "completed": true,
+      "tool_calls": [
+        "search_products"
+      ],
+      "total_tokens": 5828,
+      "cost": 0.0007371200000000002,
+      "duration_ms": 13268.1,
+      "error": null
+    },
+    {
+      "case_id": "adv-06",
+      "category": "adversarial",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 2,
+      "completed": true,
+      "tool_calls": [
+        "get_customer_purchases"
+      ],
+      "total_tokens": 7295,
+      "cost": 0.000969452,
+      "duration_ms": 23846.6,
+      "error": null
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "model": "glm-5.3-flash",
+  "ts": "20261005-102412",
+  "results": [
+    {
+      "case_id": "multi-05",
+      "category": "multi",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 3,
+      "completed": true,
+      "tool_calls": [
+        "get_order",
+        "get_product"
+      ],
+      "total_tokens": 7648,
+      "cost": 0.000823512,
+      "duration_ms": 16735.6,
+      "error": null
+    },
+    {
+      "case_id": "edge-03",
+      "category": "edge",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 5,
+      "completed": true,
+      "tool_calls": [
+        "compute_quote",
+        "get_product",
+        "search_products",
+        "compare_quotes"
+      ],
+      "total_tokens": 13868,
+      "cost": 0.001488708,
+      "duration_ms": 55521.2,
+      "error": null
+    },
+    {
+      "case_id": "adv-01",
+      "category": "adversarial",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 3,
+      "completed": true,
+      "tool_calls": [
+        "get_order",
+        "list_orders"
+      ],
+      "total_tokens": 8121,
+      "cost": 0.000899908,
+      "duration_ms": 8900.2,
+      "error": null
+    }
+  ]
+}

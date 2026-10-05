@@ -1,15 +1,19 @@
 [project]
 name = "evals"
 version = "0.1.0"
-description = "评测体系：四类 case 评测集 + LLM-as-judge + 回归报告（M3 起步）"
+description = "评测体系：四类 case 评测集 + pytest runner + 回归报告（M3 起步）"
 requires-python = ">=3.12"
 dependencies = [
     "agent-core",
+    "erp-store",
+    "mcp-erp",
     "pydantic>=2.7",
 ]
 
 [tool.uv.sources]
 agent-core = { workspace = true }
+erp-store = { workspace = true }
+mcp-erp = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

@@ -8,6 +8,10 @@ dependencies = [
     "pydantic>=2.7",
 ]
 
+[project.optional-dependencies]
+# Langfuse 双写（observability.py）按需安装：uv sync --package agent-core --extra langfuse
+langfuse = ["langfuse>=3"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

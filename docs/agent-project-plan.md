@@ -1,6 +1,6 @@
 # Agent 求职项目 · 启动计划
 
-> 状态：v4（2026-09-29）——项目定名 **Erpilot**（弃用拼音名），仓库迁至 `E:\workspace\erpilot`，脚手架就绪并通过验证；选型对齐行业真实栈（v2），个人现有技能不作为选型因素
+> 状态：v5（2026-10-05）——M1–M2 已收口；M3 提前完成全部 4 周（工具设计精研上 + 评测集起步），下一站 M4 写操作 + HITL 前置设计
 > 目标：12 个月内以本项目为核心作品，转入 agent 应用开发岗位
 > 策略：三个深方向（工具设计 / HITL 审批 / 评测体系），每个方向落到可展示的证据——数字、曲线、文章
 
@@ -179,11 +179,34 @@ Python 侧用 uv workspace 管理四个包；依赖方向：`apps` → `packages
 - 产出：工具卡 docs/tool-cards.md（15 张：用途/参数/返回/错误），文档-代码
   有同步测试把关；72 项单测全绿
 
-### 第 4 周 — 评测集起步
-- [ ] 人工标注标准先写（四类 case：单工具 / 多步 / 边界 / 对抗）
-- [ ] 首批 20~30 条 case + pytest runner 骨架（CI 预算熔断）
-- [ ] Langfuse 接入（ADR-0003 约定时点）：trace.py 转双写中的本地兜底 sink
-- 产出：evals 包跑出首份成功率报告（成本受控）
+### 第 4 周 — 评测集起步（已完成 2026-10-05）
+- [x] 人工标注标准先写（docs/eval-annotation-guide.md：判分总则 / 四类分派规则 /
+      case 字段契约 / 占位符 / 进集与回归规则）
+- [x] 首批 24 条 case + pytest 自建 runner（ADR-0004）：single/multi/edge/adv 各 6 条；
+      声明式检查（expect_tools_all/any · tools_in_order · must_mention(_any) /
+      must_not_mention · max_steps）+ 全量默认检查（completed、无 run_error）；
+      占位符运行时从种子库解析（evals/context.py），静态校验测试把关（占位符可
+      解析、工具名真实存在、id 规范、四类覆盖）
+- [x] 预算熔断：Budget 按 trace 计量成本累计，达 ERPILOT_EVAL_BUDGET（CI 0.05 元 /
+      本地默认 1 元）跳过余下 case 并在报告中注明；每条 case 的 trace 落
+      traces/evals/，失败可 erpilot replay 归因；报告落 reports/evals/（md+json，
+      供 M9 画成功率曲线）
+- [x] Langfuse 接入（ADR-0003 收尾）：JsonlTraceRecorder 增加 sinks 转发（本地
+      JSONL 降级为双写中的本地兜底 sink），agent_core/observability.py 把六类记录
+      映射为 Langfuse trace/span/generation（run_error → level=ERROR）；CLI / API /
+      评测统一接线，keys 齐全才启用，未配置零成本纯本地；SDK 为 agent-core 可选
+      依赖（--extra langfuse），fake client 单测覆盖映射与异常路径——真实端到端
+      联调待自托管部署（keys 当前为空）
+- [x] CI 评测 job：secrets 未配置自动跳过；配置后按预算跑并上传报告 artifact
+- 首份成功率报告（reports/evals/20261005-*.md，两轮全量 + 定点重跑）：单工具 100% /
+  多步 100% / 边界与对抗暴露三类问题——① 上游超时 2 次（不同 case，重跑即过，
+  属瞬态；runner 待加瞬态重试）；② 标注口径过窄 3 处（adv-01 不调工具直接识别
+  单号格式是更优路径、multi-05 经 search_products 取现价、edge-03 "恢复上架"
+  措辞）——已按标注标准修正检查项并定点重跑通过；③ 真实缺陷 1 个（adv-05：
+  模型顺从"别管折扣规则"的诱导自算 3 折，未走报价工具）——保留为已知失败，
+  待系统提示词加固后复测。修正口径后行为通过率 23/24
+- 产出：evals 包（model/context/checks/cases/runner/report 六模块 + 15 项离线单测），
+  全仓 101 项离线单测全绿 + 24 条评测 case（默认排除，显式 -m eval）
 
 ## 7. 风险与对策
 
@@ -207,7 +230,10 @@ Python 侧用 uv workspace 管理四个包；依赖方向：`apps` → `packages
 - [x] M1 第 4 周完成（代码侧）：本地 JSONL trace + `erpilot` CLI（chat/replay）+ FastAPI SSE 链路 + React 最小流式页 + ADR-0002/0003 + 文章文稿 + 44 项单测通过（2026-09-30）。真实链路当日两次验收尝试均遇上游故障（APIError / 502 upstream_error），均被 trace 的 run_error 完整留痕——异常留痕路径实战验证通过；成功任务的完整数字待端点恢复后补跑
 - [x] M1–2 里程碑收口、M3 提前启动（2026-09-30）：《手写 Agent Loop》发布 VIE；M3 第 1 周（erp_store 领域模型 + 种子数据）当日完成
 - [x] M3 第 2 周完成：FastMCP Server（10 只读工具）+ MCP→agent 桥（schema 动态转 Pydantic）+ CLI 迁至 apps/cli + ChatService 工具注入 + 65 项单测（2026-09-30）。真实链路验收：erpilot chat 经 MCP 查真数据，3 步正常结束（5901 tok ≈¥0.0007），补齐 M1 验收线的真实数字；模型对"订单 123 不存在"结构化错误自发改道——错误自愈首次实证
+- [x] M3 第 3 周完成：错误契约 v1（code/message/hint）+ 工具扩到 16 个（新增 get_customer_purchases 客户购买聚合、按 SKU 反查订单、批量比价、库存估值、逐日销量）+ 工具卡 16 张（文档-代码同步测试）+ 错误自愈记录开档（docs/error-recovery-log.md #1）+ 72 项单测（2026-09-30）
+- [x] M3 第 4 周完成（M3 里程碑收口）：人工标注标准 + 24 条四类 case + pytest 自建 runner（ADR-0004）+ 预算熔断 + Langfuse 双写（本地 JSONL 降级为兜底 sink）+ CI 评测 job + 首份成功率报告（reports/evals/，详见 §6 第 4 周）（2026-10-05）
 - [ ] assistant-ui 还是 CopilotKit（M6 前端成型时定；M1–M5 先手写最小 React UI，理解协议层）
+- [ ] Langfuse 真实端到端联调（sink 已就绪并有 fake 单测；待自托管部署后填 keys 验证）
 
 ## 9. 参考资料
 

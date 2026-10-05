@@ -1,0 +1,24 @@
+{
+  "model": "glm-5.3-flash",
+  "ts": "20261005-100952",
+  "results": [
+    {
+      "case_id": "edge-03",
+      "category": "edge",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 5,
+      "completed": true,
+      "tool_calls": [
+        "compute_quote",
+        "search_products",
+        "list_products",
+        "compute_quote"
+      ],
+      "total_tokens": 16474,
+      "cost": 0.0017828040000000002,
+      "duration_ms": 75910.9,
+      "error": null
+    }
+  ]
+}

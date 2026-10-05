@@ -11,6 +11,7 @@ M3 第 2 周起 CLI 默认经 MCP 桥消费真数据（mcp_erp.server）；--too
 """
 
 import asyncio
+import os
 from pathlib import Path
 
 import typer
@@ -44,6 +45,21 @@ def _resolve_tools(mode: str) -> list[Tool]:
         raise typer.Exit(1) from None
 
 
+def _trace_sinks() -> list:
+    """Langfuse 双写（ADR-0003 收尾）：keys 齐全才启用，失败只告警不阻断。"""
+    if not (
+        os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_SECRET_KEY")
+    ):
+        return []
+    try:
+        from agent_core.observability import LangfuseTraceSink
+
+        return [LangfuseTraceSink()]
+    except Exception as exc:
+        err_console.print(f"[yellow]Langfuse 双写未启用（本地 trace 照常）：{exc}[/yellow]")
+        return []
+
+
 @app.command()
 def chat(
     # typer 的参数声明必须就地调用 Argument/Option（B008 豁免）
@@ -68,11 +84,14 @@ def chat(
         {"role": "user", "content": text},
     ]
     trace_path = new_trace_path(trace_dir, config.model)
-    recorder = JsonlTraceRecorder(trace_path, config.model)
+    sinks = _trace_sinks()
+    recorder = JsonlTraceRecorder(trace_path, config.model, sinks=sinks)
 
     console.print(
         f"[dim]模型 {config.model} · 工具 {'MCP 真数据' if tools_mode == 'mcp' else 'demo'}"
-        f" × {len(tools)} · trace {trace_path}[/dim]\n"
+        f" × {len(tools)} · trace {trace_path}"
+        + (" · Langfuse 双写" if sinks else "")
+        + "[/dim]\n"
     )
     console.print(text, style="bold cyan", markup=False, soft_wrap=True)
     console.print()
