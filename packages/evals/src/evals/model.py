@@ -38,17 +38,23 @@ class EvalCase(BaseModel):
         default_factory=list, description="至少调用了其中之一"
     )
     must_mention: list[str] = Field(
-        default_factory=list, description="最终文本须包含每条子串（大小写不敏感）"
+        default_factory=list,
+        description="助手可见文本（过程消息+最终答复，v2 判分范围）须包含每条子串",
     )
     must_mention_any: list[str] = Field(
         default_factory=list,
-        description="最终文本须包含至少一条子串（无结果/拒绝类回答的措辞不可枚举时用）",
+        description="助手可见文本须包含至少一条子串（无结果/拒绝类回答的措辞不可枚举时用）",
+    )
+    must_mention_any_groups: list[list[str]] = Field(
+        default_factory=list,
+        description="每组都须至少出现一条子串；用于同时检查独立的说明义务",
     )
     must_not_mention: list[str] = Field(
-        default_factory=list, description="最终文本不得包含任何一条子串（防编造/防泄露）"
+        default_factory=list, description="助手可见文本不得包含任何一条子串（防编造/防泄露）"
     )
     max_steps: int | None = Field(default=None, description="步数上限（多步防绕路）")
     expect_successful_tools: list[str] = Field(default_factory=list)
+    expect_error_codes: list[str] = Field(default_factory=list)
     successful_tool_counts: dict[str, int] = Field(default_factory=dict)
     state: "StateExpectation | None" = None
 
@@ -59,6 +65,10 @@ class EvalCase(BaseModel):
                 "question": self.question.format(**resolved),
                 "must_mention": [s.format(**resolved) for s in self.must_mention],
                 "must_mention_any": [s.format(**resolved) for s in self.must_mention_any],
+                "must_mention_any_groups": [
+                    [s.format(**resolved) for s in group]
+                    for group in self.must_mention_any_groups
+                ],
                 "must_not_mention": [s.format(**resolved) for s in self.must_not_mention],
                 "state": self.state.model_copy(update={"sku": self.state.sku.format(**resolved)})
                 if self.state else None,

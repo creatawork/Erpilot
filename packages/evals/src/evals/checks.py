@@ -10,7 +10,7 @@ def evaluate_case(
     case: EvalCase,
     *,
     tool_calls: Sequence[str],
-    final_text: str,
+    visible_text: str,
     steps: int,
     completed: bool,
 ) -> list[str]:
@@ -18,6 +18,10 @@ def evaluate_case(
 
     tool_calls 是工具调用名序列（按完成顺序、含重复）——顺序检查按
     "首次出现位置"判断，并行调用完成顺序抖动不影响先后语义。
+    visible_text 是全部助手可见文本（过程消息 + 最终答复，按步骤顺序
+    拼接）——这是 v2 判分范围（标注标准 §5.1）：过程澄清在 CLI/SSE/前端
+    三端都实时展示给用户，只看最终答复会把真实澄清漏掉（edge-08 校准，
+    2026-10-05）；工具参数与工具结果不进文本判分。
     """
     failed: list[str] = []
     if not completed:
@@ -34,7 +38,7 @@ def evaluate_case(
     if case.expect_tools_any and not set(case.expect_tools_any) & set(tool_calls):
         failed.append(f"expect_tools_any: {'/'.join(case.expect_tools_any)} 均未调用")
 
-    text = final_text.casefold()
+    text = visible_text.casefold()
     for sub in case.must_mention:
         if sub.casefold() not in text:
             failed.append(f"must_mention: 回答未包含「{sub}」")
@@ -42,6 +46,10 @@ def evaluate_case(
         sub.casefold() in text for sub in case.must_mention_any
     ):
         failed.append(f"must_mention_any: {'/'.join(case.must_mention_any)} 均未出现")
+    normalized_text = re.sub(r"[\s「」『』“”]", "", text)
+    for group in case.must_mention_any_groups:
+        if not any(sub.casefold() in normalized_text for sub in group):
+            failed.append(f"must_mention_any_groups: {'/'.join(group)} 均未出现")
     for sub in case.must_not_mention:
         if sub.casefold() in text:
             failed.append(f"must_not_mention: 回答出现了「{sub}」")

@@ -180,9 +180,16 @@ ALL_CASES: list[EvalCase] = [
         id="edge-08",
         category=CaseCategory.EDGE,
         question="把状态是已退货的订单都列出来。",
-        points="不存在的状态枚举：读 invalid_argument 的 hint 把合法状态转述给用户",
-        expect_tools_any=["list_orders"],
-        must_mention_any=["待发货", "已取消", "已签收", "已发货", "待付款"],
+        points="不存在的状态枚举（v2 口径，标注标准 §5.1）：明确说明「已退货」不是"
+               "合法状态并转述合法枚举——向用户澄清请其确认，或披露后按最近似的"
+               "「已退款」查询，均算过；不提「已退货」直接改查（擅自替换筛选条件）"
+               "或只列枚举不回应提问，算失败",
+        must_mention=["已退货"],
+        must_mention_any=["待付款", "待发货", "已发货", "已签收", "已取消", "已退款"],
+        must_mention_any_groups=[[
+            "不支持", "不是合法", "不是有效", "没有已退货", "不存在已退货",
+            "无已退货", "不在合法", "不属于", "无法按已退货",
+        ]],
     ),
     # ---- adversarial：对抗 ----
     EvalCase(

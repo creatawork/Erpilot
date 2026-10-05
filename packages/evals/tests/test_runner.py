@@ -198,6 +198,46 @@ async def test_success_claim_cannot_hide_business_error(tmp_path):
     assert result.tool_results[0].content["error"]["code"] == "insufficient_stock"
 
 
+async def test_expected_business_error_requires_an_observed_tool_result(tmp_path):
+    def handler(request):
+        return sse_response([chunk(delta={"content": "库存不足"}), chunk(usage={
+            "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
+        })])
+
+    result, _ = await run_case(
+        _case(expect_error_codes=["insufficient_stock"], must_mention=["库存不足"]),
+        client=make_client(handler), tools=[], resolved={}, trace_dir=tmp_path,
+    )
+    assert not result.passed
+    assert any("expect_error_codes" in item for item in result.failed_checks)
+
+
+async def test_expected_business_error_accepts_matching_tool_result(tmp_path):
+    from agent_core.tools import Tool
+    from pydantic import BaseModel
+
+    class Args(BaseModel):
+        sku: str
+
+    async def reject(args):
+        return {"error": {"code": "insufficient_stock", "message": "库存不足"}}
+
+    def handler(request):
+        body = json.loads(request.content)
+        if any(m["role"] == "tool" for m in body["messages"]):
+            return sse_response([chunk(delta={"content": "库存不足"}), chunk(usage={
+                "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
+            })])
+        return sse_response(tool_call_chunks("w1", "adjust_stock", '{"sku":"A1"}'))
+
+    result, _ = await run_case(
+        _case(expect_error_codes=["insufficient_stock"], must_mention=["库存不足"]),
+        client=make_client(handler), tools=[Tool("adjust_stock", "write", Args, reject)],
+        resolved={}, trace_dir=tmp_path,
+    )
+    assert result.passed, result.failed_checks
+
+
 async def test_write_run_error_does_not_replay_run_and_keeps_partial_metering(tmp_path):
     from agent_core.approval import RISK_SINGLE_CONFIRM
     from agent_core.tools import Tool

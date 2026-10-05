@@ -130,7 +130,7 @@ async def run_case(
         tool_results: list[ToolResult] = []
         arguments: dict[str, dict] = {}
         step_text: list[str] = []
-        final_text = ""
+        visible_parts: list[str] = []
         steps = 0
         completed = False
         try:
@@ -150,8 +150,7 @@ async def run_case(
                                 total_tokens=measured.total_tokens + step_usage.total_tokens,
                             )
                         text = "".join(step_text)
-                        if text.strip():
-                            final_text = text  # 最终回答 = 最后一个有内容步骤的文本
+                        visible_parts.append(text)  # v2 判分范围：全部助手可见步骤文本
                         step_text.clear()
                     case ToolCallStarted(call=call):
                         try:
@@ -186,7 +185,8 @@ async def run_case(
             return result, trace_path
 
         failed = evaluate_case(
-            case, tool_calls=tool_calls, final_text=final_text, steps=steps, completed=completed
+            case, tool_calls=tool_calls, visible_text="".join(visible_parts),
+            steps=steps, completed=completed,
         )
         for name in dict.fromkeys(t.name for t in tool_results if not t.ok):
             if not any(t.name == name and t.succeeded for t in tool_results):
@@ -194,6 +194,14 @@ async def run_case(
         for name in case.expect_successful_tools:
             if not any(t.name == name and t.succeeded for t in tool_results):
                 failed.append(f"expect_successful_tools: {name} 无成功执行证据")
+        observed_codes = {
+            t.content["error"].get("code")
+            for t in tool_results
+            if isinstance(t.content, dict) and isinstance(t.content.get("error"), dict)
+        }
+        for code in case.expect_error_codes:
+            if code not in observed_codes:
+                failed.append(f"expect_error_codes: 未观测到 {code}")
         if case.state:
             if before is None or state_engine is None:
                 failed.append("state: 缺少数据库状态证据")
