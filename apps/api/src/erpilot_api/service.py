@@ -16,9 +16,11 @@ from typing import Any
 from agent_core.approval import ApprovalDecision
 from agent_core.demo_tools import system_prompt
 from agent_core.llm import LLMClient
-from agent_core.loop import AgentEvent, AgentLoop, LoopConfig, LoopEnd
+from agent_core.loop import AgentEvent, AgentLoop, LoopConfig, LoopEnd, StepStarted
 from agent_core.tools import Tool
 from agent_core.trace import JsonlTraceRecorder, TraceSink, new_trace_path
+
+from erpilot_api.run_store import RunStore
 
 
 def _sinks_from_env() -> list[TraceSink]:
@@ -44,6 +46,7 @@ class ChatService:
         tools: Sequence[Tool],
         loop_config: LoopConfig | None = None,
         approval_gate: Any | None = None,
+        run_store: RunStore | None = None,
     ) -> None:
         self._client_factory = client_factory
         self._model = model
@@ -51,6 +54,7 @@ class ChatService:
         self._tools = list(tools)
         self._loop_config = loop_config or LoopConfig()
         self._approval_gate = approval_gate
+        self._run_store = run_store
         self._sinks = _sinks_from_env()
         self._client: LLMClient | None = None
         self._sessions: dict[str, list] = {}
@@ -73,7 +77,8 @@ class ChatService:
 
     def _session_messages(self, session_id: str) -> list:
         if session_id not in self._sessions:
-            self._sessions[session_id] = [
+            saved = self._run_store.get_session(session_id) if self._run_store else None
+            self._sessions[session_id] = saved["history"] if saved else [
                 {"role": "system", "content": system_prompt(any(t.risk for t in self._tools))}
             ]
         return self._sessions[session_id]
@@ -99,13 +104,26 @@ class ChatService:
             agent, messages, recorder = self.start_run(session_id, message)
             stream = recorder.run(agent, messages)
             finished = False
+            run_id: str | None = None
             try:
+                if self._run_store:
+                    run_id = self._run_store.create_run(
+                        session_id, message, previous, str(self.last_trace)
+                    )
                 async for event in stream:
-                    if isinstance(event, LoopEnd):
+                    if isinstance(event, StepStarted) and event.step > 1 and run_id:
+                        # The previous tool group has finished and its messages are complete.
+                        self._run_store.checkpoint_run(run_id, messages)
+                    if isinstance(event, LoopEnd) and event.completed:
+                        if run_id:
+                            answer = str(messages[-1].get("content") or "")
+                            self._run_store.finish_run(run_id, messages, answer)
                         finished = True
                     yield event
             finally:
                 await stream.aclose()
                 if not finished:
+                    if run_id:
+                        self._run_store.fail_run(run_id, "run interrupted before completion")
                     # 不保留缺少 tool 回填的半轮历史，后续请求仍符合模型协议。
                     messages[:] = previous

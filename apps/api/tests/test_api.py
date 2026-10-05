@@ -107,6 +107,29 @@ async def test_session_history_persists_across_calls(tmp_path) -> None:
     assert done["completed"] is True
 
 
+async def test_session_history_survives_service_reconstruction(tmp_path) -> None:
+    from agent_core.demo_tools import DEMO_TOOLS
+    from erpilot_api.run_store import RunStore
+    from erpilot_api.service import ChatService
+
+    requests: list[httpx2.Request] = []
+    store = RunStore(tmp_path / "runs.db")
+    kwargs = dict(
+        client_factory=lambda: make_client(_handler_pair(requests)),
+        model="glm-5.3-flash", trace_dir=tmp_path, tools=DEMO_TOOLS, run_store=store,
+    )
+    first = ChatService(**kwargs)
+    async for _ in first.stream_run("s1", "查订单 123"):
+        pass
+    assert store.get_session("s1")["history"][-1]["content"] == "订单 123 已发货"
+
+    second = ChatService(**{**kwargs, "run_store": RunStore(tmp_path / "runs.db")})
+    async for _ in second.stream_run("s1", "再查一次"):
+        pass
+    roles = [m["role"] for m in requests[2]["messages"]]
+    assert roles == ["system", "user", "assistant", "tool", "assistant", "user"]
+
+
 async def test_llm_error_becomes_error_event(tmp_path) -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(400, json={"error": {"message": "bad request"}})

@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from erpilot_api.events import encode_event, sse_frame
+from erpilot_api.run_store import RunStore
 from erpilot_api.service import ChatService
 
 DEFAULT_TRACE_DIR = Path("traces")
@@ -75,6 +76,7 @@ def create_app(
     trace_dir: Path | None = None,
     tools: Sequence[Tool] | None = None,
     approval_gate: StreamApprovalGate | None = None,
+    run_store_path: Path | None = None,
 ) -> FastAPI:
     """应用工厂：测试注入 mock 的 LLMClient 工厂、临时 trace 目录与工具集。"""
     resolved_tools, env_gate = _resolve_tools(tools)
@@ -84,6 +86,11 @@ def create_app(
         trace_dir=trace_dir or DEFAULT_TRACE_DIR,
         tools=resolved_tools,
         approval_gate=approval_gate or env_gate,
+        # T04 stores read-only runs. Write runs need durable approval/token
+        # checkpoints before this store can safely own their lifecycle (T05).
+        run_store=(None if any(t.risk for t in resolved_tools) else RunStore(
+            run_store_path or (trace_dir / "runs.db" if trace_dir else Path("data/runs.db"))
+        )),
     )
     app = FastAPI(title="Erpilot API", version="0.1.0")
 
