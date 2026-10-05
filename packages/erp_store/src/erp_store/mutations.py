@@ -11,13 +11,15 @@
   报成功是在训练模型说谎（ADR-0005）
 """
 
+import json
+from contextlib import contextmanager
 from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from erp_store.db import OrderItemRow, OrderRow, ProductRow, StockRow
+from erp_store.db import MutationRequestRow, OrderItemRow, OrderRow, ProductRow, StockRow
 from erp_store.models import Order, OrderStatus, ProductStatus
 
 
@@ -45,6 +47,7 @@ class ErpMutations:
         items: list[tuple[str, int]],
         *,
         note: str | None = None,
+        client_token: str | None = None,
     ) -> Order:
         """建单：快照价取现价，校验在售与库存，扣减与建单同事务。
 
@@ -68,7 +71,11 @@ class ErpMutations:
                 )
             merged[sku] = merged.get(sku, 0) + quantity
 
-        with Session(self._engine) as s:
+        request = ["create_order", customer.strip(), sorted(merged.items()), note]
+        with self._write_session() as s:
+            prior = self._prior(s, client_token, request)
+            if prior is not None:
+                return Order.model_validate(prior)
             products = {
                 p.sku: p
                 for p in s.scalars(
@@ -126,12 +133,19 @@ class ErpMutations:
             for sku, quantity in merged.items():
                 stocks[sku].quantity -= quantity
             s.add(order)
+            s.flush()
+            result = self._load_order(s, order.order_id)
+            self._remember(s, client_token, request, result.model_dump(mode="json"))
             s.commit()
-            return self._load_order(s, order.order_id)
+            return result
 
-    def cancel_order(self, order_id: str) -> Order:
+    def cancel_order(self, order_id: str, *, client_token: str | None = None) -> Order:
         """取消订单：仅待付款/待发货可取消（状态机），取消回补库存。"""
-        with Session(self._engine) as s:
+        request = ["cancel_order", order_id]
+        with self._write_session() as s:
+            prior = self._prior(s, client_token, request)
+            if prior is not None:
+                return Order.model_validate(prior)
             order = s.get(OrderRow, order_id)
             if order is None:
                 raise MutationError(
@@ -151,14 +165,23 @@ class ErpMutations:
                 stock = s.get(StockRow, item.sku)
                 if stock is not None:
                     stock.quantity += item.quantity
+            s.flush()
+            result = self._load_order(s, order_id)
+            self._remember(s, client_token, request, result.model_dump(mode="json"))
             s.commit()
-            return self._load_order(s, order_id)
+            return result
 
-    def adjust_stock(self, sku: str, delta: int) -> tuple[str, int]:
+    def adjust_stock(
+        self, sku: str, delta: int, *, client_token: str | None = None
+    ) -> tuple[str, int]:
         """库存增减（delta 正入负出），返回 (sku, 调整后数量)。库存不为负。"""
         if delta == 0:
             raise MutationError("invalid_argument", "调整量不能为 0")
-        with Session(self._engine) as s:
+        request = ["adjust_stock", sku, delta]
+        with self._write_session() as s:
+            prior = self._prior(s, client_token, request)
+            if prior is not None:
+                return tuple(prior)
             product = s.get(ProductRow, sku)
             if product is None:
                 raise MutationError(
@@ -181,12 +204,19 @@ class ErpMutations:
                 s.add(stock)
             else:
                 stock.quantity = new_quantity
+            self._remember(s, client_token, request, [sku, new_quantity])
             s.commit()
             return sku, new_quantity
 
-    def set_product_status(self, sku: str, status: ProductStatus) -> str:
+    def set_product_status(
+        self, sku: str, status: ProductStatus, *, client_token: str | None = None
+    ) -> str:
         """商品上下架；目标状态与现状一致返回 invalid_transition。"""
-        with Session(self._engine) as s:
+        request = ["set_product_status", sku, status.value]
+        with self._write_session() as s:
+            prior = self._prior(s, client_token, request)
+            if prior is not None:
+                return prior
             product = s.get(ProductRow, sku)
             if product is None:
                 raise MutationError(
@@ -201,8 +231,44 @@ class ErpMutations:
                     "空操作不执行；可用 get_product 复核当前状态",
                 )
             product.status = status.value
+            self._remember(s, client_token, request, sku)
             s.commit()
             return sku
+
+    @contextmanager
+    def _write_session(self):
+        # SQLite 单写者：在首次读取前抢写锁，避免库存/状态/单号的读改写竞争。
+        # 新表在写锁内按需创建，旧种子库无需重建；DDL 与写结果一起提交。
+        with Session(self._engine) as session:
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            MutationRequestRow.__table__.create(session.connection(), checkfirst=True)
+            yield session
+
+    def _prior(self, session: Session, token: str | None, request: list):
+        if token is None:
+            return None
+        if not token.strip() or len(token) > 128:
+            raise MutationError("invalid_argument", "幂等键须为 1~128 个非空字符")
+        row = session.get(MutationRequestRow, token)
+        if row is None:
+            return None
+        if row.request != self._request_json(request):
+            raise MutationError(
+                "idempotency_conflict", "幂等键已用于不同写请求",
+                "重试原请求须保留原参数；新操作请使用新的 client_token",
+            )
+        return json.loads(row.result)
+
+    def _remember(self, session: Session, token: str | None, request: list, result) -> None:
+        if token is not None:
+            session.add(MutationRequestRow(
+                client_token=token, request=self._request_json(request),
+                result=json.dumps(result, ensure_ascii=False, sort_keys=True),
+            ))
+
+    @staticmethod
+    def _request_json(request: list) -> str:
+        return json.dumps(request, ensure_ascii=False, sort_keys=True)
 
     def _next_order_id(self, s: Session, now: datetime) -> str:
         """SO+日期+序号：取当日最大序号 +1（与种子数据的单号格式一致）。"""

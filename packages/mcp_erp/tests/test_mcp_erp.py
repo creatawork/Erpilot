@@ -164,6 +164,22 @@ async def test_get_customer_purchases_truncates_items_at_40(tmp_path) -> None:
     assert result.data["items"][-1]["total_amount"] > full.items[40].total_amount
 
 
+@pytest.mark.parametrize("name,args", [
+    ("list_low_stock", {"threshold": 10000, "limit": 5}),
+    ("top_products", {"days": 365, "limit": 5}),
+    ("daily_sales", {"days": 7}),
+])
+async def test_aggregate_lists_have_valid_mcp_output(seeded_db, name, args):
+    from fastmcp import Client
+
+    async with Client(create_server(seeded_db)) as client:
+        result = await client.call_tool(name, args)
+    assert not result.is_error
+    assert isinstance(result.data["items"], list)
+    assert result.data["returned"] == len(result.data["items"])
+    assert result.data["items"]
+
+
 # ---- bridge：MCP 工具 → agent_core Tool ----
 
 
@@ -383,3 +399,37 @@ def test_bridge_write_tool_executes_on_approval(tmp_path, seeded_db, repo) -> No
         tools["get_stock"].params_model.model_validate_json(json.dumps({"sku": sku}))
     ))
     assert stock["quantity"] >= 0
+
+
+async def test_write_retry_after_lost_response_changes_stock_once(tmp_path, monkeypatch):
+    from agent_core.approval import AutoApproveGate
+    from agent_core.llm import ToolCall
+    from agent_core.loop import LoopConfig, ToolRetryPolicy
+    from mcp_erp import bridge
+
+    db = tmp_path / "retry.db"
+    seed_database(db, n_products=60, n_orders=80)
+    repo = ErpRepository(make_engine(db))
+    sku = repo.list_products(limit=1)[0].sku
+    before = repo.get_stock(sku).quantity
+    tools = await build_agent_tools_async(db, writes=True, approval_gate=AutoApproveGate())
+    original = bridge._extract
+    attempts = []
+
+    def lose_first_response(result):
+        payload = original(result)
+        attempts.append(payload)
+        if len(attempts) == 1:
+            raise ConnectionError("response lost after committed mutation")
+        return payload
+
+    monkeypatch.setattr(bridge, "_extract", lose_first_response)
+    loop = AgentLoop(None, tools=tools, config=LoopConfig(
+        retry=ToolRetryPolicy(retries=1, backoff=0),
+    ))
+    content, ok = await loop._execute(ToolCall(
+        id="stock-1", name="adjust_stock", arguments=json.dumps({"sku": sku, "delta": 5}),
+    ))
+    assert ok and "error" not in json.loads(content)
+    assert len(attempts) == 2
+    assert repo.get_stock(sku).quantity == before + 5

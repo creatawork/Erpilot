@@ -323,7 +323,8 @@ def create_server(db_path: Path = DEFAULT_DB, *, include_writes: bool = False) -
         if not 0 <= threshold <= 10_000 or not 1 <= limit <= 100:
             return _err("invalid_argument", "threshold 须在 0~10000，limit 须在 1~100")
         rows = repo.list_low_stock(threshold=threshold, limit=limit)
-        return [i.model_dump(mode="json") for i in rows]
+        items = [i.model_dump(mode="json") for i in rows]
+        return {"returned": len(items), "items": items}
 
     # ---- 运营视图 ----
 
@@ -344,7 +345,8 @@ def create_server(db_path: Path = DEFAULT_DB, *, include_writes: bool = False) -
         """近 N 天畅销榜（按销量降序），只统计有效订单。"""
         if not 1 <= days <= 365 or not 1 <= limit <= 50:
             return _err("invalid_argument", "days 须在 1~365，limit 须在 1~50")
-        return [p.model_dump(mode="json") for p in repo.top_products(days=days, limit=limit)]
+        items = [p.model_dump(mode="json") for p in repo.top_products(days=days, limit=limit)]
+        return {"returned": len(items), "items": items}
 
     @mcp.tool
     def daily_sales(
@@ -353,7 +355,8 @@ def create_server(db_path: Path = DEFAULT_DB, *, include_writes: bool = False) -
         """近 N 天逐日销量点（有效口径）——看趋势、找异常日。"""
         if not 1 <= days <= 90:
             return _err("invalid_argument", "days 须在 1~90")
-        return [p.model_dump(mode="json") for p in repo.daily_sales(days=days)]
+        items = [p.model_dump(mode="json") for p in repo.daily_sales(days=days)]
+        return {"returned": len(items), "items": items}
 
     @mcp.tool
     def stock_valuation() -> dict[str, Any]:
@@ -381,6 +384,9 @@ def create_server(db_path: Path = DEFAULT_DB, *, include_writes: bool = False) -
                 list[OrderItemInput], Field(description="订单行列表（SKU + 数量）")
             ],
             note: Annotated[str | None, Field(description="订单备注（可选）")] = None,
+            client_token: Annotated[
+                str | None, Field(description="幂等键；重试同一请求须保留，新操作用新键")
+            ] = None,
         ) -> dict[str, Any]:
             """创建订单（需人工审批后执行）：快照价取现价，校验在售与库存，
             新订单从「待付款」起步。同 SKU 多行自动合并数量。"""
@@ -389,6 +395,7 @@ def create_server(db_path: Path = DEFAULT_DB, *, include_writes: bool = False) -
                     customer,
                     [(i.sku, i.quantity) for i in items],
                     note=note,
+                    client_token=client_token,
                 )
             except MutationError as exc:
                 return _err(exc.code, exc.message, exc.hint)
@@ -399,11 +406,14 @@ def create_server(db_path: Path = DEFAULT_DB, *, include_writes: bool = False) -
         @mcp.tool
         def cancel_order(
             order_id: Annotated[str, Field(description="订单号，如 SO20260301-0001")],
+            client_token: Annotated[
+                str | None, Field(description="幂等键；重试同一请求须保留，新操作用新键")
+            ] = None,
         ) -> dict[str, Any]:
             """取消订单（需人工审批后执行）：仅待付款/待发货可取消，取消后
             回补库存；已发货/已签收的订单不可取消。"""
             try:
-                order = mutations.cancel_order(order_id)
+                order = mutations.cancel_order(order_id, client_token=client_token)
             except MutationError as exc:
                 return _err(exc.code, exc.message, exc.hint)
             data = order.model_dump(mode="json")
@@ -416,12 +426,15 @@ def create_server(db_path: Path = DEFAULT_DB, *, include_writes: bool = False) -
             delta: Annotated[
                 int, Field(description="调整量：正数入库、负数出库，不能为 0")
             ],
+            client_token: Annotated[
+                str | None, Field(description="幂等键；重试同一请求须保留，新操作用新键")
+            ] = None,
         ) -> dict[str, Any]:
             """调整库存（需人工审批后执行）：按 delta 增减，库存不能减为负数。"""
             if delta == 0:
                 return _err("invalid_argument", "调整量不能为 0（正数入库，负数出库）")
             try:
-                sku, quantity = mutations.adjust_stock(sku, delta)
+                sku, quantity = mutations.adjust_stock(sku, delta, client_token=client_token)
             except MutationError as exc:
                 return _err(exc.code, exc.message, exc.hint)
             return {
@@ -437,6 +450,9 @@ def create_server(db_path: Path = DEFAULT_DB, *, include_writes: bool = False) -
             status: Annotated[
                 str, Field(description=f"目标状态，可选：{_PRODUCT_STATUS_HELP}")
             ],
+            client_token: Annotated[
+                str | None, Field(description="幂等键；重试同一请求须保留，新操作用新键")
+            ] = None,
         ) -> dict[str, Any]:
             """商品上架/下架（需人工审批后执行）；已是目标状态时报
             invalid_transition 而不是空转成功。"""
@@ -444,7 +460,7 @@ def create_server(db_path: Path = DEFAULT_DB, *, include_writes: bool = False) -
             if err:
                 return err
             try:
-                sku = mutations.set_product_status(sku, parsed)
+                sku = mutations.set_product_status(sku, parsed, client_token=client_token)
             except MutationError as exc:
                 return _err(exc.code, exc.message, exc.hint)
             return {"sku": sku, "status": parsed.value, "note": "商品状态已更新"}

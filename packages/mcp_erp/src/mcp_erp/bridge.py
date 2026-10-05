@@ -20,6 +20,7 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from agent_core.approval import (
     RISK_BATCH_CONFIRM,
@@ -104,6 +105,7 @@ def _with_risk_and_gate(tool: Tool, gate: ApprovalGate | None) -> Tool:
         params_model=tool.params_model,
         handler=tool.handler,
         risk=risk,
+        retry_safe=True,
     )
     assert gate is not None  # build_agent_tools_async 已校验
     return guarded(marked, gate)
@@ -121,6 +123,9 @@ def _convert(
     params_model = _params_model(name, schema)
 
     async def handler(args: BaseModel, _name: str = name) -> object:
+        if _name in WRITE_TOOL_RISK and args.client_token is None:
+            # 同次工具执行的超时/异常重试复用同一个参数对象与 token。
+            args.client_token = uuid4().hex
         server = create_server(db_path, include_writes=writes)
         async with Client(server) as client:
             result = await client.call_tool(_name, args.model_dump(mode="json", exclude_none=True))

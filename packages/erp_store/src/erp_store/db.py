@@ -7,9 +7,10 @@
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import Float, ForeignKey, String, create_engine
+from sqlalchemy import Float, ForeignKey, String, Text, create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.pool import NullPool
 
 DEFAULT_DB = Path("data/erpilot.db")
 
@@ -65,6 +66,16 @@ class OrderItemRow(Base):
     order: Mapped[OrderRow] = relationship(back_populates="items")
 
 
+class MutationRequestRow(Base):
+    """成功写请求的持久化幂等记录；与业务变更在同一事务提交。"""
+
+    __tablename__ = "mutation_requests"
+
+    client_token: Mapped[str] = mapped_column(String(128), primary_key=True)
+    request: Mapped[str] = mapped_column(Text)
+    result: Mapped[str] = mapped_column(Text)
+
+
 def make_engine(db_path: Path = DEFAULT_DB) -> Engine:
     """SQLite 引擎。
 
@@ -74,7 +85,8 @@ def make_engine(db_path: Path = DEFAULT_DB) -> Engine:
     """
     db_path.parent.mkdir(parents=True, exist_ok=True)
     return create_engine(
-        f"sqlite:///{db_path}", connect_args={"check_same_thread": False}
+        f"sqlite:///{db_path}", connect_args={"check_same_thread": False, "timeout": 30},
+        poolclass=NullPool,
     )
 
 
