@@ -45,7 +45,7 @@ uv run pytest                # 单元测试（mock，不消耗 token）
 # CLI：默认经 MCP 桥查询真数据（先 seed），trace 自动落盘 traces/*.jsonl
 uv run --package erp-store python -m erp_store seed
 uv run erpilot chat "订单 123 里买了什么？还有货吗？有货的话报个价"
-uv run erpilot chat --tools demo                # 内置假数据（离线演示）
+uv run erpilot chat --tools demo                # 假 ERP 工具，仍调用真实模型
 uv run erpilot chat --writes "给商品 A1001 入库 5 件"  # 终端审批后写入
 uv run erpilot replay traces/<某个>.jsonl        # 把 trace 还原成可读对话
 

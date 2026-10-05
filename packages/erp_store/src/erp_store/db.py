@@ -1,4 +1,4 @@
-"""SQLAlchemy 持久化：SQLite 起步，M6 换 PostgreSQL 只动 engine/URL（既定路径）。
+"""SQLAlchemy 持久化：当前使用 SQLite；PostgreSQL 迁移需重做写锁与编号策略。
 
 表结构与 models.py 的 Pydantic 模型一一对应。订单金额不入库——由订单项
 推导（models.Order.total_amount），快照价与汇总永不打架。
@@ -79,9 +79,8 @@ class MutationRequestRow(Base):
 def make_engine(db_path: Path = DEFAULT_DB) -> Engine:
     """SQLite 引擎。
 
-    check_same_thread=False：连接池里的连接会被不同线程取用（M3 工具层
-    跑在 FastMCP/FastAPI 的工作线程里），SQLite 的同线程限制交给连接池
-    与文件锁兜底；M6 换 PostgreSQL 后该参数随之消失。
+    check_same_thread=False 支持 FastMCP/FastAPI 工作线程；写操作以文件写锁
+    串行化。NullPool 在 Session 关闭后释放连接，避免临时库的文件句柄残留。
     """
     db_path.parent.mkdir(parents=True, exist_ok=True)
     return create_engine(

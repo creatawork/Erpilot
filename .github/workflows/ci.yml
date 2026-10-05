@@ -45,11 +45,11 @@ jobs:
   # 配置后按预算熔断跑——只花得起的钱，熔断后余下 case 记失败并照常出报告
   evals:
     runs-on: ubuntu-latest
-    needs: lint-test
+    needs: [lint-test, frontend]
     env:
       ZHIPU_API_KEY: ${{ secrets.ZHIPU_API_KEY }}
-      LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
-      LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      LLM_BASE_URL: ${{ secrets.LLM_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4/' }}
+      LLM_MODEL: ${{ secrets.LLM_MODEL || 'glm-5.3-flash' }}
       ERPILOT_EVAL_BUDGET: "0.05" # CI 单轮预算上限（元）
     steps:
       - uses: actions/checkout@v4
