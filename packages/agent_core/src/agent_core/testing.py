@@ -68,9 +68,17 @@ def multi_tool_chunks(
     return chunks
 
 
-def make_client(handler: Callable[[httpx2.Request], httpx2.Response]) -> LLMClient:
-    """LLMClient + 注入 MockTransport 的 AsyncOpenAI，请求落到 handler。"""
+def make_client(
+    handler: Callable[[httpx2.Request], httpx2.Response], *, max_retries: int = 2
+) -> LLMClient:
+    """LLMClient + 注入 MockTransport 的 AsyncOpenAI，请求落到 handler。
+
+    max_retries 是 openai SDK 自身的传输层重试（默认 2）；要测调用方自己的
+    重试策略时传 0，让错误直达上层。
+    """
     config = LLMConfig(api_key="test-key", base_url=BASE_URL, model="glm-5.3-flash")
     http = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
-    oai = AsyncOpenAI(api_key="test-key", base_url=BASE_URL, http_client=http)
+    oai = AsyncOpenAI(
+        api_key="test-key", base_url=BASE_URL, http_client=http, max_retries=max_retries
+    )
     return LLMClient(config, client=oai)

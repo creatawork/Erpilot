@@ -75,6 +75,9 @@ class CaseResult(BaseModel):
     total_tokens: int = 0
     cost: float | None = None
     duration_ms: float = 0.0
+    attempts: int = Field(
+        default=1, description="run 尝试次数（瞬态错误自动重试后 >1）；计量只含成功那次"
+    )
     error: str | None = Field(
         default=None, description="run 异常（APIError 等）；None = 正常结束"
     )

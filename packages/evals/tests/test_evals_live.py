@@ -3,8 +3,9 @@
 默认不跑（根 pyproject 的 addopts 排除 marker `eval`；无 API key 也自动跳过）。
 显式运行：
 
-    uv run pytest packages/evals -m eval          # 全量 24 条（成本 ≈ 每条 ¥0.001）
+    uv run pytest packages/evals -m eval          # 全量 case（成本 ≈ 每条 ¥0.001）
     ERPILOT_EVAL_BUDGET=0.02 uv run pytest packages/evals -m eval
+    uv run pytest packages/evals -m eval -k adv-05   # 定点复测单条
 
 报告：reports/evals/<时间戳>.md + .json（标注标准 §6；回归对比以报告为准）。
 Langfuse keys 齐全时评测 trace 同步双写远程（ADR-0003 收尾路径）。

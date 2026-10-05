@@ -62,7 +62,7 @@ async def test_run_case_failure_records_failed_checks(resolved, tools, tmp_path)
 
 
 async def test_run_case_survives_llm_error(resolved, tools, tmp_path) -> None:
-    """上游 5xx 不外抛：CaseResult.error 记失败，评测继续。"""
+    """上游错误不外抛：CaseResult.error 记失败，评测继续（本用例关闭重试保速度）。"""
     from httpx2 import Response
 
     def handler(request):
@@ -70,11 +70,83 @@ async def test_run_case_survives_llm_error(resolved, tools, tmp_path) -> None:
 
     case = _case(expect_tools_any=["get_order"])
     result, _ = await run_case(
-        case, client=make_client(handler), tools=tools, resolved=resolved, trace_dir=tmp_path
+        case, client=make_client(handler), tools=tools, resolved=resolved, trace_dir=tmp_path,
+        retries=0,
     )
     assert not result.passed
     assert result.error is not None
     assert any("run_error" in f for f in result.failed_checks)
+
+
+async def test_run_case_retries_transient_then_succeeds(resolved, tools, tmp_path) -> None:
+    """上游 5xx 是基础设施抖动：自动重跑，第二次成功后 attempts=2、照常判分。"""
+    from httpx2 import Response
+
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return Response(500, content=b"upstream error")
+        body = json.loads(request.content)
+        if any(m["role"] == "tool" for m in body["messages"]):
+            return sse_response([
+                chunk(delta={"content": f"订单 {resolved['order_id']} 状态：待发货"}),
+                chunk(usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}),
+            ])
+        return sse_response(
+            tool_call_chunks("call_1", "get_order", json.dumps({"order_id": resolved["order_id"]}))
+        )
+
+    case = _case(expect_tools_any=["get_order"])
+    result, _ = await run_case(
+        case, client=make_client(handler, max_retries=0), tools=tools, resolved=resolved,
+        trace_dir=tmp_path, retries=2, backoff=0,
+    )
+    assert result.passed, result.failed_checks
+    assert result.attempts == 2
+    assert calls["n"] == 3  # 失败尝试 1 次 + 成功尝试的 2 轮请求（工具轮 + 最终回答）
+
+
+async def test_run_case_retry_exhausted_records_last_error(resolved, tools, tmp_path) -> None:
+    """瞬态重试耗尽后按失败计：attempts = retries + 1，error 是最后一次的。"""
+    from httpx2 import Response
+
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        return Response(500, content=b"upstream error")
+
+    case = _case(expect_tools_any=["get_order"])
+    result, _ = await run_case(
+        case, client=make_client(handler, max_retries=0), tools=tools, resolved=resolved,
+        trace_dir=tmp_path, retries=2, backoff=0,
+    )
+    assert not result.passed
+    assert result.attempts == 3
+    assert calls["n"] == 3
+    assert any("run_error" in f for f in result.failed_checks)
+
+
+async def test_run_case_does_not_retry_deterministic_error(resolved, tools, tmp_path) -> None:
+    """4xx 是确定性错误：重试无意义，只调一次就判失败。"""
+    from httpx2 import Response
+
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        return Response(400, content=b"bad request")
+
+    case = _case(expect_tools_any=["get_order"])
+    result, _ = await run_case(
+        case, client=make_client(handler, max_retries=0), tools=tools, resolved=resolved,
+        trace_dir=tmp_path, retries=2, backoff=0,
+    )
+    assert not result.passed
+    assert result.attempts == 1
+    assert calls["n"] == 1
 
 
 async def test_budget_circuit_breaker_skips_without_api_call(resolved, tools, tmp_path) -> None:

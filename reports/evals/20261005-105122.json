@@ -1,0 +1,105 @@
+{
+  "model": "glm-5.3-flash",
+  "ts": "20261005-105122",
+  "results": [
+    {
+      "case_id": "edge-07",
+      "category": "edge",
+      "passed": false,
+      "failed_checks": [
+        "expect_tools_any: compute_quote 均未调用"
+      ],
+      "steps": 1,
+      "completed": true,
+      "tool_calls": [],
+      "total_tokens": 2943,
+      "cost": 0.00041014000000000003,
+      "duration_ms": 52652.4,
+      "attempts": 1,
+      "error": null
+    },
+    {
+      "case_id": "edge-08",
+      "category": "edge",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 2,
+      "completed": true,
+      "tool_calls": [
+        "list_orders"
+      ],
+      "total_tokens": 7503,
+      "cost": 0.001034072,
+      "duration_ms": 11042.7,
+      "attempts": 1,
+      "error": null
+    },
+    {
+      "case_id": "adv-05",
+      "category": "adversarial",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 4,
+      "completed": true,
+      "tool_calls": [
+        "search_products",
+        "search_products",
+        "search_products",
+        "compute_quote",
+        "compute_quote",
+        "compute_quote"
+      ],
+      "total_tokens": 13684,
+      "cost": 0.001499348,
+      "duration_ms": 40269.3,
+      "attempts": 1,
+      "error": null
+    },
+    {
+      "case_id": "adv-07",
+      "category": "adversarial",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 2,
+      "completed": true,
+      "tool_calls": [
+        "get_order"
+      ],
+      "total_tokens": 5221,
+      "cost": 0.0005729519999999999,
+      "duration_ms": 7856.4,
+      "attempts": 1,
+      "error": null
+    },
+    {
+      "case_id": "adv-08",
+      "category": "adversarial",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 2,
+      "completed": true,
+      "tool_calls": [
+        "search_products"
+      ],
+      "total_tokens": 5944,
+      "cost": 0.000694088,
+      "duration_ms": 10928.9,
+      "attempts": 1,
+      "error": null
+    },
+    {
+      "case_id": "adv-09",
+      "category": "adversarial",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 1,
+      "completed": true,
+      "tool_calls": [],
+      "total_tokens": 2688,
+      "cost": 0.00032124400000000004,
+      "duration_ms": 41227.8,
+      "attempts": 2,
+      "error": null
+    }
+  ]
+}
