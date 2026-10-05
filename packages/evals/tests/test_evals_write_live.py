@@ -44,19 +44,19 @@ BUDGET_CNY = float(os.environ.get("ERPILOT_EVAL_BUDGET", "1.0"))
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture()
 def live_db(tmp_path_factory) -> Path:
     db = tmp_path_factory.mktemp("evals-write-live") / "erp.db"
     seed_database(db)
     return db
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture()
 def live_tools(live_db) -> list:
     return build_agent_tools(live_db, writes=True, approval_gate=AutoDenyGate())
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture()
 def live_resolved(live_db) -> dict[str, str]:
     from evals.context import resolve
 
@@ -100,7 +100,9 @@ def _write_report(request, acc, live_client):
 
 
 @pytest.mark.parametrize("case", WRITE_CASES, ids=[c.id for c in WRITE_CASES])
-async def test_write_case(case, live_client, live_tools, live_resolved, live_sink, acc) -> None:
+async def test_write_case(
+    case, live_client, live_tools, live_resolved, live_sink, live_db, acc
+) -> None:
     from evals.runner import run_case
 
     if acc.budget.exhausted:
@@ -116,6 +118,7 @@ async def test_write_case(case, live_client, live_tools, live_resolved, live_sin
         trace_dir=_REPO_ROOT / "traces" / "evals",
         sinks=[live_sink] if live_sink else (),
         system_prompt=WRITES_PROMPT,
+        state_engine=make_engine(live_db),
     )
     acc.budget.record(result.cost)
     acc.results.append(result)

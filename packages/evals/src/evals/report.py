@@ -3,11 +3,14 @@
 成功率曲线的分母（case 集）必须稳定（标注标准 §6）——报告即回归对比的凭据。
 """
 
+import hashlib
 import json
+import subprocess
 import time
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
+from uuid import uuid4
 
 from evals.model import CaseCategory, CaseResult
 
@@ -37,7 +40,7 @@ def render_report(
         f"{(len(passed) / len(executed) * 100 if executed else 0):.0f}%**"
         f"（执行 {len(executed)} 条"
         + (
-            f"，预算熔断跳过 {len(results) - len(executed)} 条"
+            f"，未执行 {len(results) - len(executed)} 条"
             if len(results) > len(executed)
             else ""
         )
@@ -45,6 +48,10 @@ def render_report(
         f"- 总成本：≈¥{total_cost:.4f}"
         + (f"（预算上限 ¥{budget_limit_cny:.2f}）" if budget_limit_cny is not None else ""),
         f"- 总耗时：{elapsed_s:.0f}s",
+        f"- 重试次数：{sum(max(0, r.attempts - 1) for r in executed)}；"
+        f"计量不完整：{sum(not r.cost_complete for r in executed)} 条",
+        "- 成本为仓库价目表估算，包含已返回 usage 的失败尝试；"
+        "中断生成及 SDK 内部重试可能缺失计量，预算上限不是账单硬上限。",
         "",
         "## 分类成功率",
         "",
@@ -67,7 +74,7 @@ def render_report(
         "|---|---|---|---|---|---|---|",
     ]
     for r in results:
-        mark = "✅" if r.passed else "⏭️ 熔断跳过" if _skipped(r) else "❌"
+        mark = "✅" if r.passed else "⏭️ 未执行" if _skipped(r) else "❌"
         tokens = str(r.total_tokens) if r.total_tokens else "-"
         cost = f"≈¥{r.cost:.4f}" if r.cost is not None else "-"
         detail = "; ".join(r.failed_checks) if r.failed_checks else ""
@@ -81,7 +88,7 @@ def render_report(
 
 
 def _skipped(r: CaseResult) -> bool:
-    return any(c.startswith("budget:") for c in r.failed_checks)
+    return any(c.startswith(("budget:", "not_run:")) for c in r.failed_checks)
 
 
 def write_report(
@@ -91,14 +98,21 @@ def write_report(
     model: str,
     budget_limit_cny: float | None = None,
     elapsed_s: float = 0.0,
+    metadata: dict | None = None,
+    provenance: dict | None = None,
+    report_path: Path | None = None,
 ) -> Path:
     report_dir.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    path = report_dir / f"{stamp}.md"
+    path = report_path or report_dir / f"{stamp}-{uuid4().hex[:6]}.md"
+    provenance = provenance or source_provenance()
     path.write_text(
         render_report(
             results, model=model, budget_limit_cny=budget_limit_cny, elapsed_s=elapsed_s
-        ),
+        ) + "\n## 版本与范围\n\n```json\n"
+        + json.dumps({"provenance": provenance, "suite": metadata or {}},
+                     ensure_ascii=False, indent=2)
+        + "\n```\n",
         encoding="utf-8",
     )
     # 机器可读版本供曲线聚合（M9 起画成功率趋势）
@@ -107,6 +121,8 @@ def write_report(
             {
                 "model": model,
                 "ts": stamp,
+                "provenance": provenance,
+                "suite": metadata or {},
                 "results": [json.loads(r.model_dump_json()) for r in results],
             },
             ensure_ascii=False,
@@ -115,3 +131,23 @@ def write_report(
         encoding="utf-8",
     )
     return path
+
+
+def source_provenance() -> dict:
+    root = Path(__file__).resolve().parents[4]
+
+    def git(*args: str) -> str:
+        result = subprocess.run(["git", *args], cwd=root, capture_output=True, check=False)
+        return result.stdout.decode("utf-8", errors="replace").strip()
+
+    digest = hashlib.sha256()
+    for name in sorted(git("ls-files", "--cached", "--others", "--exclude-standard").splitlines()):
+        path = root / name
+        if path.is_file() and path.suffix in {".py", ".ts", ".tsx", ".css", ".toml", ".yml"}:
+            digest.update(name.encode())
+            digest.update(path.read_bytes())
+    return {
+        "revision": git("rev-parse", "HEAD") or "unavailable",
+        "working_tree_dirty": bool(git("status", "--porcelain")),
+        "source_sha256": digest.hexdigest(),
+    }

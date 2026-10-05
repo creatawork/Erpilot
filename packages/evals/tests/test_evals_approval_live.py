@@ -42,24 +42,24 @@ BUDGET_CNY = float(os.environ.get("ERPILOT_EVAL_BUDGET", "1.0"))
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture()
 def policy_db(tmp_path_factory) -> Path:
     db = tmp_path_factory.mktemp("evals-approval-live") / "erp.db"
     seed_database(db)
     return db
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture()
 def policy_gate() -> ScriptedPolicyGate:
     return ScriptedPolicyGate()
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture()
 def policy_tools(policy_db, policy_gate) -> list:
     return build_agent_tools(policy_db, writes=True, approval_gate=policy_gate)
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture()
 def policy_resolved(policy_db) -> dict[str, str]:
     from evals.context import resolve
 
@@ -104,7 +104,7 @@ def _approval_report(request, acc, policy_client):
 
 @pytest.mark.parametrize("case", APPROVAL_CASES, ids=[c.id for c in APPROVAL_CASES])
 async def test_approval_case(
-    case, policy_client, policy_tools, policy_resolved, policy_sink, acc
+    case, policy_client, policy_tools, policy_resolved, policy_sink, policy_db, acc
 ) -> None:
     from evals.runner import run_case
 
@@ -119,6 +119,7 @@ async def test_approval_case(
         trace_dir=_REPO_ROOT / "traces" / "evals",
         sinks=[policy_sink] if policy_sink else (),
         system_prompt=WRITES_PROMPT,
+        state_engine=make_engine(policy_db),
     )
     acc.budget.record(result.cost)
     acc.results.append(result)

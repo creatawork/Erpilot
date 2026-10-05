@@ -1,6 +1,7 @@
 """评测 case 与结果的数据契约（标注标准 §3 的机器可校验形态）。"""
 
 from enum import StrEnum
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -47,6 +48,9 @@ class EvalCase(BaseModel):
         default_factory=list, description="最终文本不得包含任何一条子串（防编造/防泄露）"
     )
     max_steps: int | None = Field(default=None, description="步数上限（多步防绕路）")
+    expect_successful_tools: list[str] = Field(default_factory=list)
+    successful_tool_counts: dict[str, int] = Field(default_factory=dict)
+    state: "StateExpectation | None" = None
 
     def format_with(self, resolved: dict[str, str]) -> "EvalCase":
         """把 question 与检查项里的占位符替换为种子库真实值，返回新 case。"""
@@ -56,6 +60,8 @@ class EvalCase(BaseModel):
                 "must_mention": [s.format(**resolved) for s in self.must_mention],
                 "must_mention_any": [s.format(**resolved) for s in self.must_mention_any],
                 "must_not_mention": [s.format(**resolved) for s in self.must_not_mention],
+                "state": self.state.model_copy(update={"sku": self.state.sku.format(**resolved)})
+                if self.state else None,
             }
         )
 
@@ -76,8 +82,32 @@ class CaseResult(BaseModel):
     cost: float | None = None
     duration_ms: float = 0.0
     attempts: int = Field(
-        default=1, description="run 尝试次数（瞬态错误自动重试后 >1）；计量只含成功那次"
+        default=1, description="run 尝试次数；计量累计已返回 usage 的所有尝试"
     )
     error: str | None = Field(
         default=None, description="run 异常（APIError 等）；None = 正常结束"
     )
+    tool_results: list["ToolResult"] = Field(default_factory=list)
+    cost_complete: bool = True
+
+
+class ToolResult(BaseModel):
+    call_id: str
+    name: str
+    arguments: dict[str, Any]
+    content: Any
+    ok: bool
+
+    @property
+    def succeeded(self) -> bool:
+        return self.ok and not (
+            isinstance(self.content, dict)
+            and ("error" in self.content or self.content.get("approval") == "denied")
+        )
+
+
+class StateExpectation(BaseModel):
+    kind: Literal["unchanged", "stock_delta", "product_status"]
+    sku: str = ""
+    delta: int = 0
+    status: str = ""

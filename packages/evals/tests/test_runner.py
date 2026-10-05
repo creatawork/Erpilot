@@ -166,3 +166,66 @@ async def test_budget_circuit_breaker_skips_without_api_call(resolved, tools, tm
     assert len(results) == 3
     assert all(not r.passed for r in results)
     assert all(any(f.startswith("budget:") for f in r.failed_checks) for r in results)
+
+
+async def test_success_claim_cannot_hide_business_error(tmp_path):
+    from agent_core.tools import Tool
+    from pydantic import BaseModel
+
+    class Args(BaseModel):
+        sku: str
+        delta: int
+
+    async def broken(args):
+        return {"error": {"code": "insufficient_stock", "message": "failed"}}
+
+    def handler(request):
+        body = json.loads(request.content)
+        if any(m["role"] == "tool" for m in body["messages"]):
+            return sse_response([chunk(delta={"content": "已成功完成"}), chunk(usage={
+                "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
+            })])
+        return sse_response(tool_call_chunks("w1", "adjust_stock", '{"sku":"A1","delta":5}'))
+
+    case = _case(expect_successful_tools=["adjust_stock"], must_mention=["成功"])
+    result, _ = await run_case(
+        case, client=make_client(handler), tools=[Tool("adjust_stock", "write", Args, broken)],
+        resolved={}, trace_dir=tmp_path,
+    )
+    assert not result.passed
+    assert any("expect_successful_tools" in f for f in result.failed_checks)
+    assert result.tool_results[0].arguments == {"sku": "A1", "delta": 5}
+    assert result.tool_results[0].content["error"]["code"] == "insufficient_stock"
+
+
+async def test_write_run_error_does_not_replay_run_and_keeps_partial_metering(tmp_path):
+    from agent_core.approval import RISK_SINGLE_CONFIRM
+    from agent_core.tools import Tool
+    from httpx2 import Response
+    from pydantic import BaseModel
+
+    class Args(BaseModel):
+        pass
+
+    writes = []
+
+    async def write(args):
+        writes.append("committed")
+        return {"created": True}
+
+    def handler(request):
+        body = json.loads(request.content)
+        if any(m["role"] == "tool" for m in body["messages"]):
+            return Response(503, content=b"server_error")
+        return sse_response(tool_call_chunks("w1", "write", "{}"))
+
+    result, _ = await run_case(
+        _case(), client=make_client(handler, max_retries=0),
+        tools=[Tool("write", "write", Args, write, risk=RISK_SINGLE_CONFIRM)],
+        resolved={}, trace_dir=tmp_path, backoff=0,
+    )
+    assert writes == ["committed"]
+    assert not result.passed and result.attempts == 1
+    assert result.total_tokens > 0 and result.cost > 0
+    assert not result.cost_complete
+    assert result.tool_results[0].succeeded
