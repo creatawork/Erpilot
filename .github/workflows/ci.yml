@@ -25,7 +25,23 @@ jobs:
       - name: Unit tests
         run: uv run pytest
 
-  # 真实链路评测（M3 第 4 周接入）：secrets 未配置时 case 自动跳过（skipif），
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+        working-directory: apps/web
+      - run: npm test
+        working-directory: apps/web
+      - run: npm run build
+        working-directory: apps/web
+
+  # 真实链路评测：secrets 未配置时显式跳过；配置后使用统一预算与报告。
   # 配置后按预算熔断跑——只花得起的钱，熔断后余下 case 记失败并照常出报告
   evals:
     runs-on: ubuntu-latest
@@ -47,7 +63,8 @@ jobs:
         run: uv sync --all-packages
 
       - name: Regression evals
-        run: uv run pytest packages/evals -m eval
+        if: env.ZHIPU_API_KEY != ''
+        run: uv run python -m evals --budget 0.05
 
       - name: Upload eval report
         if: always()

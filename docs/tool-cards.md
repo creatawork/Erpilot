@@ -95,7 +95,7 @@
 ### list_low_stock
 - 用途：低库存商品清单（按库存升序）——盘库存、补货建议
 - 参数：`threshold`（默认 10）、`limit`（1~100，默认 20）
-- 返回：`[{"sku", "name", "category", "price", "quantity", "warehouse"}]`
+- 返回：`{"returned", "items": [{"sku", "name", "category", "price", "quantity", "warehouse"}]}`；returned 是本次返回条数，非全量计数
 - 错误：`invalid_argument`（threshold 不在 0~10000 等）
 
 ## 运营视图
@@ -109,13 +109,13 @@
 ### top_products
 - 用途：近 N 天畅销榜（按销量件数降序），只统计有效订单
 - 参数：`days`（1~365，默认 30）、`limit`（1~50，默认 10）
-- 返回：`[{"sku", "name", "category", "total_quantity", "order_count", "total_amount"}]`
+- 返回：`{"returned", "items": [{"sku", "name", "category", "total_quantity", "order_count", "total_amount"}]}`
 - 错误：`invalid_argument`（days/limit 越界）
 
 ### daily_sales
 - 用途：近 N 天逐日销量点——看趋势、找异常日
 - 参数：`days`（1~90，默认 14）
-- 返回：`[{"date", "order_count", "total_amount"}]` 按日期升序
+- 返回：`{"returned", "items": [{"date", "order_count", "total_amount"}]}`，items 按日期升序
 - 错误：`invalid_argument`（days 越界）
 
 ### stock_valuation
@@ -135,6 +135,13 @@
 > 领域校验在 `erp_store.mutations`，错误契约 v1 在写路径新增两个 code：
 > `invalid_transition`（状态机非法迁移 / 空操作）与 `insufficient_stock`。
 > 写工具的执行永远先过审批门——拒绝时模型拿到的是"未执行"，不是错误。
+
+四个写工具均接受可选 `client_token`（1–128 个字符）。成功结果与业务变更
+同事务保存：同键同规范化参数返回原结果，重启后仍有效；同键不同参数返回
+`idempotency_conflict`。键的范围覆盖四个写工具，新操作须使用新键。
+失败事务不占用键。bridge 在未传键时为单次工具执行生成键并在自动重试中
+复用；重新发起模型调用会产生新键，调用方跨请求重试应显式保留键。
+直接调用 MCP Server 仅执行领域校验；审批门由 agent bridge 装配。
 
 ### create_order
 - 用途：创建订单（**single_confirm**）——快照价取现价，校验在售与库存，扣库存与建单同事务

@@ -15,3 +15,18 @@
   变成工具设计的给；后续记录重点观察 hint 是否降低改道轮数。
 - 值得预埋的评测对抗 case（M3 第 4 周评测集用）：纯数字单号、不存在的 SKU、
   对已下架商品报价、空关键词搜索、越界的 limit/days。
+
+## 写路径观察（2026-10-05 开档）
+
+工程恢复演示使用脚本化模型：批准 A1001 出库 100000 件，真实 mutation 返回
+`insufficient_stock` 与“先用 get_stock 复核”的 hint；下一步调用 get_stock，
+回复库存不足并说明当前库存，业务状态 130→130。trace：
+`traces/demo/20261005-142612-7ff381/recover.jsonl`；浏览器同样验证了该路径。
+
+这是错误契约和编排恢复的确定性证据，**不计作真实模型自愈率**。
+真实模型对 insufficient_stock / invalid_transition 的改道观察仍待专门 case。
+
+同日真实模型基线发现读工具协议缺陷：list_low_stock / top_products /
+daily_sales 成功结果为 list，但声明 dict，FastMCP 拒绝 structured_content。
+原检查只看工具名，single-05 仍显示 PASS。现已修复为 items/returned 对象，
+补真实 MCP 调用回归，并要求正常查询有成功执行结果；详见可靠性复盘。
