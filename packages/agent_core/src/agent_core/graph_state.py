@@ -16,6 +16,11 @@ class AgentState(TypedDict):
 
 def initial_state(messages: list[dict[str, Any]]) -> AgentState:
     return AgentState(
-        messages=deepcopy(messages), step=0, usage=None, pending_calls=[],
-        tool_results=[], completed=False, final_answer="",
+        messages=deepcopy(messages),
+        step=0,
+        usage=None,
+        pending_calls=[],
+        tool_results=[],
+        completed=False,
+        final_answer="",
     )
