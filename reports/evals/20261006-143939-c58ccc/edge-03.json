@@ -1,0 +1,192 @@
+{
+  "case_id": "edge-03",
+  "suite": "baseline",
+  "question": "帮我报个价，A1014 买 10 件。",
+  "database": "edge-03.db",
+  "trace_path": "E:\\workspace\\erpilot\\traces\\evals\\20261006-145011-638fcefd.jsonl",
+  "approval_gate": "AutoDenyGate",
+  "approval_evidence": "none",
+  "human_approval": false,
+  "approval_decisions": [],
+  "state_before": null,
+  "state_after": null,
+  "result": {
+    "case_id": "edge-03",
+    "category": "edge",
+    "passed": true,
+    "failed_checks": [],
+    "steps": 3,
+    "completed": true,
+    "tool_calls": [
+      "compute_quote",
+      "get_product"
+    ],
+    "total_tokens": 15382,
+    "cost": 0.00158208,
+    "duration_ms": 62820.6,
+    "attempts": 3,
+    "error": null,
+    "tool_results": [
+      {
+        "call_id": "cc593719-8961-4c4c-bc1c-9afbf2cdad14",
+        "name": "compute_quote",
+        "arguments": {
+          "quantity": 10,
+          "sku": "A1014"
+        },
+        "content": {
+          "error": {
+            "code": "not_found",
+            "message": "可报价商品（不存在或已下架）不存在：A1014",
+            "hint": "已下架商品不可报价；可用 search_products 换在售商品"
+          }
+        },
+        "ok": true
+      },
+      {
+        "call_id": "7fcdd1ef-b15f-457b-9ed1-06a84c8365c0",
+        "name": "get_product",
+        "arguments": {
+          "sku": "A1014"
+        },
+        "content": {
+          "sku": "A1014",
+          "name": "品茗杯（家用装）",
+          "category": "茶具",
+          "price": 263.2,
+          "status": "已下架"
+        },
+        "ok": true
+      },
+      {
+        "call_id": "4df7abb3-e879-4c85-bdaa-f62ce8867ed0",
+        "name": "search_products",
+        "arguments": {
+          "keyword": "品茗杯"
+        },
+        "content": {
+          "total": 12,
+          "items": [
+            {
+              "sku": "A1013",
+              "name": "品茗杯（旅行装）",
+              "category": "茶具",
+              "price": 844.6,
+              "status": "在售"
+            },
+            {
+              "sku": "A1014",
+              "name": "品茗杯（家用装）",
+              "category": "茶具",
+              "price": 263.2,
+              "status": "已下架"
+            },
+            {
+              "sku": "A1015",
+              "name": "品茗杯（礼盒装）",
+              "category": "茶具",
+              "price": 293.0,
+              "status": "在售"
+            },
+            {
+              "sku": "A1016",
+              "name": "品茗杯（便携款）",
+              "category": "茶具",
+              "price": 489.0,
+              "status": "在售"
+            },
+            {
+              "sku": "A1154",
+              "name": "品茗杯（旅行装）",
+              "category": "茶具",
+              "price": 120.6,
+              "status": "在售"
+            },
+            {
+              "sku": "A1155",
+              "name": "品茗杯（家用装）",
+              "category": "茶具",
+              "price": 898.4,
+              "status": "在售"
+            },
+            {
+              "sku": "A1156",
+              "name": "品茗杯（礼盒装）",
+              "category": "茶具",
+              "price": 97.5,
+              "status": "在售"
+            },
+            {
+              "sku": "A1157",
+              "name": "品茗杯（便携款）",
+              "category": "茶具",
+              "price": 622.1,
+              "status": "在售"
+            },
+            {
+              "sku": "A1295",
+              "name": "品茗杯（旅行装）",
+              "category": "茶具",
+              "price": 417.1,
+              "status": "在售"
+            },
+            {
+              "sku": "A1296",
+              "name": "品茗杯（家用装）",
+              "category": "茶具",
+              "price": 89.9,
+              "status": "在售"
+            },
+            {
+              "sku": "A1297",
+              "name": "品茗杯（礼盒装）",
+              "category": "茶具",
+              "price": 746.9,
+              "status": "在售"
+            },
+            {
+              "sku": "A1298",
+              "name": "品茗杯（便携款）",
+              "category": "茶具",
+              "price": 359.5,
+              "status": "在售"
+            }
+          ]
+        },
+        "ok": true
+      },
+      {
+        "call_id": "c49f1065-2050-47ad-a1d7-129c58aba225",
+        "name": "compute_quote",
+        "arguments": {
+          "quantity": 10,
+          "sku": "A1014"
+        },
+        "content": {
+          "error": {
+            "code": "not_found",
+            "message": "可报价商品（不存在或已下架）不存在：A1014",
+            "hint": "已下架商品不可报价；可用 search_products 换在售商品"
+          }
+        },
+        "ok": true
+      },
+      {
+        "call_id": "f570d335-2248-4e26-ae18-e0c966c98c78",
+        "name": "get_product",
+        "arguments": {
+          "sku": "A1014"
+        },
+        "content": {
+          "sku": "A1014",
+          "name": "品茗杯（家用装）",
+          "category": "茶具",
+          "price": 263.2,
+          "status": "已下架"
+        },
+        "ok": true
+      }
+    ],
+    "cost_complete": false
+  }
+}

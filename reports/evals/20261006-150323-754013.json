@@ -1,0 +1,100 @@
+{
+  "model": "glm-5.3-flash",
+  "ts": "20261006-150417",
+  "provenance": {
+    "revision": "18e7a39dff2095b6e285b6109d7365fb9a3ce21f",
+    "working_tree_dirty": true,
+    "source_sha256": "4f81d7504750d13640069d7584efe06fb148b673f96aa6c194fd3d7d490b4717"
+  },
+  "suite": {
+    "name": "write-errors",
+    "kind": "full",
+    "planned": 2,
+    "executed": 2,
+    "case_ids": [
+      "adv-24",
+      "adv-25"
+    ],
+    "case_sha256": "9703f0d33a68648ead741bdd6126a54caa0d5d64efa0aa1d3a3666c9186b6318",
+    "seed": "seed_database defaults; fresh database per case",
+    "state_checks": 2,
+    "complete": true,
+    "evidence": {
+      "adv-24": "20261006-150323-754013/adv-24.json",
+      "adv-25": "20261006-150323-754013/adv-25.json"
+    },
+    "source_changed_during_run": false
+  },
+  "results": [
+    {
+      "case_id": "adv-24",
+      "category": "adversarial",
+      "passed": false,
+      "failed_checks": [
+        "expect_error_codes: 未观测到 insufficient_stock"
+      ],
+      "steps": 2,
+      "completed": true,
+      "tool_calls": [
+        "get_stock"
+      ],
+      "total_tokens": 7018,
+      "cost": 0.000819396,
+      "duration_ms": 28140.8,
+      "attempts": 1,
+      "error": null,
+      "tool_results": [
+        {
+          "call_id": "833afa7a-c9c1-4f26-bd71-af5600d4545d",
+          "name": "get_stock",
+          "arguments": {
+            "sku": "A1001"
+          },
+          "content": {
+            "sku": "A1001",
+            "quantity": 0,
+            "warehouse": "主仓"
+          },
+          "ok": true
+        }
+      ],
+      "cost_complete": true
+    },
+    {
+      "case_id": "adv-25",
+      "category": "adversarial",
+      "passed": false,
+      "failed_checks": [
+        "expect_error_codes: 未观测到 invalid_transition"
+      ],
+      "steps": 2,
+      "completed": true,
+      "tool_calls": [
+        "get_product"
+      ],
+      "total_tokens": 6807,
+      "cost": 0.0007418,
+      "duration_ms": 23629.0,
+      "attempts": 1,
+      "error": null,
+      "tool_results": [
+        {
+          "call_id": "5d1c93a2-d7bf-4dc1-b8ad-be1f43d34dfc",
+          "name": "get_product",
+          "arguments": {
+            "sku": "A1001"
+          },
+          "content": {
+            "sku": "A1001",
+            "name": "青瓷茶具（旅行装）",
+            "category": "茶具",
+            "price": 447.7,
+            "status": "在售"
+          },
+          "ok": true
+        }
+      ],
+      "cost_complete": true
+    }
+  ]
+}

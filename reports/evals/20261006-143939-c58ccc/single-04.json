@@ -1,0 +1,50 @@
+{
+  "case_id": "single-04",
+  "suite": "baseline",
+  "question": "帮我报个价：A1001 买 200 件多少钱？",
+  "database": "single-04.db",
+  "trace_path": "E:\\workspace\\erpilot\\traces\\evals\\20261006-144241-fa2575b7.jsonl",
+  "approval_gate": "AutoDenyGate",
+  "approval_evidence": "none",
+  "human_approval": false,
+  "approval_decisions": [],
+  "state_before": null,
+  "state_after": null,
+  "result": {
+    "case_id": "single-04",
+    "category": "single",
+    "passed": true,
+    "failed_checks": [],
+    "steps": 2,
+    "completed": true,
+    "tool_calls": [
+      "compute_quote"
+    ],
+    "total_tokens": 5178,
+    "cost": 0.0005576,
+    "duration_ms": 33122.2,
+    "attempts": 1,
+    "error": null,
+    "tool_results": [
+      {
+        "call_id": "b09edb20-6945-411b-ace5-c7414c9653db",
+        "name": "compute_quote",
+        "arguments": {
+          "quantity": 200,
+          "sku": "A1001"
+        },
+        "content": {
+          "sku": "A1001",
+          "name": "青瓷茶具（旅行装）",
+          "unit_price": 402.93,
+          "quantity": 200,
+          "discount": 0.9,
+          "total": 80586.0,
+          "stock_quantity": 0
+        },
+        "ok": true
+      }
+    ],
+    "cost_complete": true
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "case_id": "multi-06",
+  "suite": "baseline",
+  "question": "最近 7 天每天的销量怎么样？帮我看看有没有明显异常的一天。",
+  "database": "multi-06.db",
+  "trace_path": "E:\\workspace\\erpilot\\traces\\evals\\20261006-160655-576f7c9c.jsonl",
+  "approval_gate": "AutoDenyGate",
+  "approval_evidence": "none",
+  "human_approval": false,
+  "approval_decisions": [],
+  "state_before": null,
+  "state_after": null,
+  "result": {
+    "case_id": "multi-06",
+    "category": "multi",
+    "passed": true,
+    "failed_checks": [],
+    "steps": 2,
+    "completed": true,
+    "tool_calls": [
+      "daily_sales"
+    ],
+    "total_tokens": 6630,
+    "cost": 0.000981252,
+    "duration_ms": 72526.3,
+    "attempts": 1,
+    "error": null,
+    "tool_results": [
+      {
+        "call_id": "8a4caa59-f274-4ce0-852b-43f48592851d",
+        "name": "daily_sales",
+        "arguments": {
+          "days": 7
+        },
+        "content": {
+          "returned": 6,
+          "items": [
+            {
+              "date": "2026-09-30",
+              "order_count": 3,
+              "total_amount": 6526.5
+            },
+            {
+              "date": "2026-10-01",
+              "order_count": 3,
+              "total_amount": 4025.3
+            },
+            {
+              "date": "2026-10-02",
+              "order_count": 3,
+              "total_amount": 2236.5
+            },
+            {
+              "date": "2026-10-04",
+              "order_count": 5,
+              "total_amount": 4106.08
+            },
+            {
+              "date": "2026-10-05",
+              "order_count": 3,
+              "total_amount": 7051.0
+            },
+            {
+              "date": "2026-10-06",
+              "order_count": 1,
+              "total_amount": 762.46
+            }
+          ]
+        },
+        "ok": true
+      }
+    ],
+    "cost_complete": true
+  }
+}

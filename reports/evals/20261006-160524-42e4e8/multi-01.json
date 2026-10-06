@@ -1,0 +1,110 @@
+{
+  "case_id": "multi-01",
+  "suite": "baseline",
+  "question": "订单 SO20261005-0254 里买了些什么？这些东西现在还有货吗？",
+  "database": "multi-01.db",
+  "trace_path": "E:\\workspace\\erpilot\\traces\\evals\\20261006-160525-0b6dd0b9.jsonl",
+  "approval_gate": "AutoDenyGate",
+  "approval_evidence": "none",
+  "human_approval": false,
+  "approval_decisions": [],
+  "state_before": null,
+  "state_after": null,
+  "result": {
+    "case_id": "multi-01",
+    "category": "multi",
+    "passed": true,
+    "failed_checks": [],
+    "steps": 3,
+    "completed": true,
+    "tool_calls": [
+      "get_order",
+      "get_stock",
+      "get_stock",
+      "get_stock"
+    ],
+    "total_tokens": 8478,
+    "cost": 0.000915636,
+    "duration_ms": 89322.4,
+    "attempts": 1,
+    "error": null,
+    "tool_results": [
+      {
+        "call_id": "697333d9-8414-4dc9-bf04-cedc9244ee6c",
+        "name": "get_order",
+        "arguments": {
+          "order_id": "SO20261005-0254"
+        },
+        "content": {
+          "order_id": "SO20261005-0254",
+          "customer": "沈砚秋",
+          "status": "待发货",
+          "created_at": "2026-10-05T13:30:58.562384",
+          "items": [
+            {
+              "sku": "B1211",
+              "name": "笔架（半生半熟）",
+              "quantity": 1,
+              "unit_price": 249.7
+            },
+            {
+              "sku": "A1169",
+              "name": "茶叶罐（便携款）",
+              "quantity": 5,
+              "unit_price": 489.6
+            },
+            {
+              "sku": "E1279",
+              "name": "刺绣团扇（素色）",
+              "quantity": 1,
+              "unit_price": 292.3
+            }
+          ],
+          "note": null,
+          "total_amount": 2990.0
+        },
+        "ok": true
+      },
+      {
+        "call_id": "9cb9664e-5074-4b01-bc29-d279c2ea185d",
+        "name": "get_stock",
+        "arguments": {
+          "sku": "B1211"
+        },
+        "content": {
+          "sku": "B1211",
+          "quantity": 27,
+          "warehouse": "主仓"
+        },
+        "ok": true
+      },
+      {
+        "call_id": "9f7e4fbb-e20b-4fe4-802a-473f9ec7a270",
+        "name": "get_stock",
+        "arguments": {
+          "sku": "E1279"
+        },
+        "content": {
+          "sku": "E1279",
+          "quantity": 175,
+          "warehouse": "主仓"
+        },
+        "ok": true
+      },
+      {
+        "call_id": "fd769323-18d3-4bf9-bf77-72a049a1241d",
+        "name": "get_stock",
+        "arguments": {
+          "sku": "A1169"
+        },
+        "content": {
+          "sku": "A1169",
+          "quantity": 171,
+          "warehouse": "主仓"
+        },
+        "ok": true
+      }
+    ],
+    "cost_complete": true
+  }
+}

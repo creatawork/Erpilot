@@ -1,0 +1,29 @@
+{
+  "case_id": "edge-07",
+  "suite": "baseline",
+  "question": "算一下 A1001 买 0 件要多少钱。",
+  "database": "edge-07.db",
+  "trace_path": "E:\\workspace\\erpilot\\traces\\evals\\20261006-145217-374e27e0.jsonl",
+  "approval_gate": "AutoDenyGate",
+  "approval_evidence": "none",
+  "human_approval": false,
+  "approval_decisions": [],
+  "state_before": null,
+  "state_after": null,
+  "result": {
+    "case_id": "edge-07",
+    "category": "edge",
+    "passed": true,
+    "failed_checks": [],
+    "steps": 1,
+    "completed": true,
+    "tool_calls": [],
+    "total_tokens": 2815,
+    "cost": 0.00036662,
+    "duration_ms": 3403.3,
+    "attempts": 1,
+    "error": null,
+    "tool_results": [],
+    "cost_complete": true
+  }
+}

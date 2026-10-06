@@ -1,0 +1,62 @@
+{
+  "case_id": "single-02",
+  "suite": "baseline",
+  "question": "查一下商品 A1001 的详情，现价多少钱？",
+  "database": "single-02.db",
+  "trace_path": "E:\\workspace\\erpilot\\traces\\evals\\20261006-143946-dc5dcc16.jsonl",
+  "approval_gate": "AutoDenyGate",
+  "approval_evidence": "none",
+  "human_approval": false,
+  "approval_decisions": [],
+  "state_before": null,
+  "state_after": null,
+  "result": {
+    "case_id": "single-02",
+    "category": "single",
+    "passed": true,
+    "failed_checks": [],
+    "steps": 2,
+    "completed": true,
+    "tool_calls": [
+      "get_product"
+    ],
+    "total_tokens": 7512,
+    "cost": 0.000768244,
+    "duration_ms": 99608.6,
+    "attempts": 2,
+    "error": null,
+    "tool_results": [
+      {
+        "call_id": "65add3fe-728d-4a2f-be09-c0590c4f60ef",
+        "name": "get_product",
+        "arguments": {
+          "sku": "A1001"
+        },
+        "content": {
+          "sku": "A1001",
+          "name": "青瓷茶具（旅行装）",
+          "category": "茶具",
+          "price": 447.7,
+          "status": "在售"
+        },
+        "ok": true
+      },
+      {
+        "call_id": "44af9e4c-7048-4472-911d-c19438186bb9",
+        "name": "get_product",
+        "arguments": {
+          "sku": "A1001"
+        },
+        "content": {
+          "sku": "A1001",
+          "name": "青瓷茶具（旅行装）",
+          "category": "茶具",
+          "price": 447.7,
+          "status": "在售"
+        },
+        "ok": true
+      }
+    ],
+    "cost_complete": false
+  }
+}

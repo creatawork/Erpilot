@@ -1,0 +1,156 @@
+{
+  "case_id": "multi-04",
+  "suite": "baseline",
+  "question": "看看这个月卖得最好的 5 个商品，再告诉我它们的库存够不够。",
+  "database": "multi-04.db",
+  "trace_path": "E:\\workspace\\erpilot\\traces\\evals\\20261006-144701-17154dd1.jsonl",
+  "approval_gate": "AutoDenyGate",
+  "approval_evidence": "none",
+  "human_approval": false,
+  "approval_decisions": [],
+  "state_before": null,
+  "state_after": null,
+  "result": {
+    "case_id": "multi-04",
+    "category": "multi",
+    "passed": true,
+    "failed_checks": [],
+    "steps": 3,
+    "completed": true,
+    "tool_calls": [
+      "top_products",
+      "get_stock",
+      "get_stock",
+      "get_stock",
+      "get_stock",
+      "get_stock"
+    ],
+    "total_tokens": 8759,
+    "cost": 0.001037528,
+    "duration_ms": 13630.0,
+    "attempts": 1,
+    "error": null,
+    "tool_results": [
+      {
+        "call_id": "chatcmpl-tool-8c4e06d1af0eef6c",
+        "name": "top_products",
+        "arguments": {
+          "days": 30,
+          "limit": 5
+        },
+        "content": {
+          "returned": 5,
+          "items": [
+            {
+              "sku": "D1258",
+              "name": "白瓷盖碗（收藏款）",
+              "category": "瓷器",
+              "total_quantity": 43,
+              "order_count": 6,
+              "total_amount": 27420.34
+            },
+            {
+              "sku": "B1202",
+              "name": "镇尺（初学套）",
+              "category": "文房",
+              "total_quantity": 26,
+              "order_count": 3,
+              "total_amount": 2142.4
+            },
+            {
+              "sku": "A1152",
+              "name": "公道杯（礼盒装）",
+              "category": "茶具",
+              "total_quantity": 25,
+              "order_count": 2,
+              "total_amount": 2907.5
+            },
+            {
+              "sku": "D1261",
+              "name": "青瓷花瓶（家用）",
+              "category": "瓷器",
+              "total_quantity": 25,
+              "order_count": 2,
+              "total_amount": 14795.0
+            },
+            {
+              "sku": "C1245",
+              "name": "塔香（禅意款）",
+              "category": "香道",
+              "total_quantity": 22,
+              "order_count": 2,
+              "total_amount": 3515.6
+            }
+          ]
+        },
+        "ok": true
+      },
+      {
+        "call_id": "613bf76a-b787-4308-9d1f-b7b42cffe655",
+        "name": "get_stock",
+        "arguments": {
+          "sku": "D1258"
+        },
+        "content": {
+          "sku": "D1258",
+          "quantity": 23,
+          "warehouse": "主仓"
+        },
+        "ok": true
+      },
+      {
+        "call_id": "84341fd7-9f81-46f7-b803-c51fae91bcc6",
+        "name": "get_stock",
+        "arguments": {
+          "sku": "A1152"
+        },
+        "content": {
+          "sku": "A1152",
+          "quantity": 35,
+          "warehouse": "主仓"
+        },
+        "ok": true
+      },
+      {
+        "call_id": "2fe2e1bd-a434-4076-94b8-a127978e460a",
+        "name": "get_stock",
+        "arguments": {
+          "sku": "D1261"
+        },
+        "content": {
+          "sku": "D1261",
+          "quantity": 159,
+          "warehouse": "主仓"
+        },
+        "ok": true
+      },
+      {
+        "call_id": "da9ff313-9a82-4e1f-9bf6-e66088cbb64c",
+        "name": "get_stock",
+        "arguments": {
+          "sku": "C1245"
+        },
+        "content": {
+          "sku": "C1245",
+          "quantity": 187,
+          "warehouse": "主仓"
+        },
+        "ok": true
+      },
+      {
+        "call_id": "8a14d1c8-9312-4e81-abcf-dd976f9ef2a0",
+        "name": "get_stock",
+        "arguments": {
+          "sku": "B1202"
+        },
+        "content": {
+          "sku": "B1202",
+          "quantity": 118,
+          "warehouse": "主仓"
+        },
+        "ok": true
+      }
+    ],
+    "cost_complete": true
+  }
+}

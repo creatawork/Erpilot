@@ -7,7 +7,7 @@ from agent_core.dotenv import find_dotenv, load_dotenv
 from agent_core.llm import LLMClient, LLMConfig
 from openai import AsyncOpenAI
 
-from evals.baseline import BASELINE_CASES, run_baseline
+from evals.baseline import SUITES, run_baseline, select_cases
 from evals.runner import Budget
 
 
@@ -18,12 +18,17 @@ def main() -> None:
     parser.add_argument("--budget", type=float,
                         default=float(os.environ.get("ERPILOT_EVAL_BUDGET", "0.1")))
     parser.add_argument("--case", action="append", default=[], help="case id，可重复；缺省完整集")
+    parser.add_argument("--suite", choices=list(SUITES), default="baseline",
+                        help=("baseline 原基线；write-errors 写错误观察集；"
+                              "write-preflight 写前安全预检"))
     parser.add_argument("--timeout", type=float, default=30, help="单次模型请求超时秒数")
     args = parser.parse_args()
-    cases = [c for c in BASELINE_CASES if not args.case or c.id in args.case]
-    unknown = set(args.case) - {c.id for c in cases}
-    if unknown or args.budget <= 0 or args.timeout <= 0:
-        parser.error(f"未知 case {sorted(unknown)} 或预算/超时非正数")
+    try:
+        cases = select_cases(args.suite, args.case)
+    except ValueError as exc:
+        parser.error(str(exc))
+    if args.budget <= 0 or args.timeout <= 0:
+        parser.error("预算/超时须为正数")
     config = LLMConfig.from_env()
     # 单层重试：runner 可见每次尝试，避免 SDK 隐式重试扩大耗时与费用。
     sdk = AsyncOpenAI(api_key=config.api_key, base_url=config.base_url,

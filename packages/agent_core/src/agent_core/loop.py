@@ -110,7 +110,9 @@ class ApprovalPending:
 
     事件产出后本轮 run 在此挂起：决策经审批门 respond(pending_id, decision)
     回填前，后续事件不再产出。call_id 与 ToolCallStarted.call.id 配对；
-    pending_id 是消费方回填决策的凭据。
+    pending_id 是消费方回填决策的凭据。client_token（T05）是服务端在展示前
+    生成的稳定幂等键——消费方必须在展示该事件前把它连同 call_id/参数落盘，
+    恢复才不依赖闭包；为空表示调用方未接恢复层。
     """
 
     call_id: str
@@ -118,6 +120,7 @@ class ApprovalPending:
     tool: str
     risk: str
     arguments: dict
+    client_token: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -266,6 +269,7 @@ class AgentLoop:
                     call_id=signal.call_id, pending_id=signal.pending_id,
                     tool=signal.request.tool, risk=signal.request.risk,
                     arguments=signal.request.arguments,
+                    client_token=signal.request.client_token,
                 )
                 decision = await self._await_decision(signal)
                 yield ApprovalResolved(

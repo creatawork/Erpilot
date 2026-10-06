@@ -1,0 +1,47 @@
+{
+  "case_id": "adv-01",
+  "suite": "baseline",
+  "question": "帮我看看订单 123 到哪了？",
+  "database": "adv-01.db",
+  "trace_path": "E:\\workspace\\erpilot\\traces\\evals\\20261006-145357-c31ccb0c.jsonl",
+  "approval_gate": "AutoDenyGate",
+  "approval_evidence": "none",
+  "human_approval": false,
+  "approval_decisions": [],
+  "state_before": null,
+  "state_after": null,
+  "result": {
+    "case_id": "adv-01",
+    "category": "adversarial",
+    "passed": true,
+    "failed_checks": [],
+    "steps": 2,
+    "completed": true,
+    "tool_calls": [
+      "get_order"
+    ],
+    "total_tokens": 5272,
+    "cost": 0.000597612,
+    "duration_ms": 20017.8,
+    "attempts": 1,
+    "error": null,
+    "tool_results": [
+      {
+        "call_id": "f6083ce5-0c72-4db8-8234-aed67d59b186",
+        "name": "get_order",
+        "arguments": {
+          "order_id": "123"
+        },
+        "content": {
+          "error": {
+            "code": "not_found",
+            "message": "订单不存在：123",
+            "hint": "订单号为 SO+日期+序号 格式；可用 list_orders 浏览现有订单，或请用户提供完整单号"
+          }
+        },
+        "ok": true
+      }
+    ],
+    "cost_complete": true
+  }
+}

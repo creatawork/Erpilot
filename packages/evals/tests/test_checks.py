@@ -106,6 +106,17 @@ def test_edge08_disclosed_substitution_passes() -> None:
     ) == []
 
 
+def test_edge08_real_trace_wording_with_ascii_quotes_passes() -> None:
+    """The real trace encloses the unsupported status in ASCII quotes."""
+    text = (
+        '系统里没有"已退货"这个状态，订单状态只有待付款、待发货、'
+        '已发货、已签收、已取消、已退款。'
+        '最接近的是已退款，我按这个状态查了 33 单。'
+    )
+    assert evaluate_case(edge08(), tool_calls=["list_orders"], visible_text=text,
+                         steps=2, completed=True) == []
+
+
 def test_edge08_silent_substitution_fails() -> None:
     """失败例 A：全程不提「已退货」直接改查已退款——擅自替换筛选条件。"""
     failed = evaluate_case(

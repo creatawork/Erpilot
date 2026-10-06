@@ -38,11 +38,17 @@ DENIED_NOTE = "该操作未经批准，未对系统产生任何变更；如实�
 
 @dataclass(frozen=True, slots=True)
 class ApprovalRequest:
-    """一次待审批的写调用：工具名、风险等级与已校验的入参。"""
+    """一次待审批的写调用：工具名、风险等级与已校验的入参。
+
+    client_token（T05，ADR-0008）：服务端在审批展示**前**生成的稳定幂等键，
+    经 token_factory 注入并随请求透出——持久化与恢复都用它，执行段不得
+    重新生成。为空表示调用方未接恢复层（CLI/同步评测门，行为不变）。
+    """
 
     tool: str
     risk: str
     arguments: dict
+    client_token: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,8 +109,16 @@ def _denial_payload(decision: ApprovalDecision) -> str:
     )
 
 
-def guarded(tool: Tool, gate: ApprovalGate | SuspendingGate) -> Tool:
+def guarded(
+    tool: Tool,
+    gate: ApprovalGate | SuspendingGate,
+    token_factory: Callable[[], str] | None = None,
+) -> Tool:
     """给带 risk 的工具包上审批门；risk=None 的只读工具原样返回。
+
+    token_factory（T05，ADR-0008）：提供时在**审批展示前**生成稳定幂等键——
+    挂在请求上供组合层持久化，批准执行时注入同一参数对象，恢复路径复用
+    原 token。不提供时行为与 M4 完全一致（同步评测门/CLI 不接恢复层）。
 
     同名同 schema——对模型透明，对 loop 透明：同步门在 handler 内先 review
     后执行；挂起门抛 ApprovalSuspended 由 loop 接管。拒绝一律返回未执行
@@ -113,17 +127,24 @@ def guarded(tool: Tool, gate: ApprovalGate | SuspendingGate) -> Tool:
     if tool.risk is None:
         return tool
 
+    def _inject(args: BaseModel, token: str) -> None:
+        if token and "client_token" in type(args).model_fields:
+            args.client_token = token
+
     suspend = getattr(gate, "suspend", None)
     if suspend is not None:  # 挂起式事件门：等待决策发生在 loop 层
 
         async def suspending_handler(args: BaseModel) -> object:
+            token = token_factory() if token_factory else ""
             request = ApprovalRequest(
-                tool=tool.name, risk=tool.risk or "", arguments=args.model_dump()
+                tool=tool.name, risk=tool.risk or "", arguments=args.model_dump(),
+                client_token=token,
             )
 
             async def resume(decision: ApprovalDecision) -> object:
                 if not decision.approved:
                     return _denial_payload(decision)
+                _inject(args, token)  # 原 token 进执行段，恢复重放才对得上幂等表
                 return await tool.handler(args)
 
             raise suspend(request, resume)
@@ -135,13 +156,19 @@ def guarded(tool: Tool, gate: ApprovalGate | SuspendingGate) -> Tool:
             handler=suspending_handler,
             risk=tool.risk,
             retry_safe=tool.retry_safe,
+            schema_version=tool.schema_version,
         )
 
     async def handler(args: BaseModel) -> object:
-        request = ApprovalRequest(tool=tool.name, risk=tool.risk or "", arguments=args.model_dump())
+        token = token_factory() if token_factory else ""
+        request = ApprovalRequest(
+            tool=tool.name, risk=tool.risk or "", arguments=args.model_dump(),
+            client_token=token,
+        )
         decision = await gate.review(request)  # type: ignore[attr-defined]
         if not decision.approved:
             return _denial_payload(decision)
+        _inject(args, token)
         return await tool.handler(args)
 
     return Tool(
@@ -151,6 +178,7 @@ def guarded(tool: Tool, gate: ApprovalGate | SuspendingGate) -> Tool:
         handler=handler,
         risk=tool.risk,
         retry_safe=tool.retry_safe,
+        schema_version=tool.schema_version,
     )
 
 
@@ -212,6 +240,10 @@ class AutoApproveGate:
         return ApprovalDecision(approved=True)
 
 
-def guard_tools(tools: list[Tool], gate: ApprovalGate | SuspendingGate) -> list[Tool]:
+def guard_tools(
+    tools: list[Tool],
+    gate: ApprovalGate | SuspendingGate,
+    token_factory: Callable[[], str] | None = None,
+) -> list[Tool]:
     """按工具遍历包门：只读原样、带 risk 的过门（组合层装配入口）。"""
-    return [guarded(t, gate) for t in tools]
+    return [guarded(t, gate, token_factory) for t in tools]

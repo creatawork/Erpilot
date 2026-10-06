@@ -1,0 +1,62 @@
+{
+  "case_id": "edge-02",
+  "suite": "baseline",
+  "question": "查一下商品 SKU-NOEXIST-404 的信息。",
+  "database": "edge-02.db",
+  "trace_path": "E:\\workspace\\erpilot\\traces\\evals\\20261006-144941-a45b7e6c.jsonl",
+  "approval_gate": "AutoDenyGate",
+  "approval_evidence": "none",
+  "human_approval": false,
+  "approval_decisions": [],
+  "state_before": null,
+  "state_after": null,
+  "result": {
+    "case_id": "edge-02",
+    "category": "edge",
+    "passed": true,
+    "failed_checks": [],
+    "steps": 2,
+    "completed": true,
+    "tool_calls": [
+      "get_product"
+    ],
+    "total_tokens": 7586,
+    "cost": 0.000792916,
+    "duration_ms": 29269.9,
+    "attempts": 2,
+    "error": null,
+    "tool_results": [
+      {
+        "call_id": "4608a42c-9053-4286-9595-95f98edaa61b",
+        "name": "get_product",
+        "arguments": {
+          "sku": "SKU-NOEXIST-404"
+        },
+        "content": {
+          "error": {
+            "code": "not_found",
+            "message": "商品不存在：SKU-NOEXIST-404",
+            "hint": "可用 search_products 按名称/品类关键词查找 SKU"
+          }
+        },
+        "ok": true
+      },
+      {
+        "call_id": "eebf3eba-6a71-44a1-90be-c367ff0b6761",
+        "name": "get_product",
+        "arguments": {
+          "sku": "SKU-NOEXIST-404"
+        },
+        "content": {
+          "error": {
+            "code": "not_found",
+            "message": "商品不存在：SKU-NOEXIST-404",
+            "hint": "可用 search_products 按名称/品类关键词查找 SKU"
+          }
+        },
+        "ok": true
+      }
+    ],
+    "cost_complete": false
+  }
+}

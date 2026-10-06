@@ -1,0 +1,84 @@
+{
+  "case_id": "multi-05",
+  "suite": "baseline",
+  "question": "订单 SO20261005-0460 里 香囊（禅意款） 的下单价和现在的售价一样吗？差多少？",
+  "database": "multi-05.db",
+  "trace_path": "E:\\workspace\\erpilot\\traces\\evals\\20261006-144715-d3d784d6.jsonl",
+  "approval_gate": "AutoDenyGate",
+  "approval_evidence": "none",
+  "human_approval": false,
+  "approval_decisions": [],
+  "state_before": null,
+  "state_after": null,
+  "result": {
+    "case_id": "multi-05",
+    "category": "multi",
+    "passed": true,
+    "failed_checks": [],
+    "steps": 3,
+    "completed": true,
+    "tool_calls": [
+      "get_order",
+      "get_product"
+    ],
+    "total_tokens": 8052,
+    "cost": 0.00087718,
+    "duration_ms": 17434.2,
+    "attempts": 1,
+    "error": null,
+    "tool_results": [
+      {
+        "call_id": "bccd5bf1-1283-4e7d-959b-17e188130050",
+        "name": "get_order",
+        "arguments": {
+          "order_id": "SO20261005-0460"
+        },
+        "content": {
+          "order_id": "SO20261005-0460",
+          "customer": "闻人语",
+          "status": "已发货",
+          "created_at": "2026-10-05T23:47:57.229106",
+          "items": [
+            {
+              "sku": "B1055",
+              "name": "砚台（初学套）",
+              "quantity": 1,
+              "unit_price": 231.8
+            },
+            {
+              "sku": "C1099",
+              "name": "香囊（禅意款）",
+              "quantity": 1,
+              "unit_price": 148.26
+            },
+            {
+              "sku": "B1061",
+              "name": "镇尺（初学套）",
+              "quantity": 2,
+              "unit_price": 191.2
+            }
+          ],
+          "note": null,
+          "total_amount": 762.46
+        },
+        "ok": true
+      },
+      {
+        "call_id": "chatcmpl-tool-bcf9d6734ef56b1d",
+        "name": "get_product",
+        "arguments": {
+          "sku": "C1099"
+        },
+        "content": {
+          "sku": "C1099",
+          "name": "香囊（禅意款）",
+          "category": "香道",
+          "price": 146.1,
+          "status": "在售"
+        },
+        "ok": true
+      }
+    ],
+    "cost_complete": true
+  }
+}

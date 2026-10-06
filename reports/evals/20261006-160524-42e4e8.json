@@ -1,0 +1,521 @@
+{
+  "model": "glm-5.3-flash",
+  "ts": "20261006-160948",
+  "provenance": {
+    "revision": "18e7a39dff2095b6e285b6109d7365fb9a3ce21f",
+    "working_tree_dirty": true,
+    "source_sha256": "2d94bba4187af5a56ea28f928025735d12e207bf730e1872331c0a8c9df0449b"
+  },
+  "suite": {
+    "name": "baseline",
+    "kind": "targeted",
+    "planned": 3,
+    "executed": 3,
+    "case_ids": [
+      "multi-01",
+      "multi-06",
+      "edge-08"
+    ],
+    "case_sha256": "2fe7f618e44ebc5f543b826e7bfceea8de08b70acee376687f957f731001a546",
+    "seed": "seed_database defaults; fresh database per case",
+    "state_checks": 0,
+    "complete": true,
+    "evidence": {
+      "multi-01": "20261006-160524-42e4e8/multi-01.json",
+      "multi-06": "20261006-160524-42e4e8/multi-06.json",
+      "edge-08": "20261006-160524-42e4e8/edge-08.json"
+    },
+    "source_changed_during_run": false
+  },
+  "results": [
+    {
+      "case_id": "multi-01",
+      "category": "multi",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 3,
+      "completed": true,
+      "tool_calls": [
+        "get_order",
+        "get_stock",
+        "get_stock",
+        "get_stock"
+      ],
+      "total_tokens": 8478,
+      "cost": 0.000915636,
+      "duration_ms": 89322.4,
+      "attempts": 1,
+      "error": null,
+      "tool_results": [
+        {
+          "call_id": "697333d9-8414-4dc9-bf04-cedc9244ee6c",
+          "name": "get_order",
+          "arguments": {
+            "order_id": "SO20261005-0254"
+          },
+          "content": {
+            "order_id": "SO20261005-0254",
+            "customer": "沈砚秋",
+            "status": "待发货",
+            "created_at": "2026-10-05T13:30:58.562384",
+            "items": [
+              {
+                "sku": "B1211",
+                "name": "笔架（半生半熟）",
+                "quantity": 1,
+                "unit_price": 249.7
+              },
+              {
+                "sku": "A1169",
+                "name": "茶叶罐（便携款）",
+                "quantity": 5,
+                "unit_price": 489.6
+              },
+              {
+                "sku": "E1279",
+                "name": "刺绣团扇（素色）",
+                "quantity": 1,
+                "unit_price": 292.3
+              }
+            ],
+            "note": null,
+            "total_amount": 2990.0
+          },
+          "ok": true
+        },
+        {
+          "call_id": "9cb9664e-5074-4b01-bc29-d279c2ea185d",
+          "name": "get_stock",
+          "arguments": {
+            "sku": "B1211"
+          },
+          "content": {
+            "sku": "B1211",
+            "quantity": 27,
+            "warehouse": "主仓"
+          },
+          "ok": true
+        },
+        {
+          "call_id": "9f7e4fbb-e20b-4fe4-802a-473f9ec7a270",
+          "name": "get_stock",
+          "arguments": {
+            "sku": "E1279"
+          },
+          "content": {
+            "sku": "E1279",
+            "quantity": 175,
+            "warehouse": "主仓"
+          },
+          "ok": true
+        },
+        {
+          "call_id": "fd769323-18d3-4bf9-bf77-72a049a1241d",
+          "name": "get_stock",
+          "arguments": {
+            "sku": "A1169"
+          },
+          "content": {
+            "sku": "A1169",
+            "quantity": 171,
+            "warehouse": "主仓"
+          },
+          "ok": true
+        }
+      ],
+      "cost_complete": true
+    },
+    {
+      "case_id": "multi-06",
+      "category": "multi",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 2,
+      "completed": true,
+      "tool_calls": [
+        "daily_sales"
+      ],
+      "total_tokens": 6630,
+      "cost": 0.000981252,
+      "duration_ms": 72526.3,
+      "attempts": 1,
+      "error": null,
+      "tool_results": [
+        {
+          "call_id": "8a4caa59-f274-4ce0-852b-43f48592851d",
+          "name": "daily_sales",
+          "arguments": {
+            "days": 7
+          },
+          "content": {
+            "returned": 6,
+            "items": [
+              {
+                "date": "2026-09-30",
+                "order_count": 3,
+                "total_amount": 6526.5
+              },
+              {
+                "date": "2026-10-01",
+                "order_count": 3,
+                "total_amount": 4025.3
+              },
+              {
+                "date": "2026-10-02",
+                "order_count": 3,
+                "total_amount": 2236.5
+              },
+              {
+                "date": "2026-10-04",
+                "order_count": 5,
+                "total_amount": 4106.08
+              },
+              {
+                "date": "2026-10-05",
+                "order_count": 3,
+                "total_amount": 7051.0
+              },
+              {
+                "date": "2026-10-06",
+                "order_count": 1,
+                "total_amount": 762.46
+              }
+            ]
+          },
+          "ok": true
+        }
+      ],
+      "cost_complete": true
+    },
+    {
+      "case_id": "edge-08",
+      "category": "edge",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 4,
+      "completed": true,
+      "tool_calls": [
+        "list_orders",
+        "list_orders",
+        "list_orders"
+      ],
+      "total_tokens": 16070,
+      "cost": 0.00206366,
+      "duration_ms": 99588.4,
+      "attempts": 1,
+      "error": null,
+      "tool_results": [
+        {
+          "call_id": "ae215f87-be87-42ce-8e9b-3a0e4faddf35",
+          "name": "list_orders",
+          "arguments": {
+            "status": "已退货"
+          },
+          "content": {
+            "error": {
+              "code": "invalid_argument",
+              "message": "无效取值：已退货",
+              "hint": "可选：待付款 / 待发货 / 已发货 / 已签收 / 已取消 / 已退款"
+            }
+          },
+          "ok": true
+        },
+        {
+          "call_id": "ff9ceda9-fe46-4630-8b91-e79d141eb4d7",
+          "name": "list_orders",
+          "arguments": {
+            "status": "已退款"
+          },
+          "content": {
+            "total": 33,
+            "items": [
+              {
+                "order_id": "SO20260929-0369",
+                "customer": "闻人语",
+                "status": "已退款",
+                "created_at": "2026-09-29T16:02:04",
+                "items_count": 1,
+                "total_amount": 1188.0
+              },
+              {
+                "order_id": "SO20260929-0550",
+                "customer": "崔九思",
+                "status": "已退款",
+                "created_at": "2026-09-29T04:08:41",
+                "items_count": 3,
+                "total_amount": 1105.85
+              },
+              {
+                "order_id": "SO20260924-0419",
+                "customer": "苏辞",
+                "status": "已退款",
+                "created_at": "2026-09-24T06:26:47",
+                "items_count": 1,
+                "total_amount": 874.26
+              },
+              {
+                "order_id": "SO20260922-0242",
+                "customer": "薛小满",
+                "status": "已退款",
+                "created_at": "2026-09-22T20:22:25",
+                "items_count": 4,
+                "total_amount": 3036.9
+              },
+              {
+                "order_id": "SO20260905-0092",
+                "customer": "秦观澜",
+                "status": "已退款",
+                "created_at": "2026-09-05T04:05:38",
+                "items_count": 2,
+                "total_amount": 782.2
+              },
+              {
+                "order_id": "SO20260903-0001",
+                "customer": "方聿修",
+                "status": "已退款",
+                "created_at": "2026-09-03T00:53:52",
+                "items_count": 3,
+                "total_amount": 2350.1
+              },
+              {
+                "order_id": "SO20260829-0265",
+                "customer": "崔九思",
+                "status": "已退款",
+                "created_at": "2026-08-29T06:52:55",
+                "items_count": 1,
+                "total_amount": 127.8
+              },
+              {
+                "order_id": "SO20260828-0021",
+                "customer": "程素心",
+                "status": "已退款",
+                "created_at": "2026-08-28T11:39:40",
+                "items_count": 4,
+                "total_amount": 2976.95
+              },
+              {
+                "order_id": "SO20260827-0307",
+                "customer": "林晚照",
+                "status": "已退款",
+                "created_at": "2026-08-27T10:56:21",
+                "items_count": 2,
+                "total_amount": 324.5
+              },
+              {
+                "order_id": "SO20260820-0358",
+                "customer": "江疏影阁",
+                "status": "已退款",
+                "created_at": "2026-08-20T19:25:58",
+                "items_count": 1,
+                "total_amount": 173.6
+              },
+              {
+                "order_id": "SO20260820-0109",
+                "customer": "陆修远",
+                "status": "已退款",
+                "created_at": "2026-08-20T18:53:31",
+                "items_count": 1,
+                "total_amount": 2264.0
+              },
+              {
+                "order_id": "SO20260818-0521",
+                "customer": "温故",
+                "status": "已退款",
+                "created_at": "2026-08-18T18:02:12",
+                "items_count": 3,
+                "total_amount": 3035.1
+              },
+              {
+                "order_id": "SO20260810-0480",
+                "customer": "陆修远",
+                "status": "已退款",
+                "created_at": "2026-08-10T23:07:32",
+                "items_count": 1,
+                "total_amount": 763.2
+              },
+              {
+                "order_id": "SO20260729-0527",
+                "customer": "白鹿",
+                "status": "已退款",
+                "created_at": "2026-07-29T03:18:40",
+                "items_count": 2,
+                "total_amount": 6336.5
+              },
+              {
+                "order_id": "SO20260728-0290",
+                "customer": "方聿修",
+                "status": "已退款",
+                "created_at": "2026-07-28T07:40:47",
+                "items_count": 1,
+                "total_amount": 6357.0
+              },
+              {
+                "order_id": "SO20260726-0098",
+                "customer": "闻人语",
+                "status": "已退款",
+                "created_at": "2026-07-26T08:28:09",
+                "items_count": 4,
+                "total_amount": 1635.72
+              },
+              {
+                "order_id": "SO20260725-0026",
+                "customer": "程素心",
+                "status": "已退款",
+                "created_at": "2026-07-25T15:47:09",
+                "items_count": 1,
+                "total_amount": 69.4
+              },
+              {
+                "order_id": "SO20260716-0066",
+                "customer": "陆修远",
+                "status": "已退款",
+                "created_at": "2026-07-16T17:54:49",
+                "items_count": 1,
+                "total_amount": 743.2
+              },
+              {
+                "order_id": "SO20260704-0229",
+                "customer": "林晚照",
+                "status": "已退款",
+                "created_at": "2026-07-04T20:30:55",
+                "items_count": 3,
+                "total_amount": 10607.7
+              },
+              {
+                "order_id": "SO20260616-0253",
+                "customer": "程素心",
+                "status": "已退款",
+                "created_at": "2026-06-16T07:57:42",
+                "items_count": 4,
+                "total_amount": 4339.0
+              }
+            ],
+            "note": "列表不含明细；单笔明细用 get_order，按客户聚合用 get_customer_purchases"
+          },
+          "ok": true
+        },
+        {
+          "call_id": "3a2bc3fd-c51c-4db5-a9be-f8ca6b5c1bf3",
+          "name": "list_orders",
+          "arguments": {
+            "status": "已退款",
+            "limit": 20,
+            "offset": 20
+          },
+          "content": {
+            "total": 33,
+            "items": [
+              {
+                "order_id": "SO20260614-0373",
+                "customer": "程素心",
+                "status": "已退款",
+                "created_at": "2026-06-14T12:16:22",
+                "items_count": 1,
+                "total_amount": 210.4
+              },
+              {
+                "order_id": "SO20260614-0477",
+                "customer": "崔九思",
+                "status": "已退款",
+                "created_at": "2026-06-14T08:46:52",
+                "items_count": 2,
+                "total_amount": 455.4
+              },
+              {
+                "order_id": "SO20260613-0231",
+                "customer": "陆修远",
+                "status": "已退款",
+                "created_at": "2026-06-13T17:50:36",
+                "items_count": 3,
+                "total_amount": 322.05
+              },
+              {
+                "order_id": "SO20260611-0113",
+                "customer": "方聿修",
+                "status": "已退款",
+                "created_at": "2026-06-11T06:42:11",
+                "items_count": 4,
+                "total_amount": 829.91
+              },
+              {
+                "order_id": "SO20260608-0577",
+                "customer": "陶然",
+                "status": "已退款",
+                "created_at": "2026-06-08T07:30:58",
+                "items_count": 3,
+                "total_amount": 1848.05
+              },
+              {
+                "order_id": "SO20260606-0188",
+                "customer": "林晚照",
+                "status": "已退款",
+                "created_at": "2026-06-06T00:54:11",
+                "items_count": 1,
+                "total_amount": 164.8
+              },
+              {
+                "order_id": "SO20260531-0325",
+                "customer": "周砚白",
+                "status": "已退款",
+                "created_at": "2026-05-31T00:23:44",
+                "items_count": 2,
+                "total_amount": 3336.2
+              },
+              {
+                "order_id": "SO20260504-0570",
+                "customer": "闻人语",
+                "status": "已退款",
+                "created_at": "2026-05-04T23:44:33",
+                "items_count": 1,
+                "total_amount": 386.4
+              },
+              {
+                "order_id": "SO20260424-0596",
+                "customer": "顾青山",
+                "status": "已退款",
+                "created_at": "2026-04-24T22:15:43",
+                "items_count": 4,
+                "total_amount": 754.62
+              },
+              {
+                "order_id": "SO20260419-0167",
+                "customer": "程素心",
+                "status": "已退款",
+                "created_at": "2026-04-19T21:36:21",
+                "items_count": 1,
+                "total_amount": 580.4
+              },
+              {
+                "order_id": "SO20260419-0554",
+                "customer": "崔九思",
+                "status": "已退款",
+                "created_at": "2026-04-19T08:52:04",
+                "items_count": 1,
+                "total_amount": 342.2
+              },
+              {
+                "order_id": "SO20260411-0190",
+                "customer": "苏辞",
+                "status": "已退款",
+                "created_at": "2026-04-11T08:17:37",
+                "items_count": 2,
+                "total_amount": 610.5
+              },
+              {
+                "order_id": "SO20260409-0547",
+                "customer": "陶然",
+                "status": "已退款",
+                "created_at": "2026-04-09T14:25:03",
+                "items_count": 2,
+                "total_amount": 1437.6
+              }
+            ],
+            "note": "列表不含明细；单笔明细用 get_order，按客户聚合用 get_customer_purchases"
+          },
+          "ok": true
+        }
+      ],
+      "cost_complete": true
+    }
+  ]
+}

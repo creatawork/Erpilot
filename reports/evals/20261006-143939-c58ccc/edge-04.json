@@ -1,0 +1,60 @@
+{
+  "case_id": "edge-04",
+  "suite": "baseline",
+  "question": "把最近 400 天的销量汇总给我看看。",
+  "database": "edge-04.db",
+  "trace_path": "E:\\workspace\\erpilot\\traces\\evals\\20261006-145114-2b4b668d.jsonl",
+  "approval_gate": "AutoDenyGate",
+  "approval_evidence": "none",
+  "human_approval": false,
+  "approval_decisions": [],
+  "state_before": null,
+  "state_after": null,
+  "result": {
+    "case_id": "edge-04",
+    "category": "edge",
+    "passed": true,
+    "failed_checks": [],
+    "steps": 3,
+    "completed": true,
+    "tool_calls": [
+      "sales_summary",
+      "sales_summary"
+    ],
+    "total_tokens": 7692,
+    "cost": 0.0008116320000000001,
+    "duration_ms": 11611.9,
+    "attempts": 1,
+    "error": null,
+    "tool_results": [
+      {
+        "call_id": "e8dca338-2bdf-4f68-a366-e28b734b9e09",
+        "name": "sales_summary",
+        "arguments": {
+          "days": 400
+        },
+        "content": {
+          "error": {
+            "code": "invalid_argument",
+            "message": "days 须在 1~365"
+          }
+        },
+        "ok": true
+      },
+      {
+        "call_id": "1e23e489-8d8d-4095-9235-1c8b0ca10927",
+        "name": "sales_summary",
+        "arguments": {
+          "days": 365
+        },
+        "content": {
+          "days": 365,
+          "order_count": 496,
+          "total_amount": 1202949.9
+        },
+        "ok": true
+      }
+    ],
+    "cost_complete": true
+  }
+}

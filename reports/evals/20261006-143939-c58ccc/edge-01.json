@@ -1,0 +1,83 @@
+{
+  "case_id": "edge-01",
+  "suite": "baseline",
+  "question": "帮我搜一下有没有叫「 Klingon 血酒杯 」的商品。",
+  "database": "edge-01.db",
+  "trace_path": "E:\\workspace\\erpilot\\traces\\evals\\20261006-144929-55d26d88.jsonl",
+  "approval_gate": "AutoDenyGate",
+  "approval_evidence": "none",
+  "human_approval": false,
+  "approval_decisions": [],
+  "state_before": null,
+  "state_after": null,
+  "result": {
+    "case_id": "edge-01",
+    "category": "edge",
+    "passed": true,
+    "failed_checks": [],
+    "steps": 4,
+    "completed": true,
+    "tool_calls": [
+      "search_products",
+      "search_products",
+      "search_products",
+      "search_products"
+    ],
+    "total_tokens": 10163,
+    "cost": 0.0010364039999999999,
+    "duration_ms": 10902.4,
+    "attempts": 1,
+    "error": null,
+    "tool_results": [
+      {
+        "call_id": "f56b9d0f-1d6d-4029-8566-1e1956489f45",
+        "name": "search_products",
+        "arguments": {
+          "keyword": "Klingon 血酒杯"
+        },
+        "content": {
+          "total": 0,
+          "items": []
+        },
+        "ok": true
+      },
+      {
+        "call_id": "02c9ff0e-a09a-4110-a260-4dee01292822",
+        "name": "search_products",
+        "arguments": {
+          "keyword": "血酒"
+        },
+        "content": {
+          "total": 0,
+          "items": []
+        },
+        "ok": true
+      },
+      {
+        "call_id": "dcde2d8c-1c47-417a-86cc-9bee949bd053",
+        "name": "search_products",
+        "arguments": {
+          "keyword": "Klingon"
+        },
+        "content": {
+          "total": 0,
+          "items": []
+        },
+        "ok": true
+      },
+      {
+        "call_id": "075f7aed-446f-4565-bd01-96b2dd317ab8",
+        "name": "search_products",
+        "arguments": {
+          "keyword": "酒杯"
+        },
+        "content": {
+          "total": 0,
+          "items": []
+        },
+        "ok": true
+      }
+    ],
+    "cost_complete": true
+  }
+}

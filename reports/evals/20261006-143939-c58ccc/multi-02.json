@@ -1,0 +1,267 @@
+{
+  "case_id": "multi-02",
+  "suite": "baseline",
+  "question": "白瓷盖碗（收藏款） 最近都出现在哪些订单里？",
+  "database": "multi-02.db",
+  "trace_path": "E:\\workspace\\erpilot\\traces\\evals\\20261006-144547-0569c3fe.jsonl",
+  "approval_gate": "AutoDenyGate",
+  "approval_evidence": "none",
+  "human_approval": false,
+  "approval_decisions": [],
+  "state_before": null,
+  "state_after": null,
+  "result": {
+    "case_id": "multi-02",
+    "category": "multi",
+    "passed": true,
+    "failed_checks": [],
+    "steps": 3,
+    "completed": true,
+    "tool_calls": [
+      "search_products",
+      "get_orders_by_sku",
+      "get_orders_by_sku"
+    ],
+    "total_tokens": 10344,
+    "cost": 0.001259472,
+    "duration_ms": 48888.8,
+    "attempts": 2,
+    "error": null,
+    "tool_results": [
+      {
+        "call_id": "ee1b25e2-ff0c-40f1-b554-805f3647b61f",
+        "name": "search_products",
+        "arguments": {
+          "keyword": "白瓷盖碗"
+        },
+        "content": {
+          "total": 8,
+          "items": [
+            {
+              "sku": "D1114",
+              "name": "白瓷盖碗（手绘）",
+              "category": "瓷器",
+              "price": 389.3,
+              "status": "在售"
+            },
+            {
+              "sku": "D1115",
+              "name": "白瓷盖碗（复古）",
+              "category": "瓷器",
+              "price": 540.0,
+              "status": "在售"
+            },
+            {
+              "sku": "D1116",
+              "name": "白瓷盖碗（家用）",
+              "category": "瓷器",
+              "price": 403.8,
+              "status": "在售"
+            },
+            {
+              "sku": "D1117",
+              "name": "白瓷盖碗（收藏款）",
+              "category": "瓷器",
+              "price": 568.8,
+              "status": "在售"
+            },
+            {
+              "sku": "D1255",
+              "name": "白瓷盖碗（手绘）",
+              "category": "瓷器",
+              "price": 300.7,
+              "status": "在售"
+            },
+            {
+              "sku": "D1256",
+              "name": "白瓷盖碗（复古）",
+              "category": "瓷器",
+              "price": 242.2,
+              "status": "在售"
+            },
+            {
+              "sku": "D1257",
+              "name": "白瓷盖碗（家用）",
+              "category": "瓷器",
+              "price": 411.5,
+              "status": "在售"
+            },
+            {
+              "sku": "D1258",
+              "name": "白瓷盖碗（收藏款）",
+              "category": "瓷器",
+              "price": 635.7,
+              "status": "在售"
+            }
+          ]
+        },
+        "ok": true
+      },
+      {
+        "call_id": "2cbbb51c-bc10-4dc1-8877-01e254ec2417",
+        "name": "get_orders_by_sku",
+        "arguments": {
+          "sku": "D1117"
+        },
+        "content": {
+          "total": 6,
+          "items": [
+            {
+              "order_id": "SO20260826-0407",
+              "customer": "温故",
+              "status": "已签收",
+              "created_at": "2026-08-26T02:43:19",
+              "items_count": 5,
+              "total_amount": 6249.7
+            },
+            {
+              "order_id": "SO20260805-0143",
+              "customer": "齐白石斋",
+              "status": "已签收",
+              "created_at": "2026-08-05T21:57:22",
+              "items_count": 4,
+              "total_amount": 7113.9
+            },
+            {
+              "order_id": "SO20260726-0397",
+              "customer": "闻人语",
+              "status": "已发货",
+              "created_at": "2026-07-26T04:52:39",
+              "items_count": 2,
+              "total_amount": 11431.8
+            },
+            {
+              "order_id": "SO20260712-0499",
+              "customer": "温故",
+              "status": "已签收",
+              "created_at": "2026-07-12T23:37:01",
+              "items_count": 1,
+              "total_amount": 568.8
+            },
+            {
+              "order_id": "SO20260507-0284",
+              "customer": "周砚白",
+              "status": "已签收",
+              "created_at": "2026-05-07T12:49:12",
+              "items_count": 3,
+              "total_amount": 1720.4
+            },
+            {
+              "order_id": "SO20260414-0015",
+              "customer": "薛小满",
+              "status": "已签收",
+              "created_at": "2026-04-14T11:54:06",
+              "items_count": 2,
+              "total_amount": 2916.8
+            }
+          ],
+          "note": "列表不含明细；单笔明细用 get_order"
+        },
+        "ok": true
+      },
+      {
+        "call_id": "7626fb1e-0020-4cfa-b1df-78fcfc5326e4",
+        "name": "get_orders_by_sku",
+        "arguments": {
+          "sku": "D1258"
+        },
+        "content": {
+          "total": 11,
+          "items": [
+            {
+              "order_id": "SO20260929-0539",
+              "customer": "顾青山",
+              "status": "已发货",
+              "created_at": "2026-09-29T08:16:37",
+              "items_count": 4,
+              "total_amount": 4214.94
+            },
+            {
+              "order_id": "SO20260924-0131",
+              "customer": "白鹿",
+              "status": "已签收",
+              "created_at": "2026-09-24T16:02:45",
+              "items_count": 2,
+              "total_amount": 4155.7
+            },
+            {
+              "order_id": "SO20260913-0053",
+              "customer": "林晚照",
+              "status": "已发货",
+              "created_at": "2026-09-13T13:38:50",
+              "items_count": 3,
+              "total_amount": 7303.05
+            },
+            {
+              "order_id": "SO20260913-0111",
+              "customer": "方聿修",
+              "status": "已发货",
+              "created_at": "2026-09-13T02:59:19",
+              "items_count": 3,
+              "total_amount": 12627.0
+            },
+            {
+              "order_id": "SO20260911-0481",
+              "customer": "陆修远",
+              "status": "待发货",
+              "created_at": "2026-09-11T00:30:33",
+              "items_count": 4,
+              "total_amount": 7054.0
+            },
+            {
+              "order_id": "SO20260910-0467",
+              "customer": "陶然",
+              "status": "已发货",
+              "created_at": "2026-09-10T01:01:57",
+              "items_count": 5,
+              "total_amount": 8307.6
+            },
+            {
+              "order_id": "SO20260826-0123",
+              "customer": "崔九思",
+              "status": "已取消",
+              "created_at": "2026-08-26T01:32:20",
+              "items_count": 2,
+              "total_amount": 3295.1
+            },
+            {
+              "order_id": "SO20260728-0290",
+              "customer": "方聿修",
+              "status": "已退款",
+              "created_at": "2026-07-28T06:18:26",
+              "items_count": 1,
+              "total_amount": 6357.0
+            },
+            {
+              "order_id": "SO20260604-0355",
+              "customer": "许清欢",
+              "status": "已签收",
+              "created_at": "2026-06-04T02:25:21",
+              "items_count": 4,
+              "total_amount": 3194.78
+            },
+            {
+              "order_id": "SO20260520-0493",
+              "customer": "温故",
+              "status": "已签收",
+              "created_at": "2026-05-20T09:46:26",
+              "items_count": 1,
+              "total_amount": 635.7
+            },
+            {
+              "order_id": "SO20260430-0587",
+              "customer": "韩青梧",
+              "status": "已签收",
+              "created_at": "2026-04-30T18:15:58",
+              "items_count": 1,
+              "total_amount": 1271.4
+            }
+          ],
+          "note": "列表不含明细；单笔明细用 get_order"
+        },
+        "ok": true
+      }
+    ],
+    "cost_complete": false
+  }
+}

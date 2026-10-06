@@ -7,9 +7,10 @@
 - delta             {text}                               增量回复文本
 - tool_started      {id, name, arguments}                即将执行工具调用
 - tool_finished     {id, name, content, ok}              工具执行完毕（ok=False 时 content 是错误）
-- approval_pending  {call_id, pending_id, tool, risk, arguments}   写调用等待人工审批；
-                                                             流在此挂起，POST /api/chat/approve
-                                                             回填决策后继续
+- approval_pending  {call_id, pending_id, tool, risk, arguments, client_token}
+                    写调用等待人工审批；流在此挂起，POST /api/chat/approve 回填
+                    决策后继续。client_token（T05）是服务端生成的稳定幂等键，
+                    写意图已随本事件前置落盘
 - approval_resolved {call_id, pending_id, tool, approved, reason}  决策已回填
 - done              {steps, completed, usage, cost, duration_ms, trace}   一次 run 收口
 - error             {message}                            服务端异常（随后流关闭）
@@ -44,13 +45,17 @@ def encode_event(event: AgentEvent) -> tuple[str, dict[str, Any]] | None:
             return "tool_started", {"id": call.id, "name": call.name, "arguments": call.arguments}
         case ToolCallFinished(call_id=cid, name=name, content=content, ok=ok):
             return "tool_finished", {"id": cid, "name": name, "content": content, "ok": ok}
-        case ApprovalPending(call_id=cid, pending_id=pid, tool=name, risk=risk, arguments=args):
+        case ApprovalPending(
+            call_id=cid, pending_id=pid, tool=name, risk=risk, arguments=args,
+            client_token=token,
+        ):
             return "approval_pending", {
                 "call_id": cid,
                 "pending_id": pid,
                 "tool": name,
                 "risk": risk,
                 "arguments": args,
+                "client_token": token,
             }
         case ApprovalResolved(
             call_id=cid, pending_id=pid, tool=name, approved=approved, reason=reason

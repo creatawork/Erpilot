@@ -1,0 +1,31 @@
+{
+  "case_id": "multi-06",
+  "suite": "baseline",
+  "question": "最近 7 天每天的销量怎么样？帮我看看有没有明显异常的一天。",
+  "database": "multi-06.db",
+  "trace_path": "E:\\workspace\\erpilot\\traces\\evals\\20261006-161253-189e8f72.jsonl",
+  "approval_gate": "AutoDenyGate",
+  "approval_evidence": "none",
+  "human_approval": false,
+  "approval_decisions": [],
+  "state_before": null,
+  "state_after": null,
+  "result": {
+    "case_id": "multi-06",
+    "category": "multi",
+    "passed": false,
+    "failed_checks": [
+      "run_error: APIConnectionError: Connection error."
+    ],
+    "steps": 0,
+    "completed": false,
+    "tool_calls": [],
+    "total_tokens": 0,
+    "cost": 0.0,
+    "duration_ms": 21163.1,
+    "attempts": 3,
+    "error": "APIConnectionError: Connection error.",
+    "tool_results": [],
+    "cost_complete": false
+  }
+}

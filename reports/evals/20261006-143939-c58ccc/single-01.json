@@ -1,0 +1,68 @@
+{
+  "case_id": "single-01",
+  "suite": "baseline",
+  "question": "帮我查一下订单 SO20261005-0254 现在到什么状态了？",
+  "database": "single-01.db",
+  "trace_path": "E:\\workspace\\erpilot\\traces\\evals\\20261006-143939-f82668fd.jsonl",
+  "approval_gate": "AutoDenyGate",
+  "approval_evidence": "none",
+  "human_approval": false,
+  "approval_decisions": [],
+  "state_before": null,
+  "state_after": null,
+  "result": {
+    "case_id": "single-01",
+    "category": "single",
+    "passed": true,
+    "failed_checks": [],
+    "steps": 2,
+    "completed": true,
+    "tool_calls": [
+      "get_order"
+    ],
+    "total_tokens": 5442,
+    "cost": 0.000615396,
+    "duration_ms": 6086.5,
+    "attempts": 1,
+    "error": null,
+    "tool_results": [
+      {
+        "call_id": "3fdf584a-3531-44e6-a922-be010db68f0a",
+        "name": "get_order",
+        "arguments": {
+          "order_id": "SO20261005-0254"
+        },
+        "content": {
+          "order_id": "SO20261005-0254",
+          "customer": "沈砚秋",
+          "status": "待发货",
+          "created_at": "2026-10-05T12:05:12.629784",
+          "items": [
+            {
+              "sku": "B1211",
+              "name": "笔架（半生半熟）",
+              "quantity": 1,
+              "unit_price": 249.7
+            },
+            {
+              "sku": "A1169",
+              "name": "茶叶罐（便携款）",
+              "quantity": 5,
+              "unit_price": 489.6
+            },
+            {
+              "sku": "E1279",
+              "name": "刺绣团扇（素色）",
+              "quantity": 1,
+              "unit_price": 292.3
+            }
+          ],
+          "note": null,
+          "total_amount": 2990.0
+        },
+        "ok": true
+      }
+    ],
+    "cost_complete": true
+  }
+}

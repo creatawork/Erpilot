@@ -75,7 +75,9 @@ async def test_chat_stream_emits_protocol_events(tmp_path) -> None:
     ]
     assert events[0][1]["model"] == "glm-5.3-flash"
     steps = [data for name, data in events if name == "step"]
-    assert steps == [{"step": 1}, {"step": 2}]
+    assert [data["step"] for data in steps] == [1, 2]
+    assert all(data["run_id"] == events[0][1]["run_id"] for _, data in events)
+    assert [data["seq"] for _, data in events] == list(range(1, len(events) + 1))
     tool_finished = next(data for name, data in events if name == "tool_finished")
     assert tool_finished["ok"] is True and tool_finished["id"] == "call_1"
     done = next(data for name, data in events if name == "done")
@@ -275,6 +277,7 @@ async def test_encode_approval_events() -> None:
         tool="create_order",
         risk=RISK,
         arguments={"sku": "A1001"},
+        client_token="tok-1",
     )
     assert encode_event(pending) == (
         "approval_pending",
@@ -284,6 +287,7 @@ async def test_encode_approval_events() -> None:
             "tool": "create_order",
             "risk": RISK,
             "arguments": {"sku": "A1001"},
+            "client_token": "tok-1",  # T05：稳定幂等键随事件透出，写意图已前置落盘
         },
     )
     resolved = ApprovalResolved(

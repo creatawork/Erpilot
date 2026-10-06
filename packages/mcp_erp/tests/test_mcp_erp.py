@@ -433,3 +433,83 @@ async def test_write_retry_after_lost_response_changes_stock_once(tmp_path, monk
     assert ok and "error" not in json.loads(content)
     assert len(attempts) == 2
     assert repo.get_stock(sku).quantity == before + 5
+
+
+# ---- 写调用身份与恢复执行入口（T05/T06，ADR-0008） ----
+
+
+def _seeded_write_env(tmp_path):
+    db = tmp_path / "identity.db"
+    seed_database(db, n_products=60, n_orders=80)
+    return db, ErpRepository(make_engine(db))
+
+
+def test_bridge_tools_carry_schema_version(seeded_db) -> None:
+    """工具签名版本 = 参数 schema 的 sha256：重建稳定、写工具签名互异。"""
+    from agent_core.approval import AutoDenyGate
+
+    first = {t.name: t.schema_version for t in build_agent_tools(seeded_db)}
+    second = {t.name: t.schema_version for t in build_agent_tools(seeded_db)}
+    assert None not in first.values()
+    assert first == second  # 同 schema 重建 → 同版本（恢复兼容性判定依据）
+    write_tools = build_agent_tools(seeded_db, writes=True, approval_gate=AutoDenyGate())
+    writes = {t.name: t.schema_version for t in write_tools if t.name in WRITE_TOOLS}
+    assert len(set(writes.values())) == len(writes)  # 写工具签名互异
+    # 只读工具签名互异不要求（同签名如 get_product/get_stock 属同一兼容域）
+
+
+def test_write_intent_token_flows_from_gate_to_execution(tmp_path, repo) -> None:
+    """审批前分配的 token 一路进执行段：幂等表里是它，不是执行时新造的。"""
+    import asyncio
+    import sqlite3
+
+    from agent_core.approval import ApprovalDecision, ApprovalSuspended, StreamApprovalGate
+
+    db, repo = _seeded_write_env(tmp_path)
+    sku = next(p.sku for p in repo.list_products(limit=60)
+               if repo.get_stock(p.sku).quantity >= 2)
+    before = repo.get_stock(sku).quantity
+    gate = StreamApprovalGate()
+    tools = {
+        t.name: t for t in build_agent_tools(
+            db, writes=True, approval_gate=gate, token_factory=lambda: "persist-me",
+        )
+    }
+    args = tools["adjust_stock"].params_model.model_validate_json(
+        json.dumps({"sku": sku, "delta": 2})
+    )
+    with pytest.raises(ApprovalSuspended) as exc_info:
+        asyncio.run(tools["adjust_stock"].handler(args))
+    signal = exc_info.value
+    assert signal.request.client_token == "persist-me"  # 执行前、展示时已有
+
+    content = _run(signal.resume(ApprovalDecision(approved=True)))
+    assert "error" not in content
+    assert repo.get_stock(sku).quantity == before + 2
+    with sqlite3.connect(db) as conn:
+        tokens = [r[0] for r in conn.execute("SELECT client_token FROM mutation_requests")]
+    assert tokens == ["persist-me"]
+
+
+def test_execute_write_replays_first_result_with_original_token(tmp_path) -> None:
+    """恢复执行入口：原 token 直呼写工具；重放返回首次结果，库存只变一次。"""
+    from mcp_erp import execute_write_async
+
+    db, repo = _seeded_write_env(tmp_path)
+    sku = next(p.sku for p in repo.list_products(limit=60)
+               if repo.get_stock(p.sku).quantity >= 2)
+    before = repo.get_stock(sku).quantity
+
+    first = _run(execute_write_async(db, "adjust_stock", {"sku": sku, "delta": 4}, "tok-t06"))
+    assert first["quantity"] == before + 4
+    replay = _run(execute_write_async(db, "adjust_stock", {"sku": sku, "delta": 4}, "tok-t06"))
+    assert replay == first
+    assert repo.get_stock(sku).quantity == before + 4  # 只变一次
+
+    business_error = _run(execute_write_async(
+        db, "adjust_stock", {"sku": sku, "delta": -10**9}, "tok-t06-bad",
+    ))
+    assert business_error["error"]["code"] == "insufficient_stock"
+
+    with pytest.raises(ValueError, match="写工具"):
+        _run(execute_write_async(db, "get_order", {"order_id": "x"}, "tok-t06"))

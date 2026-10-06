@@ -352,7 +352,11 @@ def create_server(db_path: Path = DEFAULT_DB, *, include_writes: bool = False) -
     def daily_sales(
         days: Annotated[int, Field(description="统计最近 N 天（1~90）")] = 14,
     ) -> dict[str, Any]:
-        """近 N 天逐日销量点（有效口径）——看趋势、找异常日。"""
+        """近 N×24 小时逐日有效销量。
+
+        仅返回存在有效销量的日期；未返回的日期表示当天有效订单数与有效销量为 0。
+        汇总结果适合看趋势、找异常日；无需再逐单拉取明细，除非用户要求明细。
+        """
         if not 1 <= days <= 90:
             return _err("invalid_argument", "days 须在 1~90")
         items = [p.model_dump(mode="json") for p in repo.daily_sales(days=days)]

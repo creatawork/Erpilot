@@ -31,6 +31,9 @@ class Tool:
     # batch_confirm / single_confirm，审批门（approval.guarded）据此拦截
     risk: str | None = None
     retry_safe: bool = False  # 写工具必须由适配层提供稳定幂等键，才能自动重试
+    # 工具签名版本（T05，ADR-0008）：参数 schema 的 sha256，由适配层填；
+    # 恢复时校验——不兼容的工具版本不得继承原批准
+    schema_version: str | None = None
 
     def openai_schema(self) -> dict[str, Any]:
         """OpenAI tools 参数格式：{"type": "function", "function": {...}}。"""

@@ -197,3 +197,82 @@ def test_stream_gate_discard_cleans_waiter() -> None:
     signal = asyncio.run(make())
     gate.discard(signal.pending_id)
     assert not gate.respond(signal.pending_id, ApprovalDecision(approved=True))
+
+
+# ---- 稳定幂等键注入（T05，ADR-0008）：审批展示前生成，执行段复用 ----
+
+
+async def test_token_factory_allocates_before_suspend_and_resume_reuses_it() -> None:
+    """token 在挂起信号抛出前已生成并挂在请求上；批准执行注入同一 token。"""
+    seen_tokens: list[str] = []
+
+    async def write_handler(params: SkuQuery) -> dict[str, str]:
+        seen_tokens.append(getattr(params, "client_token", ""))
+        return {"executed": params.sku}
+
+    write_tool = Tool(
+        name="adjust_stock", description="调库存", params_model=SkuQuery,
+        handler=write_handler, risk=RISK_SINGLE_CONFIRM,
+    )
+    # 参数模型带 client_token 字段（mcp_erp 写工具的形状）
+    from pydantic import create_model
+
+    TokenSku = create_model(
+        "TokenSku", sku=(str, Field(description="SKU")),
+        client_token=(str | None, Field(default=None)),
+    )
+    token_tool = Tool(
+        name="adjust_stock", description="调库存", params_model=TokenSku,
+        handler=write_handler, risk=RISK_SINGLE_CONFIRM,
+    )
+
+    gate = StreamApprovalGate()
+    wrapped = guarded(token_tool, gate, token_factory=lambda: "token-t05")
+
+    args = TokenSku(sku="A1001")
+    with pytest.raises(ApprovalSuspended) as exc_info:
+        await wrapped.handler(args)
+    signal = exc_info.value
+    assert signal.request.client_token == "token-t05"  # 展示前已分配
+    assert args.client_token is None  # 执行前不落参数对象
+
+    await signal.resume(ApprovalDecision(approved=True))
+    assert seen_tokens == ["token-t05"]  # 原 token 进执行段
+
+    # 无 factory：行为与 M4 一致，请求不带 token
+    plain = guarded(write_tool, StreamApprovalGate())
+    with pytest.raises(ApprovalSuspended) as exc_info:
+        await plain.handler(SkuQuery(sku="A1001"))
+    assert exc_info.value.request.client_token == ""
+
+
+async def test_sync_gate_with_token_factory_injects_after_approval() -> None:
+    """同步门路径：factory 提供时同样展示前分配、批准后注入（评测门不传则不变）。"""
+    seen: list[ApprovalRequest] = []
+    seen_tokens: list[str] = []
+
+    async def write_handler(params: SkuQuery) -> dict[str, str]:
+        seen_tokens.append(getattr(params, "client_token", ""))
+        return {"executed": params.sku}
+
+    from pydantic import create_model
+
+    TokenSku = create_model(
+        "TokenSku", sku=(str, Field(description="SKU")),
+        client_token=(str | None, Field(default=None)),
+    )
+    token_tool = Tool(
+        name="adjust_stock", description="调库存", params_model=TokenSku,
+        handler=write_handler, risk=RISK_SINGLE_CONFIRM,
+    )
+
+    class RecordingGate:
+        async def review(self, request: ApprovalRequest) -> ApprovalDecision:
+            seen.append(request)
+            return ApprovalDecision(approved=True)
+
+    wrapped = guarded(token_tool, RecordingGate(), token_factory=lambda: "sync-token")  # type: ignore[arg-type]
+    await wrapped.handler(TokenSku(sku="B2002"))
+
+    assert seen[0].client_token == "sync-token"
+    assert seen_tokens == ["sync-token"]

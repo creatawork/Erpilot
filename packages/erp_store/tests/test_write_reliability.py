@@ -97,3 +97,69 @@ def test_parallel_same_token_creates_one_order(store):
     assert len({o.order_id for o in orders}) == 1
     assert repo.count_orders(customer="same") == 1
     assert repo.get_stock(sku).quantity == before - 1
+
+
+# ---- 按 token 对账的内部查询（T06，ADR-0008 §3 推演 3） ----
+
+
+def test_lookup_token_distinguishes_found_not_found_and_conflict(store):
+    _, repo, mutations = store
+    sku = available(repo)
+
+    # 查询成功、无记录：不单独证明未执行
+    assert mutations.lookup_token("no-such-token").status == "not_found"
+
+    result = mutations.adjust_stock(sku, 3, client_token="reconcile-1")
+    found = mutations.lookup_token("reconcile-1")
+    assert found.status == "found"
+    assert found.result == [sku, repo.get_stock(sku).quantity]
+    assert result == (sku, repo.get_stock(sku).quantity)
+
+    # 同 token 异参：conflict，结果不给（原批准不可迁移到异参动作）
+    conflict = mutations.lookup_token("reconcile-1")
+    assert conflict.status == "found"
+    assert ErpMutations.canonical_request("adjust_stock", {"sku": sku, "delta": 1}) \
+        != conflict.request
+
+
+def test_lookup_token_rejects_malformed_key(store):
+    _, _, mutations = store
+    with pytest.raises(MutationError, match="幂等键"):
+        mutations.lookup_token("")
+
+
+def test_canonical_request_matches_persisted_request_for_all_four_tools(store):
+    """canonical_request 是幂等表 request 的逆映射：对账靠它判同 token 异参。"""
+    path, repo, mutations = store
+    sku = available(repo)
+    mutations.adjust_stock(sku, 2, client_token="canon-1")
+    mutations.set_product_status(sku, ProductStatus.OFF_SALE, client_token="canon-2")
+    mutations.set_product_status(sku, ProductStatus.ON_SALE, client_token="canon-3")
+    order = mutations.create_order("对账客户", [(sku, 1), (sku, 1)], client_token="canon-4")
+    mutations.cancel_order(order.order_id, client_token="canon-5")
+
+    import json
+
+    from sqlalchemy import create_engine, text
+
+    with create_engine(f"sqlite:///{path}").connect() as conn:
+        rows = dict(conn.execute(
+            text("SELECT client_token, request FROM mutation_requests")
+        ).all())
+
+    assert json.loads(rows["canon-1"]) == ErpMutations.canonical_request(
+        "adjust_stock", {"sku": sku, "delta": 2}
+    )
+    assert json.loads(rows["canon-2"]) == ErpMutations.canonical_request(
+        "set_product_status", {"sku": sku, "status": "已下架"}
+    )
+    assert json.loads(rows["canon-4"]) == ErpMutations.canonical_request(
+        "create_order", {"customer": " 对账客户 ", "items": [
+            {"sku": sku, "quantity": 1}, {"sku": sku, "quantity": 1},
+        ]}
+    )
+    assert json.loads(rows["canon-5"]) == ErpMutations.canonical_request(
+        "cancel_order", {"order_id": order.order_id}
+    )
+    with pytest.raises(ValueError, match="口径"):
+        ErpMutations.canonical_request("get_order", {"order_id": "x"})

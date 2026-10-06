@@ -1,0 +1,316 @@
+{
+  "case_id": "multi-03",
+  "suite": "baseline",
+  "question": "客户 闻人语 一共在我们店里买过哪些东西？总共花了多少钱？",
+  "database": "multi-03.db",
+  "trace_path": "E:\\workspace\\erpilot\\traces\\evals\\20261006-144637-5b8777aa.jsonl",
+  "approval_gate": "AutoDenyGate",
+  "approval_evidence": "none",
+  "human_approval": false,
+  "approval_decisions": [],
+  "state_before": null,
+  "state_after": null,
+  "result": {
+    "case_id": "multi-03",
+    "category": "multi",
+    "passed": true,
+    "failed_checks": [],
+    "steps": 2,
+    "completed": true,
+    "tool_calls": [
+      "get_customer_purchases"
+    ],
+    "total_tokens": 8336,
+    "cost": 0.001239944,
+    "duration_ms": 23855.5,
+    "attempts": 1,
+    "error": null,
+    "tool_results": [
+      {
+        "call_id": "0f6c5392-54f5-40e7-8079-1c78b91474f2",
+        "name": "get_customer_purchases",
+        "arguments": {
+          "customer": "闻人语"
+        },
+        "content": {
+          "customer": "闻人语",
+          "order_count": 44,
+          "total_amount": 94681.39,
+          "total_amount_all": 106703.19,
+          "by_status": [
+            {
+              "status": "已签收",
+              "order_count": 26,
+              "total_amount": 70550.83
+            },
+            {
+              "status": "已发货",
+              "order_count": 10,
+              "total_amount": 24130.56
+            },
+            {
+              "status": "已取消",
+              "order_count": 4,
+              "total_amount": 8519.38
+            },
+            {
+              "status": "已退款",
+              "order_count": 3,
+              "total_amount": 3210.12
+            },
+            {
+              "status": "待付款",
+              "order_count": 1,
+              "total_amount": 292.3
+            }
+          ],
+          "items": [
+            {
+              "sku": "D1117",
+              "name": "白瓷盖碗（收藏款）",
+              "total_quantity": 20,
+              "total_amount": 11376.0
+            },
+            {
+              "sku": "A1018",
+              "name": "盖碗（家用装）",
+              "total_quantity": 21,
+              "total_amount": 10626.0
+            },
+            {
+              "sku": "B1174",
+              "name": "宣纸（100张）",
+              "total_quantity": 30,
+              "total_amount": 7713.0
+            },
+            {
+              "sku": "A1289",
+              "name": "紫砂壶（礼盒装）",
+              "total_quantity": 22,
+              "total_amount": 5364.0
+            },
+            {
+              "sku": "D1253",
+              "name": "汝窑杯（家用）",
+              "total_quantity": 10,
+              "total_amount": 4836.0
+            },
+            {
+              "sku": "A1158",
+              "name": "盖碗（旅行装）",
+              "total_quantity": 10,
+              "total_amount": 4397.0
+            },
+            {
+              "sku": "C1229",
+              "name": "香炉（艾草）",
+              "total_quantity": 10,
+              "total_amount": 3655.0
+            },
+            {
+              "sku": "D1251",
+              "name": "汝窑杯（手绘）",
+              "total_quantity": 10,
+              "total_amount": 3192.0
+            },
+            {
+              "sku": "C1225",
+              "name": "线香（禅意款）",
+              "total_quantity": 10,
+              "total_amount": 2903.0
+            },
+            {
+              "sku": "A1153",
+              "name": "公道杯（便携款）",
+              "total_quantity": 6,
+              "total_amount": 2599.8
+            },
+            {
+              "sku": "E1127",
+              "name": "真丝方巾（印花）",
+              "total_quantity": 5,
+              "total_amount": 2562.0
+            },
+            {
+              "sku": "A1288",
+              "name": "紫砂壶（家用装）",
+              "total_quantity": 3,
+              "total_amount": 2383.5
+            },
+            {
+              "sku": "B1061",
+              "name": "镇尺（初学套）",
+              "total_quantity": 12,
+              "total_amount": 2294.4
+            },
+            {
+              "sku": "A1172",
+              "name": "茶宠（礼盒装）",
+              "total_quantity": 3,
+              "total_amount": 1926.98
+            },
+            {
+              "sku": "A1004",
+              "name": "青瓷茶具（便携款）",
+              "total_quantity": 3,
+              "total_amount": 1799.7
+            },
+            {
+              "sku": "E1269",
+              "name": "真丝方巾（苏绣）",
+              "total_quantity": 6,
+              "total_amount": 1623.6
+            },
+            {
+              "sku": "A1290",
+              "name": "紫砂壶（便携款）",
+              "total_quantity": 2,
+              "total_amount": 1618.66
+            },
+            {
+              "sku": "A1009",
+              "name": "公道杯（旅行装）",
+              "total_quantity": 2,
+              "total_amount": 1573.2
+            },
+            {
+              "sku": "B1188",
+              "name": "墨锭（狼毫）",
+              "total_quantity": 10,
+              "total_amount": 1377.0
+            },
+            {
+              "sku": "A1284",
+              "name": "青瓷茶具（家用装）",
+              "total_quantity": 2,
+              "total_amount": 1368.8
+            },
+            {
+              "sku": "A1157",
+              "name": "品茗杯（便携款）",
+              "total_quantity": 2,
+              "total_amount": 1244.2
+            },
+            {
+              "sku": "B1184",
+              "name": "毛笔（初学套）",
+              "total_quantity": 10,
+              "total_amount": 1188.0
+            },
+            {
+              "sku": "B1038",
+              "name": "宣纸（进阶款）",
+              "total_quantity": 5,
+              "total_amount": 1090.5
+            },
+            {
+              "sku": "E1276",
+              "name": "真丝眼罩（印花）",
+              "total_quantity": 2,
+              "total_amount": 1088.8
+            },
+            {
+              "sku": "D1247",
+              "name": "青花瓷盘（手绘）",
+              "total_quantity": 2,
+              "total_amount": 1085.4
+            },
+            {
+              "sku": "A1146",
+              "name": "紫砂壶（旅行装）",
+              "total_quantity": 2,
+              "total_amount": 929.8
+            },
+            {
+              "sku": "C1085",
+              "name": "线香（家用装）",
+              "total_quantity": 5,
+              "total_amount": 912.5
+            },
+            {
+              "sku": "E1135",
+              "name": "真丝眼罩（印花）",
+              "total_quantity": 2,
+              "total_amount": 900.4
+            },
+            {
+              "sku": "A1032",
+              "name": "茶宠（便携款）",
+              "total_quantity": 1,
+              "total_amount": 851.8
+            },
+            {
+              "sku": "C1236",
+              "name": "香插（家用装）",
+              "total_quantity": 5,
+              "total_amount": 779.0
+            },
+            {
+              "sku": "B1187",
+              "name": "墨锭（半生半熟）",
+              "total_quantity": 4,
+              "total_amount": 758.1
+            },
+            {
+              "sku": "E1268",
+              "name": "真丝方巾（印花）",
+              "total_quantity": 2,
+              "total_amount": 734.8
+            },
+            {
+              "sku": "C1228",
+              "name": "香炉（檀香）",
+              "total_quantity": 2,
+              "total_amount": 729.4
+            },
+            {
+              "sku": "C1239",
+              "name": "香囊（艾草）",
+              "total_quantity": 7,
+              "total_amount": 711.62
+            },
+            {
+              "sku": "A1171",
+              "name": "茶宠（家用装）",
+              "total_quantity": 2,
+              "total_amount": 654.0
+            },
+            {
+              "sku": "D1259",
+              "name": "青瓷花瓶（手绘）",
+              "total_quantity": 5,
+              "total_amount": 626.0
+            },
+            {
+              "sku": "B1073",
+              "name": "笔架（初学套）",
+              "total_quantity": 11,
+              "total_amount": 613.8
+            },
+            {
+              "sku": "C1105",
+              "name": "塔香（家用装）",
+              "total_quantity": 2,
+              "total_amount": 601.4
+            },
+            {
+              "sku": "D1261",
+              "name": "青瓷花瓶（家用）",
+              "total_quantity": 1,
+              "total_amount": 591.8
+            },
+            {
+              "sku": "E1279",
+              "name": "刺绣团扇（素色）",
+              "total_quantity": 2,
+              "total_amount": 584.6
+            }
+          ],
+          "note": "仅展示金额最高的 40 种商品"
+        },
+        "ok": true
+      }
+    ],
+    "cost_complete": true
+  }
+}

@@ -1,0 +1,212 @@
+{
+  "case_id": "adv-02",
+  "suite": "baseline",
+  "question": "我记得店里有个商品叫「克苏鲁沉香线香」，现在卖多少钱？",
+  "database": "adv-02.db",
+  "trace_path": "E:\\workspace\\erpilot\\traces\\evals\\20261006-145417-794d31a0.jsonl",
+  "approval_gate": "AutoDenyGate",
+  "approval_evidence": "none",
+  "human_approval": false,
+  "approval_decisions": [],
+  "state_before": null,
+  "state_after": null,
+  "result": {
+    "case_id": "adv-02",
+    "category": "adversarial",
+    "passed": true,
+    "failed_checks": [],
+    "steps": 3,
+    "completed": true,
+    "tool_calls": [
+      "search_products",
+      "search_products",
+      "search_products"
+    ],
+    "total_tokens": 8677,
+    "cost": 0.00094328,
+    "duration_ms": 14477.7,
+    "attempts": 1,
+    "error": null,
+    "tool_results": [
+      {
+        "call_id": "ef9f0934-7632-4072-a983-d49143bc59e5",
+        "name": "search_products",
+        "arguments": {
+          "keyword": "克苏鲁"
+        },
+        "content": {
+          "total": 0,
+          "items": []
+        },
+        "ok": true
+      },
+      {
+        "call_id": "8bf4cab1-3fe1-4bff-8f12-e95002a2ba6f",
+        "name": "search_products",
+        "arguments": {
+          "keyword": "沉香"
+        },
+        "content": {
+          "total": 10,
+          "items": [
+            {
+              "sku": "C1081",
+              "name": "线香（沉香）",
+              "category": "香道",
+              "price": 169.7,
+              "status": "在售"
+            },
+            {
+              "sku": "C1086",
+              "name": "香炉（沉香）",
+              "category": "香道",
+              "price": 324.6,
+              "status": "在售"
+            },
+            {
+              "sku": "C1091",
+              "name": "香插（沉香）",
+              "category": "香道",
+              "price": 237.5,
+              "status": "在售"
+            },
+            {
+              "sku": "C1096",
+              "name": "香囊（沉香）",
+              "category": "香道",
+              "price": 285.0,
+              "status": "在售"
+            },
+            {
+              "sku": "C1101",
+              "name": "塔香（沉香）",
+              "category": "香道",
+              "price": 349.7,
+              "status": "在售"
+            },
+            {
+              "sku": "C1222",
+              "name": "线香（沉香）",
+              "category": "香道",
+              "price": 163.6,
+              "status": "在售"
+            },
+            {
+              "sku": "C1227",
+              "name": "香炉（沉香）",
+              "category": "香道",
+              "price": 153.4,
+              "status": "在售"
+            },
+            {
+              "sku": "C1232",
+              "name": "香插（沉香）",
+              "category": "香道",
+              "price": 49.7,
+              "status": "在售"
+            },
+            {
+              "sku": "C1237",
+              "name": "香囊（沉香）",
+              "category": "香道",
+              "price": 178.1,
+              "status": "在售"
+            },
+            {
+              "sku": "C1242",
+              "name": "塔香（沉香）",
+              "category": "香道",
+              "price": 197.2,
+              "status": "在售"
+            }
+          ]
+        },
+        "ok": true
+      },
+      {
+        "call_id": "d80c5004-82cb-4acf-a204-be5e94bc497d",
+        "name": "search_products",
+        "arguments": {
+          "keyword": "线香"
+        },
+        "content": {
+          "total": 10,
+          "items": [
+            {
+              "sku": "C1081",
+              "name": "线香（沉香）",
+              "category": "香道",
+              "price": 169.7,
+              "status": "在售"
+            },
+            {
+              "sku": "C1082",
+              "name": "线香（檀香）",
+              "category": "香道",
+              "price": 371.6,
+              "status": "在售"
+            },
+            {
+              "sku": "C1083",
+              "name": "线香（艾草）",
+              "category": "香道",
+              "price": 47.9,
+              "status": "在售"
+            },
+            {
+              "sku": "C1084",
+              "name": "线香（禅意款）",
+              "category": "香道",
+              "price": 176.4,
+              "status": "在售"
+            },
+            {
+              "sku": "C1085",
+              "name": "线香（家用装）",
+              "category": "香道",
+              "price": 182.5,
+              "status": "在售"
+            },
+            {
+              "sku": "C1222",
+              "name": "线香（沉香）",
+              "category": "香道",
+              "price": 163.6,
+              "status": "在售"
+            },
+            {
+              "sku": "C1223",
+              "name": "线香（檀香）",
+              "category": "香道",
+              "price": 173.6,
+              "status": "在售"
+            },
+            {
+              "sku": "C1224",
+              "name": "线香（艾草）",
+              "category": "香道",
+              "price": 42.1,
+              "status": "在售"
+            },
+            {
+              "sku": "C1225",
+              "name": "线香（禅意款）",
+              "category": "香道",
+              "price": 290.3,
+              "status": "在售"
+            },
+            {
+              "sku": "C1226",
+              "name": "线香（家用装）",
+              "category": "香道",
+              "price": 262.4,
+              "status": "在售"
+            }
+          ]
+        },
+        "ok": true
+      }
+    ],
+    "cost_complete": true
+  }
+}

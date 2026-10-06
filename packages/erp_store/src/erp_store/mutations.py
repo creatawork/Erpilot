@@ -13,7 +13,9 @@
 
 import json
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
@@ -31,6 +33,20 @@ class MutationError(Exception):
         self.code = code
         self.message = message
         self.hint = hint
+
+
+@dataclass(frozen=True, slots=True)
+class TokenLookup:
+    """按 token 查幂等表的结果（T06，ADR-0008 恢复契约）。
+
+    status 三态：found（业务已提交，result 是首次成功结果）/
+    not_found（查询成功但无记录——不单独证明未执行）/ conflict（同 token
+    异参，原批准不可迁移）。查询本身失败以异常向上抛，由调用方判 unknown。
+    """
+
+    status: str
+    result: Any = None
+    request: list | None = None
 
 
 # 允许取消的状态（状态机 v1：已发货/已签收走退款流程，不在本工具范围）
@@ -234,6 +250,47 @@ class ErpMutations:
             self._remember(s, client_token, request, sku)
             s.commit()
             return sku
+
+    def lookup_token(self, client_token: str) -> TokenLookup:
+        """内部恢复查询（T06，ADR-0008 §3 推演 3）：按 token 查幂等表。
+
+        不进模型工具面（不增加可见工具数量）；查询失败（DB 错/超时）以异常
+        向上抛，由恢复协调判 unknown——禁止在查询失败时做任何重试决策。
+        """
+        if not client_token or not client_token.strip() or len(client_token) > 128:
+            raise MutationError("invalid_argument", "幂等键须为 1~128 个非空字符")
+        with self._write_session() as s:
+            row = s.get(MutationRequestRow, client_token)
+            if row is None:
+                return TokenLookup("not_found")
+            return TokenLookup("found", json.loads(row.result), json.loads(row.request))
+
+    @staticmethod
+    def canonical_request(tool: str, arguments: dict) -> list:
+        """工具入参 → 幂等表 request 口径（与各 mutation 的 request 构造一致）。
+
+        恢复对账用：同 token 异参时 row.request 与本口径不一致即 conflict。
+        """
+        if tool == "adjust_stock":
+            return ["adjust_stock", arguments["sku"], int(arguments["delta"])]
+        if tool == "cancel_order":
+            return ["cancel_order", arguments["order_id"]]
+        if tool == "set_product_status":
+            # 状态入参可能是别名或枚举值，统一归一到幂等表存的枚举 value
+            return [
+                "set_product_status", arguments["sku"],
+                ProductStatus(arguments["status"]).value,
+            ]
+        if tool == "create_order":
+            merged: dict[str, int] = {}
+            for item in arguments["items"]:
+                merged[item["sku"]] = merged.get(item["sku"], 0) + int(item["quantity"])
+            note = arguments.get("note")
+            return [
+                "create_order", arguments["customer"].strip(),
+                [[sku, quantity] for sku, quantity in sorted(merged.items())], note,
+            ]
+        raise ValueError(f"工具 {tool} 没有幂等 request 口径")
 
     @contextmanager
     def _write_session(self):

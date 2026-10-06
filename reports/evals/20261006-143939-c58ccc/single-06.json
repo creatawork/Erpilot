@@ -1,0 +1,63 @@
+{
+  "case_id": "single-06",
+  "suite": "baseline",
+  "question": "店里现在都有哪些品类？各有多少在售商品？",
+  "database": "single-06.db",
+  "trace_path": "E:\\workspace\\erpilot\\traces\\evals\\20261006-144454-a5a6411a.jsonl",
+  "approval_gate": "AutoDenyGate",
+  "approval_evidence": "none",
+  "human_approval": false,
+  "approval_decisions": [],
+  "state_before": null,
+  "state_after": null,
+  "result": {
+    "case_id": "single-06",
+    "category": "single",
+    "passed": true,
+    "failed_checks": [],
+    "steps": 2,
+    "completed": true,
+    "tool_calls": [
+      "list_categories"
+    ],
+    "total_tokens": 4849,
+    "cost": 0.000494052,
+    "duration_ms": 7206.3,
+    "attempts": 1,
+    "error": null,
+    "tool_results": [
+      {
+        "call_id": "chatcmpl-tool-88c617e4fa6eeb58",
+        "name": "list_categories",
+        "arguments": {},
+        "content": {
+          "total": 5,
+          "items": [
+            {
+              "category": "丝绸",
+              "product_count": 31
+            },
+            {
+              "category": "文房",
+              "product_count": 95
+            },
+            {
+              "category": "瓷器",
+              "product_count": 38
+            },
+            {
+              "category": "茶具",
+              "product_count": 81
+            },
+            {
+              "category": "香道",
+              "product_count": 50
+            }
+          ]
+        },
+        "ok": true
+      }
+    ],
+    "cost_complete": true
+  }
+}

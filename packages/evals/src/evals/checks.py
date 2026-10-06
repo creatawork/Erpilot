@@ -46,7 +46,7 @@ def evaluate_case(
         sub.casefold() in text for sub in case.must_mention_any
     ):
         failed.append(f"must_mention_any: {'/'.join(case.must_mention_any)} 均未出现")
-    normalized_text = re.sub(r"[\s「」『』“”]", "", text)
+    normalized_text = re.sub(r"[\s「」『』“”\"']", "", text)
     for group in case.must_mention_any_groups:
         if not any(sub.casefold() in normalized_text for sub in group):
             failed.append(f"must_mention_any_groups: {'/'.join(group)} 均未出现")

@@ -1,0 +1,80 @@
+{
+  "case_id": "edge-05",
+  "suite": "baseline",
+  "question": "订单 SO20260930-0059 是什么状态？",
+  "database": "edge-05.db",
+  "trace_path": "E:\\workspace\\erpilot\\traces\\evals\\20261006-145126-30768c5a.jsonl",
+  "approval_gate": "AutoDenyGate",
+  "approval_evidence": "none",
+  "human_approval": false,
+  "approval_decisions": [],
+  "state_before": null,
+  "state_after": null,
+  "result": {
+    "case_id": "edge-05",
+    "category": "edge",
+    "passed": true,
+    "failed_checks": [],
+    "steps": 2,
+    "completed": true,
+    "tool_calls": [
+      "get_order"
+    ],
+    "total_tokens": 5404,
+    "cost": 0.000590276,
+    "duration_ms": 26172.6,
+    "attempts": 1,
+    "error": null,
+    "tool_results": [
+      {
+        "call_id": "0c6a3b3f-491e-4475-81a3-14d969be8012",
+        "name": "get_order",
+        "arguments": {
+          "order_id": "SO20260930-0059"
+        },
+        "content": {
+          "order_id": "SO20260930-0059",
+          "customer": "闻人语",
+          "status": "已取消",
+          "created_at": "2026-09-30T03:05:18.304454",
+          "items": [
+            {
+              "sku": "B1080",
+              "name": "字帖（进阶款）",
+              "quantity": 1,
+              "unit_price": 105.5
+            },
+            {
+              "sku": "E1141",
+              "name": "刺绣团扇（双面）",
+              "quantity": 1,
+              "unit_price": 511.2
+            },
+            {
+              "sku": "D1260",
+              "name": "青瓷花瓶（复古）",
+              "quantity": 1,
+              "unit_price": 339.0
+            },
+            {
+              "sku": "B1072",
+              "name": "笔架（羊毫）",
+              "quantity": 1,
+              "unit_price": 156.7
+            },
+            {
+              "sku": "A1018",
+              "name": "盖碗（家用装）",
+              "quantity": 1,
+              "unit_price": 506.0
+            }
+          ],
+          "note": null,
+          "total_amount": 1618.4
+        },
+        "ok": true
+      }
+    ],
+    "cost_complete": true
+  }
+}

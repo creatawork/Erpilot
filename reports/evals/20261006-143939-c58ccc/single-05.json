@@ -1,0 +1,360 @@
+{
+  "case_id": "single-05",
+  "suite": "baseline",
+  "question": "盘一下库存，现在有哪些商品快缺货了？",
+  "database": "single-05.db",
+  "trace_path": "E:\\workspace\\erpilot\\traces\\evals\\20261006-144315-1a4f5357.jsonl",
+  "approval_gate": "AutoDenyGate",
+  "approval_evidence": "none",
+  "human_approval": false,
+  "approval_decisions": [],
+  "state_before": null,
+  "state_after": null,
+  "result": {
+    "case_id": "single-05",
+    "category": "single",
+    "passed": true,
+    "failed_checks": [],
+    "steps": 2,
+    "completed": true,
+    "tool_calls": [
+      "list_low_stock",
+      "stock_valuation"
+    ],
+    "total_tokens": 8742,
+    "cost": 0.001332112,
+    "duration_ms": 98460.3,
+    "attempts": 1,
+    "error": null,
+    "tool_results": [
+      {
+        "call_id": "78c71bd1-708c-4264-ba30-a02535b851d5",
+        "name": "list_low_stock",
+        "arguments": {
+          "limit": 50,
+          "threshold": 10
+        },
+        "content": {
+          "returned": 34,
+          "items": [
+            {
+              "sku": "A1001",
+              "name": "青瓷茶具（旅行装）",
+              "category": "茶具",
+              "price": 447.7,
+              "quantity": 0,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "A1026",
+              "name": "茶叶罐（家用装）",
+              "category": "茶具",
+              "price": 675.6,
+              "quantity": 0,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "A1151",
+              "name": "公道杯（家用装）",
+              "category": "茶具",
+              "price": 802.0,
+              "quantity": 0,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "A1299",
+              "name": "盖碗（旅行装）",
+              "category": "茶具",
+              "price": 236.8,
+              "quantity": 0,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "B1060",
+              "name": "镇尺（羊毫）",
+              "category": "文房",
+              "price": 224.7,
+              "quantity": 0,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "B1079",
+              "name": "字帖（初学套）",
+              "category": "文房",
+              "price": 25.3,
+              "quantity": 0,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "B1183",
+              "name": "毛笔（羊毫）",
+              "category": "文房",
+              "price": 185.5,
+              "quantity": 0,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "B1209",
+              "name": "毛毡（进阶款）",
+              "category": "文房",
+              "price": 267.7,
+              "quantity": 0,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "B1214",
+              "name": "笔架（初学套）",
+              "category": "文房",
+              "price": 54.1,
+              "quantity": 0,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "B1216",
+              "name": "字帖（100张）",
+              "category": "文房",
+              "price": 85.8,
+              "quantity": 0,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "C1082",
+              "name": "线香（檀香）",
+              "category": "香道",
+              "price": 371.6,
+              "quantity": 0,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "C1088",
+              "name": "香炉（艾草）",
+              "category": "香道",
+              "price": 104.8,
+              "quantity": 0,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "C1105",
+              "name": "塔香（家用装）",
+              "category": "香道",
+              "price": 300.7,
+              "quantity": 0,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "C1222",
+              "name": "线香（沉香）",
+              "category": "香道",
+              "price": 163.6,
+              "quantity": 0,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "C1232",
+              "name": "香插（沉香）",
+              "category": "香道",
+              "price": 49.7,
+              "quantity": 0,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "D1109",
+              "name": "青花瓷盘（收藏款）",
+              "category": "瓷器",
+              "price": 400.4,
+              "quantity": 0,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "D1110",
+              "name": "汝窑杯（手绘）",
+              "category": "瓷器",
+              "price": 275.7,
+              "quantity": 0,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "D1113",
+              "name": "汝窑杯（收藏款）",
+              "category": "瓷器",
+              "price": 378.7,
+              "quantity": 0,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "D1121",
+              "name": "青瓷花瓶（收藏款）",
+              "category": "瓷器",
+              "price": 85.6,
+              "quantity": 0,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "D1252",
+              "name": "汝窑杯（复古）",
+              "category": "瓷器",
+              "price": 476.9,
+              "quantity": 0,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "E1127",
+              "name": "真丝方巾（印花）",
+              "category": "丝绸",
+              "price": 512.4,
+              "quantity": 0,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "E1129",
+              "name": "真丝方巾（双面）",
+              "category": "丝绸",
+              "price": 286.1,
+              "quantity": 0,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "E1132",
+              "name": "桑蚕丝枕套（苏绣）",
+              "category": "丝绸",
+              "price": 537.5,
+              "quantity": 0,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "E1137",
+              "name": "真丝眼罩（双面）",
+              "category": "丝绸",
+              "price": 208.5,
+              "quantity": 0,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "E1268",
+              "name": "真丝方巾（印花）",
+              "category": "丝绸",
+              "price": 367.4,
+              "quantity": 0,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "B1039",
+              "name": "毛笔（100张）",
+              "category": "文房",
+              "price": 27.2,
+              "quantity": 6,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "D1263",
+              "name": "粉彩碟（手绘）",
+              "category": "瓷器",
+              "price": 128.2,
+              "quantity": 6,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "A1025",
+              "name": "茶叶罐（旅行装）",
+              "category": "茶具",
+              "price": 69.4,
+              "quantity": 7,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "B1034",
+              "name": "宣纸（半生半熟）",
+              "category": "文房",
+              "price": 236.6,
+              "quantity": 7,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "C1241",
+              "name": "香囊（家用装）",
+              "category": "香道",
+              "price": 209.4,
+              "quantity": 7,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "E1274",
+              "name": "桑蚕丝枕套（双面）",
+              "category": "丝绸",
+              "price": 103.7,
+              "quantity": 8,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "B1070",
+              "name": "笔架（半生半熟）",
+              "category": "文房",
+              "price": 219.1,
+              "quantity": 9,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "B1059",
+              "name": "镇尺（狼毫）",
+              "category": "文房",
+              "price": 102.5,
+              "quantity": 10,
+              "warehouse": "主仓"
+            },
+            {
+              "sku": "E1138",
+              "name": "刺绣团扇（素色）",
+              "category": "丝绸",
+              "price": 529.6,
+              "quantity": 10,
+              "warehouse": "主仓"
+            }
+          ]
+        },
+        "ok": true
+      },
+      {
+        "call_id": "103a7a0b-39bf-49de-b198-8051873f1e61",
+        "name": "stock_valuation",
+        "arguments": {},
+        "content": {
+          "grand_total_value": 8231102.6,
+          "categories": [
+            {
+              "category": "丝绸",
+              "sku_count": 32,
+              "total_quantity": 3040,
+              "total_value": 1142848.4
+            },
+            {
+              "category": "文房",
+              "sku_count": 96,
+              "total_quantity": 8083,
+              "total_value": 1204905.8
+            },
+            {
+              "category": "瓷器",
+              "sku_count": 40,
+              "total_quantity": 3619,
+              "total_value": 1265489.0
+            },
+            {
+              "category": "茶具",
+              "sku_count": 82,
+              "total_quantity": 8033,
+              "total_value": 3518991.2
+            },
+            {
+              "category": "香道",
+              "sku_count": 50,
+              "total_quantity": 5090,
+              "total_value": 1098868.2
+            }
+          ]
+        },
+        "ok": true
+      }
+    ],
+    "cost_complete": true
+  }
+}

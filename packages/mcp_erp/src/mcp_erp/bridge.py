@@ -17,7 +17,9 @@ approval_gate——审批门（agent_core.approval.guarded）包在 handler 外�
 """
 
 import asyncio
+import hashlib
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -58,9 +60,12 @@ def build_agent_tools(
     *,
     writes: bool = False,
     approval_gate: ApprovalGate | None = None,
+    token_factory: Callable[[], str] | None = None,
 ) -> list[Tool]:
     """同步入口（应用启动 / CLI main，不能在事件循环内调用）。"""
-    return asyncio.run(build_agent_tools_async(db_path, writes=writes, approval_gate=approval_gate))
+    return asyncio.run(build_agent_tools_async(
+        db_path, writes=writes, approval_gate=approval_gate, token_factory=token_factory,
+    ))
 
 
 async def build_agent_tools_async(
@@ -68,11 +73,13 @@ async def build_agent_tools_async(
     *,
     writes: bool = False,
     approval_gate: ApprovalGate | None = None,
+    token_factory: Callable[[], str] | None = None,
 ) -> list[Tool]:
     """发现 MCP 工具并转换为 agent_core Tool 列表（可在运行中的 loop 内调用）。
 
     db 文件不存在时报带指引的错误。writes=True 必须给 approval_gate
-    （无 gate 不给写工具，ADR-0005 决策 4）。
+    （无 gate 不给写工具，ADR-0005 决策 4）。token_factory（T05，ADR-0008）
+    提供时写工具在审批展示前生成稳定幂等键，供组合层持久化与恢复复用。
     """
     if writes and approval_gate is None:
         raise ValueError("writes=True 必须提供 approval_gate：写工具不过审批门就不该存在")
@@ -90,11 +97,13 @@ async def build_agent_tools_async(
         for t in mcp_tools
     ]
     if writes:
-        tools = [_with_risk_and_gate(t, approval_gate) for t in tools]  # type: ignore[arg-type]
+        tools = [_with_risk_and_gate(t, approval_gate, token_factory) for t in tools]  # type: ignore[arg-type]
     return tools
 
 
-def _with_risk_and_gate(tool: Tool, gate: ApprovalGate | None) -> Tool:
+def _with_risk_and_gate(
+    tool: Tool, gate: ApprovalGate | None, token_factory: Callable[[], str] | None = None
+) -> Tool:
     """给写工具标注风险等级并包审批门；只读工具原样返回。"""
     risk = WRITE_TOOL_RISK.get(tool.name)
     if risk is None:
@@ -106,9 +115,16 @@ def _with_risk_and_gate(tool: Tool, gate: ApprovalGate | None) -> Tool:
         handler=tool.handler,
         risk=risk,
         retry_safe=True,
+        schema_version=tool.schema_version,
     )
     assert gate is not None  # build_agent_tools_async 已校验
-    return guarded(marked, gate)
+    return guarded(marked, gate, token_factory)
+
+
+def _schema_sha(schema: dict[str, Any]) -> str:
+    """参数 JSON Schema 的 sha256（T05）：恢复时校验工具版本兼容性。"""
+    canonical = json.dumps(schema, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _convert(
@@ -124,14 +140,21 @@ def _convert(
 
     async def handler(args: BaseModel, _name: str = name) -> object:
         if _name in WRITE_TOOL_RISK and args.client_token is None:
-            # 同次工具执行的超时/异常重试复用同一个参数对象与 token。
+            # 同次工具执行的超时/异常重试复用同一个参数对象与 token；
+            # 接恢复层时 token 已由审批门前注入（T05），此处只兜底遗留路径。
             args.client_token = uuid4().hex
         server = create_server(db_path, include_writes=writes)
         async with Client(server) as client:
             result = await client.call_tool(_name, args.model_dump(mode="json", exclude_none=True))
         return _extract(result)
 
-    return Tool(name=name, description=description, params_model=params_model, handler=handler)
+    return Tool(
+        name=name,
+        description=description,
+        params_model=params_model,
+        handler=handler,
+        schema_version=_schema_sha(schema),
+    )
 
 
 def _params_model(tool_name: str, schema: dict[str, Any]) -> type[BaseModel]:
@@ -165,6 +188,28 @@ def _annotation_of(prop: dict[str, Any]) -> type:
         non_null = [p for p in prop["anyOf"] if p.get("type") != "null"]
         return _TYPE_MAP.get(non_null[0].get("type", "string"), str) if non_null else str
     return _TYPE_MAP.get(prop.get("type", "string"), str)
+
+
+async def execute_write_async(
+    db_path: Path | str,
+    tool: str,
+    arguments: dict[str, Any],
+    client_token: str,
+) -> Any:
+    """恢复路径专用执行入口（T06，ADR-0008）：**原 token** 直呼一次写工具。
+
+    只供组合层恢复协调使用——不在工具面注册（不增加模型可见工具数量），
+    不经过审批门（能进这里的调用必须已持有效批准，见恢复协调的校验）。
+    业务错误沿用工具层错误契约（{"error": {...}}），由调用方按结果判定。
+    """
+    if tool not in WRITE_TOOL_RISK:
+        raise ValueError(f"{tool} 不是写工具：恢复执行入口只接受写调用")
+    server = create_server(Path(db_path), include_writes=True)
+    async with Client(server) as client:
+        result = await client.call_tool(
+            tool, {**arguments, "client_token": client_token}
+        )
+    return _extract(result)
 
 
 def _extract(result: CallToolResult) -> Any:

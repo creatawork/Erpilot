@@ -1,0 +1,46 @@
+{
+  "model": "glm-5.3-flash",
+  "ts": "20261006-161315",
+  "provenance": {
+    "revision": "18e7a39dff2095b6e285b6109d7365fb9a3ce21f",
+    "working_tree_dirty": true,
+    "source_sha256": "f81db018964804bcb86fbaea2bceaf73e5549e09271367c4455799e493be4477"
+  },
+  "suite": {
+    "name": "baseline",
+    "kind": "targeted",
+    "planned": 1,
+    "executed": 1,
+    "case_ids": [
+      "multi-06"
+    ],
+    "case_sha256": "526c65915cb7478d014629959d7e857e633b93610306ca5643bc3d4a99de3fd6",
+    "seed": "seed_database defaults; fresh database per case",
+    "state_checks": 0,
+    "complete": true,
+    "evidence": {
+      "multi-06": "20261006-161253-2c46fb/multi-06.json"
+    },
+    "source_changed_during_run": false
+  },
+  "results": [
+    {
+      "case_id": "multi-06",
+      "category": "multi",
+      "passed": false,
+      "failed_checks": [
+        "run_error: APIConnectionError: Connection error."
+      ],
+      "steps": 0,
+      "completed": false,
+      "tool_calls": [],
+      "total_tokens": 0,
+      "cost": 0.0,
+      "duration_ms": 21163.1,
+      "attempts": 3,
+      "error": "APIConnectionError: Connection error.",
+      "tool_results": [],
+      "cost_complete": false
+    }
+  ]
+}
