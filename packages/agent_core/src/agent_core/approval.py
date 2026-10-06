@@ -135,6 +135,8 @@ def guarded(tool: Tool, gate: ApprovalGate | SuspendingGate) -> Tool:
             handler=suspending_handler,
             risk=tool.risk,
             retry_safe=tool.retry_safe,
+            approved_handler=tool.approved_handler or tool.handler,
+            approval_gate=gate,
         )
 
     async def handler(args: BaseModel) -> object:
@@ -151,6 +153,8 @@ def guarded(tool: Tool, gate: ApprovalGate | SuspendingGate) -> Tool:
         handler=handler,
         risk=tool.risk,
         retry_safe=tool.retry_safe,
+        approved_handler=tool.approved_handler or tool.handler,
+        approval_gate=gate,
     )
 
 
@@ -166,14 +170,21 @@ class StreamApprovalGate:
     def __init__(self) -> None:
         self._waiters: dict[str, asyncio.Future[ApprovalDecision]] = {}
 
+    def register(self, pending_id: str) -> asyncio.Future[ApprovalDecision]:
+        """Attach a live waiter to a durable graph approval ID."""
+        if pending_id in self._waiters:
+            raise ValueError("approval already has an active waiter")
+        future = asyncio.get_running_loop().create_future()
+        self._waiters[pending_id] = future
+        return future
+
     def suspend(
         self,
         request: ApprovalRequest,
         resume: Callable[[ApprovalDecision], Awaitable[object]],
     ) -> ApprovalSuspended:
         pending_id = uuid4().hex[:12]
-        future: asyncio.Future[ApprovalDecision] = asyncio.get_running_loop().create_future()
-        self._waiters[pending_id] = future
+        future = self.register(pending_id)
         signal = ApprovalSuspended(request=request, resume=resume, pending_id=pending_id)
         signal.decision = future
         signal.cleanup = lambda: self.discard(pending_id)

@@ -1,4 +1,4 @@
-"""离线脚本化演示；使用真实 loop/MCP/审批/数据库，不代表真实模型成功率。"""
+"""离线脚本化演示；使用真实 LangGraph/MCP/审批/数据库，不代表真实模型成功率。"""
 
 import argparse
 import asyncio
@@ -8,13 +8,15 @@ from pathlib import Path
 
 from agent_core.approval import ApprovalDecision, StreamApprovalGate
 from agent_core.demo_tools import WRITES_PROMPT
-from agent_core.loop import AgentLoop, ApprovalPending, LoopEnd, ToolCallFinished
+from agent_core.events import ApprovalPending, LoopEnd, ToolCallFinished
+from agent_core.graph_runtime import LangGraphRuntime
 from agent_core.testing import USAGE, chunk, make_client, sse_response, tool_call_chunks
 from agent_core.trace import JsonlTraceRecorder, format_transcript, load_records
 from erp_store.db import make_engine
 from erp_store.models import ProductStatus
 from erp_store.repository import ErpRepository
 from erp_store.seed import seed_database
+from langgraph.checkpoint.memory import InMemorySaver
 from mcp_erp import build_agent_tools, build_agent_tools_async
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -69,15 +71,17 @@ async def run_demo(output: Path) -> list[dict]:
             before = repo.get_stock(sku).quantity
             gate = StreamApprovalGate()
             tools = await build_agent_tools_async(db, writes=True, approval_gate=gate)
-            loop = AgentLoop(demo_client(sku), tools=tools)
+            runtime = LangGraphRuntime(
+                demo_client(sku), tools=tools, checkpointer=InMemorySaver()
+            )
             path = output / f"{scenario}.jsonl"
             # recorder 为追加格式；每次演示使用新的输出目录以保留历史证据。
             recorder = JsonlTraceRecorder(path, "scripted-demo")
             events = []
-            async for event in recorder.run(loop, [
+            async for event in recorder.run(runtime, [
                 {"role": "system", "content": WRITES_PROMPT},
                 {"role": "user", "content": scenario},
-            ]):
+            ], thread_id=f"demo:{scenario}"):
                 events.append(event)
                 if isinstance(event, ApprovalPending):
                     gate.respond(event.pending_id, ApprovalDecision(scenario != "deny", "演示决策"))
@@ -124,6 +128,7 @@ def serve(port: int) -> None:
         app = create_app(
             client_factory=lambda: demo_client(sku), model="scripted-demo",
             trace_dir=ROOT / "traces" / "browser-demo", tools=tools, approval_gate=gate,
+            checkpointer=InMemorySaver(),
         )
         app.mount("/", StaticFiles(directory=ROOT / "apps/web/dist", html=True))
         try:

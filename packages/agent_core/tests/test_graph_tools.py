@@ -3,7 +3,7 @@ import json
 
 from agent_core.graph_tools import execute_tool_call, prepare_tool_calls
 from agent_core.llm import ToolCall
-from agent_core.loop import LoopConfig, ToolRetryPolicy
+from agent_core.runtime_config import LoopConfig, ToolRetryPolicy
 from agent_core.tools import Tool
 from pydantic import BaseModel
 

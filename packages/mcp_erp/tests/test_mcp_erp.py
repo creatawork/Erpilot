@@ -9,12 +9,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
-from agent_core.loop import AgentLoop, ToolCallFinished
+from agent_core.events import ToolCallFinished
+from agent_core.graph_runtime import LangGraphRuntime
 from agent_core.testing import chunk, make_client, sse_response, tool_call_chunks
 from erp_store.db import OrderItemRow, OrderRow, init_db, make_engine
 from erp_store.models import OrderStatus
 from erp_store.repository import ErpRepository
 from erp_store.seed import seed_database
+from langgraph.checkpoint.memory import InMemorySaver
 from mcp_erp import build_agent_tools, build_agent_tools_async, create_server
 from sqlalchemy.orm import Session
 
@@ -164,11 +166,14 @@ async def test_get_customer_purchases_truncates_items_at_40(tmp_path) -> None:
     assert result.data["items"][-1]["total_amount"] > full.items[40].total_amount
 
 
-@pytest.mark.parametrize("name,args", [
-    ("list_low_stock", {"threshold": 10000, "limit": 5}),
-    ("top_products", {"days": 365, "limit": 5}),
-    ("daily_sales", {"days": 7}),
-])
+@pytest.mark.parametrize(
+    "name,args",
+    [
+        ("list_low_stock", {"threshold": 10000, "limit": 5}),
+        ("top_products", {"days": 365, "limit": 5}),
+        ("daily_sales", {"days": 7}),
+    ],
+)
 async def test_aggregate_lists_have_valid_mcp_output(seeded_db, name, args):
     from fastmcp import Client
 
@@ -364,7 +369,11 @@ async def test_agent_loop_queries_real_data_over_mcp(seeded_db, repo) -> None:
             tool_call_chunks("call_1", "get_order", json.dumps({"order_id": order.order_id}))
         )
 
-    agent = AgentLoop(make_client(handler), tools=await build_agent_tools_async(seeded_db))
+    agent = LangGraphRuntime(
+        make_client(handler),
+        tools=await build_agent_tools_async(seeded_db),
+        checkpointer=InMemorySaver(),
+    )
     events = [e async for e in agent.run([{"role": "user", "content": f"查订单 {order.order_id}"}])]
 
     finished = [e for e in events if isinstance(e, ToolCallFinished)]
@@ -395,16 +404,18 @@ def test_bridge_write_tool_executes_on_approval(tmp_path, seeded_db, repo) -> No
     assert result["status"] == "pending_payment" or result["status"] == "待付款"
     assert result["result_note"]
     # 库存同事务扣减
-    stock = _run(tools["get_stock"].handler(
-        tools["get_stock"].params_model.model_validate_json(json.dumps({"sku": sku}))
-    ))
+    stock = _run(
+        tools["get_stock"].handler(
+            tools["get_stock"].params_model.model_validate_json(json.dumps({"sku": sku}))
+        )
+    )
     assert stock["quantity"] >= 0
 
 
 async def test_write_retry_after_lost_response_changes_stock_once(tmp_path, monkeypatch):
     from agent_core.approval import AutoApproveGate
-    from agent_core.llm import ToolCall
-    from agent_core.loop import LoopConfig, ToolRetryPolicy
+    from agent_core.events import ToolCallFinished
+    from agent_core.runtime_config import LoopConfig, ToolRetryPolicy
     from mcp_erp import bridge
 
     db = tmp_path / "retry.db"
@@ -413,6 +424,21 @@ async def test_write_retry_after_lost_response_changes_stock_once(tmp_path, monk
     sku = repo.list_products(limit=1)[0].sku
     before = repo.get_stock(sku).quantity
     tools = await build_agent_tools_async(db, writes=True, approval_gate=AutoApproveGate())
+    from dataclasses import replace
+
+    write_tool = next(tool for tool in tools if tool.name == "adjust_stock")
+    original_handler = write_tool.approved_handler
+    tokens = []
+
+    async def track_token(args):
+        tokens.append(args.client_token)
+        return await original_handler(args)
+
+    tools = [
+        replace(tool, handler=track_token, approved_handler=track_token)
+        if tool.name == "adjust_stock" else tool
+        for tool in tools
+    ]
     original = bridge._extract
     attempts = []
 
@@ -424,12 +450,35 @@ async def test_write_retry_after_lost_response_changes_stock_once(tmp_path, monk
         return payload
 
     monkeypatch.setattr(bridge, "_extract", lose_first_response)
-    loop = AgentLoop(None, tools=tools, config=LoopConfig(
-        retry=ToolRetryPolicy(retries=1, backoff=0),
-    ))
-    content, ok = await loop._execute(ToolCall(
-        id="stock-1", name="adjust_stock", arguments=json.dumps({"sku": sku, "delta": 5}),
-    ))
-    assert ok and "error" not in json.loads(content)
+
+    def model(request):
+        body = json.loads(request.content)
+        if any(message["role"] == "tool" for message in body["messages"]):
+            return sse_response([chunk(delta={"content": "done"}), chunk(usage=None)])
+        return sse_response(
+            tool_call_chunks(
+                "stock-1",
+                "adjust_stock",
+                json.dumps({"sku": sku, "delta": 5}),
+            )
+        )
+
+    runtime = LangGraphRuntime(
+        make_client(model),
+        tools=tools,
+        config=LoopConfig(retry=ToolRetryPolicy(retries=1, backoff=0)),
+        checkpointer=InMemorySaver(),
+    )
+    thread_id = "mcp-retry"
+    events = [
+        event
+        async for event in runtime.run(
+            [{"role": "user", "content": "adjust"}],
+            thread_id=thread_id,
+        )
+    ]
+    finished = next(event for event in events if isinstance(event, ToolCallFinished))
+    assert finished.ok and "error" not in json.loads(finished.content)
     assert len(attempts) == 2
     assert repo.get_stock(sku).quantity == before + 5
+    assert len(tokens) == 2 and tokens[0] and tokens[0] == tokens[1]

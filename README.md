@@ -12,10 +12,9 @@ ERP + (co)pilot。产品隐喻是一位**掌柜**：掌柜打理店铺日常—�
 
 ## 技术栈
 
-当前实现：Python 3.12 · FastAPI · 手写 agent loop · FastMCP · SQLite / SQLAlchemy ·
-OpenAI 兼容 SDK · GLM-5.3 Flash · 本地 JSONL（可选 Langfuse sink）· React + TypeScript。
-
-LangGraph、PostgreSQL / pgvector、LiteLLM 属于后续路线，尚未接入。
+当前实现：Python 3.12 · LangGraph · FastAPI · FastMCP · SQLite / SQLAlchemy ·
+PostgreSQL checkpoint · OpenAI 兼容 SDK · GLM-5.3 Flash · 本地 JSONL（可选 Langfuse sink）· React + TypeScript。
+ERP 业务数据与 API RunStore 仍在 SQLite；PostgreSQL 只保存图状态。
 
 选型理由见 [`docs/adr/0001-tech-stack.md`](docs/adr/0001-tech-stack.md)。
 
@@ -27,7 +26,7 @@ LangGraph、PostgreSQL / pgvector、LiteLLM 属于后续路线，尚未接入。
 │   ├── cli/            # erpilot CLI：typer + rich（组合层，默认 MCP 真数据）
 │   └── web/            # React + TS：流式对话、工具时间线、审批卡片（M1 第 4 周初始化）
 ├── packages/
-│   ├── agent_core/     # 手写 agent loop（不依赖任何业务包）
+│   ├── agent_core/     # LangGraph 运行时（不依赖任何业务包）
 │   ├── mcp_erp/        # FastMCP Server：ERP 能力 → MCP 工具 + agent 桥
 │   ├── erp_store/      # 领域模型 + 种子数据（商品/库存/订单，SQLite）
 │   └── evals/          # 评测集 + runner + 报告
@@ -39,7 +38,8 @@ LangGraph、PostgreSQL / pgvector、LiteLLM 属于后续路线，尚未接入。
 ```bash
 # 安装 uv（若未安装）：https://docs.astral.sh/uv/
 uv sync --all-packages       # 创建虚拟环境并安装全部工作区依赖
-cp .env.example .env         # 填入 ZHIPU_API_KEY
+cp .env.example .env         # 填入 ZHIPU_API_KEY；本地 PostgreSQL URL 已给出示例值
+docker compose up -d postgres # API graph checkpoint（本地演示凭据仅供开发）
 uv run pytest                # 单元测试（mock，不消耗 token）
 
 # CLI：默认经 MCP 桥查询真数据（先 seed），trace 自动落盘 traces/*.jsonl
@@ -50,8 +50,8 @@ uv run erpilot chat --writes "给商品 A1001 入库 5 件"  # 终端审批后�
 uv run erpilot replay traces/<某个>.jsonl        # 把 trace 还原成可读对话
 
 # API + 前端：SSE 链路
-ERPILOT_TOOLS=mcp uv run --package erpilot-api uvicorn erpilot_api.main:app --reload
-# 启用审批写入时再设置 ERPILOT_WRITES=1；PowerShell 用 $env:ERPILOT_WRITES="1"
+uv run --package erpilot-api python -m erpilot_api
+# 启用审批写入时再设置 ERPILOT_WRITES=1；缺少/无法连接 checkpoint DB 时 API 会拒绝启动
 # 验证：http://127.0.0.1:8000/healthz
 cd apps/web && npm install && npm run dev      # http://localhost:5173
 
@@ -82,10 +82,13 @@ uv run python scripts/demo.py --serve --port 8765
 幂等记录同事务提交，SQLite 写事务在读取库存之前取得写锁，避免并发超卖。
 写工具自动重试只在具备幂等契约时启用；整轮写任务不自动重跑。
 
-审批是内存中的单用户原型：正常决策、断连和取消会释放等待请求；未完成会话
-恢复到本轮前历史。进程重启恢复、身份认证及审批归属校验尚未实现，当前适合
-本机展示。下一阶段按持久化任务/审批、恢复协议、部署验收推进，见
-[可靠性复盘](docs/write-reliability.md) 与 [ADR-0007](docs/adr/0007-write-reliability.md)。
+审批通过 LangGraph `interrupt` 挂起，API 使用 PostgreSQL checkpoint 保存待审批
+参数与稳定 token；页面断连后可读取 session snapshot 并通过恢复 SSE 提交决策。
+节点执行中断后也可从保存的 checkpoint 显式继续，历史工具成功/失败状态会保留。
+ERP 业务数据和 RunStore 仍保存在 SQLite。此版本不实现 ADR-0008 中完整的
+R01–R10 崩溃对账与自动续跑协议，也未加入身份认证和多进程调度；边界见
+[ADR-0009](docs/adr/0009-langgraph-runtime.md)、[ADR-0008](docs/adr/0008-persistent-run-recovery.md)
+与[可靠性复盘](docs/write-reliability.md)。
 
 Langfuse 双写（可选）：`.env` 配置 `LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY /
 LANGFUSE_HOST` 后，CLI / API / 评测的 trace 在本地 JSONL 兜底之外同步上报远程
@@ -96,8 +99,9 @@ M1 各周验收入口：第 1–3 周为 `python -m agent_core`（最简演示�
 
 ## 下一阶段规划
 
-下一阶段按“M4 验收补缺 → 持久化任务与审批 → 重启/断连恢复 → 故障验收”推进。
-见 [总体规划](tasks/plan.md) 与 [任务清单](tasks/todo.md)（12 项任务、4 个检查点，当前仅规划，未实施）。
+M6–8 的 LangGraph + PostgreSQL HITL 已实施。下一阶段按评测驱动迭代与
+prompt injection 防护推进；完整恢复协议仍是后续独立工作。见
+[总体规划](tasks/plan.md)、[任务清单](tasks/todo.md) 与 [ADR-0009](docs/adr/0009-langgraph-runtime.md)。
 
 ## 路线图
 
@@ -105,13 +109,13 @@ M1 各周验收入口：第 1–3 周为 `python -m agent_core`（最简演示�
 |---|---|
 | M1–2 | 手写 agent loop：流式、工具调用、结构化输出、本地 trace |
 | M3–5 | FastMCP Server + 工具设计精研（15~20 个工具）+ 评测集起步 |
-| M6–8 | LangGraph 重构编排 + Postgres checkpointer + HITL 审批流 |
+| M6–8 | ✅ LangGraph 重构编排 + PostgreSQL checkpointer + HITL 审批流 |
 | M9–11 | 评测驱动迭代（成功率曲线、成本优化）+ prompt injection 防护 |
 | M12 | 部署上线、项目档案页与系列文章收口 |
 
 ## 文章与决策
 
-- 所有架构决策记录在 `docs/adr/`（0001–0007，含挂起审批与写入可靠性），范围冻结与启动计划见 [`docs/agent-project-plan.md`](docs/agent-project-plan.md)
+- 所有架构决策记录在 `docs/adr/`（0001–0009，含 LangGraph/PostgreSQL HITL），范围冻结与启动计划见 [`docs/agent-project-plan.md`](docs/agent-project-plan.md)
 - 评测集：人工标注标准 [`docs/eval-annotation-guide.md`](docs/eval-annotation-guide.md) + 工具卡 [`docs/tool-cards.md`](docs/tool-cards.md) + 错误自愈记录 [`docs/error-recovery-log.md`](docs/error-recovery-log.md)
 - 系列文章发布于个人站点 [Vie](https://vie-vibe.cn)，文稿随仓库维护：
   1. 《手写 Agent Loop：从一次 API 调用到多步任务》—— [`docs/articles/01-handwritten-agent-loop.md`](docs/articles/01-handwritten-agent-loop.md)

@@ -42,10 +42,8 @@ from uuid import uuid4
 
 from openai.types.chat import ChatCompletionMessageParam
 
-from agent_core.llm import TextDelta, ToolCall, Usage
-from agent_core.loop import (
+from agent_core.events import (
     AgentEvent,
-    AgentLoop,
     ApprovalPending,
     ApprovalResolved,
     LoopEnd,
@@ -54,6 +52,7 @@ from agent_core.loop import (
     ToolCallFinished,
     ToolCallStarted,
 )
+from agent_core.llm import TextDelta, ToolCall, Usage
 from agent_core.prices import cost_of
 
 TRACE_VERSION = 1
@@ -90,8 +89,13 @@ class JsonlTraceRecorder:
         self._sinks = list(sinks)
 
     async def run(
-        self, agent: AgentLoop, messages: list[ChatCompletionMessageParam]
+        self, agent, messages: list[ChatCompletionMessageParam], *, thread_id=None
     ) -> AsyncIterator[AgentEvent]:
+        stream = agent.run(messages, thread_id=thread_id) if thread_id else agent.run(messages)
+        async for event in self.record(stream, messages):
+            yield event
+
+    async def record(self, stream, messages) -> AsyncIterator[AgentEvent]:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         run_id = uuid4().hex[:12]
         started = time.perf_counter()
@@ -116,7 +120,6 @@ class JsonlTraceRecorder:
             step = 0
             step_text: list[str] = []
             pending: dict[str, tuple[float, ToolCall]] = {}
-            stream = agent.run(messages)
             try:
                 async for event in stream:
                     match event:

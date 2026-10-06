@@ -1,6 +1,6 @@
 # M6–8 LangGraph + PostgreSQL HITL Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Replace the hand-written agent loop with a LangGraph runtime that preserves Erpilot's tool, event, and approval behavior while persisting graph checkpoints in PostgreSQL.
 
@@ -71,7 +71,7 @@
 - Produces `AgentState`, a `TypedDict` with `messages`, `step`, `usage`, `pending_calls`, `tool_results`, `completed`, and `final_answer` fields.
 - Tool calls and results are `dict[str, object]`-shaped JSON data, not LangChain message objects or runtime instances.
 
-- [ ] **Step 1: Write state serialization and append/replace tests**
+- [x] **Step 1: Write state serialization and append/replace tests**
 
 ```python
 def test_agent_state_contains_only_serializable_checkpoint_values():
@@ -81,21 +81,21 @@ def test_agent_state_contains_only_serializable_checkpoint_values():
     assert state["pending_calls"] == []
 ```
 
-- [ ] **Step 2: Run the focused test and confirm the missing state API fails**
+- [x] **Step 2: Run the focused test and confirm the missing state API fails**
 
 Run: `uv run pytest packages/agent_core/tests/test_graph_state.py -q`
 Expected: FAIL because `graph_state.py` and `initial_state` do not exist.
 
-- [ ] **Step 3: Add `AgentState` and `initial_state(messages)`**
+- [x] **Step 3: Add `AgentState` and `initial_state(messages)`**
 
 Use plain dict/list/string/number/bool/null values. Keep `messages` replaceable so context compression can return a bounded history without an append-only reducer.
 
-- [ ] **Step 4: Run the focused test**
+- [x] **Step 4: Run the focused test**
 
 Run: `uv run pytest packages/agent_core/tests/test_graph_state.py -q`
 Expected: PASS; JSON serialization raises no exception.
 
-- [ ] **Step 5: Commit the state contract**
+- [x] **Step 5: Commit the state contract**
 
 ```bash
 git add packages/agent_core/src/agent_core/graph_state.py packages/agent_core/tests/test_graph_state.py
@@ -114,30 +114,30 @@ git commit -m "feat: define serializable graph state"
 - Produces `build_graph(client, tools, config, checkpointer) -> CompiledStateGraph`.
 - The model node consumes `AgentState` and uses `LLMClient.stream_chat(messages, tools=...)`; it must not create a LangChain provider client.
 
-- [ ] **Step 1: Add a stub-client test for streamed text and usage**
+- [x] **Step 1: Add a stub-client test for streamed text and usage**
 
 Test one `TextDelta("答复")` and one `StreamEnd(usage=...)`; assert state contains the assistant answer and accumulated usage.
 
-- [ ] **Step 2: Run the focused test to confirm graph API is absent**
+- [x] **Step 2: Run the focused test to confirm graph API is absent**
 
 Run: `uv run pytest packages/agent_core/tests/test_graph_model.py -q`
 Expected: FAIL because `build_graph` does not exist.
 
-- [ ] **Step 3: Add `langgraph` to agent-core and update the lockfile**
+- [x] **Step 3: Add `langgraph` to agent-core and update the lockfile**
 
 Run: `uv add --package agent-core langgraph`
 Expected: `packages/agent_core/pyproject.toml` records the dependency and `uv.lock` resolves the workspace.
 
-- [ ] **Step 4: Implement the model node and minimal graph**
+- [x] **Step 4: Implement the model node and minimal graph**
 
 Stream current LLM events, gather text/tool calls, append one OpenAI-compatible assistant message, increment `step`, and route to a terminal state when there are no tool calls.
 
-- [ ] **Step 5: Run the focused model-node tests**
+- [x] **Step 5: Run the focused model-node tests**
 
 Run: `uv run pytest packages/agent_core/tests/test_graph_model.py -q`
 Expected: PASS for final text, assistant message format, usage aggregation, and checkpointer injection.
 
-- [ ] **Step 6: Commit the minimal model graph**
+- [x] **Step 6: Commit the minimal model graph**
 
 ```bash
 git add packages/agent_core/pyproject.toml uv.lock packages/agent_core/src/agent_core/graph.py packages/agent_core/tests/test_graph_model.py
@@ -155,9 +155,9 @@ git commit -m "feat: add LangGraph model node"
 - Consumes existing `LoopConfig`, `ContextPolicy`, and `compress_messages`.
 - Produces max-step termination with the existing `LoopEnd(completed=False)` behavior and one-based step numbering.
 
-- [ ] **Step 1: Add tests for step numbering, max steps, and context compression**
-- [ ] **Step 2: Run `uv run pytest packages/agent_core/tests/test_graph_control_flow.py -q` and confirm the expected failures**
-- [ ] **Step 3: Apply `compress_messages` before each model request and route by `step < max_steps`**
+- [x] **Step 1: Add tests for step numbering, max steps, and context compression**
+- [x] **Step 2: Run `uv run pytest packages/agent_core/tests/test_graph_control_flow.py -q` and confirm the expected failures**
+- [x] **Step 3: Apply `compress_messages` before each model request and route by `step < max_steps`**
 
 ```python
 if state["step"] >= config.max_steps:
@@ -165,8 +165,8 @@ if state["step"] >= config.max_steps:
 compress_messages(state["messages"], config.context)
 ```
 
-- [ ] **Step 4: Re-run the focused control-flow tests and confirm PASS**
-- [ ] **Step 5: Commit the control-flow slice**
+- [x] **Step 4: Re-run the focused control-flow tests and confirm PASS**
+- [x] **Step 5: Commit the control-flow slice**
 
 ```bash
 git add packages/agent_core/src/agent_core/graph.py packages/agent_core/src/agent_core/graph_state.py packages/agent_core/tests/test_graph_control_flow.py
@@ -184,25 +184,25 @@ git commit -m "feat: preserve agent step and context policies"
 - Produces `prepare_tool_calls(calls, tools) -> list[dict]` and async `execute_tool_call(call, tools, config) -> dict`.
 - Each call record includes `call_id`, `name`, normalized `arguments`, `risk`, `client_token`, `pending_id`, and result fields when complete.
 
-- [ ] **Step 1: Add tests for Pydantic argument validation, unknown tools, and call/result ID pairing**
-- [ ] **Step 2: Run the focused tests and confirm missing helpers fail**
+- [x] **Step 1: Add tests for Pydantic argument validation, unknown tools, and call/result ID pairing**
+- [x] **Step 2: Run the focused tests and confirm missing helpers fail**
 
 Run: `uv run pytest packages/agent_core/tests/test_graph_tools.py -q`
 
-- [ ] **Step 3: Implement normalization and JSON-shaped structured errors**
+- [x] **Step 3: Implement normalization and JSON-shaped structured errors**
 
 Malformed arguments return the existing `validation` error envelope; unregistered names return `unknown_tool`. Neither path invokes a handler.
 
-- [ ] **Step 4: Add parallel read-only fan-out and retry-safe transient handling**
+- [x] **Step 4: Add parallel read-only fan-out and retry-safe transient handling**
 
 Use `asyncio.gather` for calls with `risk is None`; preserve result-to-`call_id` pairing even when completion order differs. Reuse existing `ToolRetryPolicy` semantics.
 
-- [ ] **Step 5: Run the focused tool tests**
+- [x] **Step 5: Run the focused tool tests**
 
 Run: `uv run pytest packages/agent_core/tests/test_graph_tools.py -q`
 Expected: PASS for valid calls, error envelopes, timeout retry policy, and parallel result pairing.
 
-- [ ] **Step 6: Commit read-tool execution**
+- [x] **Step 6: Commit read-tool execution**
 
 ```bash
 git add packages/agent_core/src/agent_core/graph_tools.py packages/agent_core/src/agent_core/graph.py packages/agent_core/tests/test_graph_tools.py
@@ -221,9 +221,9 @@ git commit -m "feat: execute graph read tools"
 - Produces `make_approval_payload(call) -> dict` and a write-task node that invokes `interrupt(payload)` before calling any write handler.
 - Resuming supplies only `{"approved": bool, "reason": str, "pending_id": str}`; tool name and normalized arguments come from checkpointed state.
 
-- [ ] **Step 1: Add tests for missing gate, pending payload, reject path, and approve path**
-- [ ] **Step 2: Run `uv run pytest packages/agent_core/tests/test_graph_approval.py -q` and confirm failures**
-- [ ] **Step 3: Assign UUID `client_token` and `pending_id` in the call preparation node**
+- [x] **Step 1: Add tests for missing gate, pending payload, reject path, and approve path**
+- [x] **Step 2: Run `uv run pytest packages/agent_core/tests/test_graph_approval.py -q` and confirm failures**
+- [x] **Step 3: Assign UUID `client_token` and `pending_id` in the call preparation node**
 
 ```python
 if call["risk"] is not None:
@@ -231,21 +231,21 @@ if call["risk"] is not None:
     call["pending_id"] = uuid4().hex
 ```
 
-- [ ] **Step 4: Implement one interrupt per graph task and execute only after an approved resume**
+- [x] **Step 4: Implement one interrupt per graph task and execute only after an approved resume**
 
 The approval node reads call data from state, calls `interrupt()` before side effects, validates the returned pending ID, and then either returns the structured denial result or invokes the original handler using the same checkpointed arguments.
 
-- [ ] **Step 5: Verify tool construction rejects writes without approval runtime**
+- [x] **Step 5: Verify tool construction rejects writes without approval runtime**
 
 Run: `uv run pytest packages/agent_core/tests/test_graph_approval.py::test_write_tools_require_approval_runtime -q`
 Expected: PASS; the handler call count remains zero.
 
-- [ ] **Step 6: Verify replay reuses token and same-token/different-arguments conflict is surfaced**
+- [x] **Step 6: Verify replay reuses token and same-token/different-arguments conflict is surfaced**
 
 Run: `uv run pytest packages/agent_core/tests/test_graph_approval.py -q`
 Expected: PASS; approved retry uses the identical token and never changes the normalized request.
 
-- [ ] **Step 7: Commit the approval node**
+- [x] **Step 7: Commit the approval node**
 
 ```bash
 git add packages/agent_core/src/agent_core/graph_approval.py packages/agent_core/src/agent_core/graph_tools.py packages/agent_core/src/agent_core/graph.py packages/agent_core/tests/test_graph_approval.py
@@ -264,20 +264,20 @@ git commit -m "feat: gate graph writes with interrupts"
 - Produces `LangGraphRuntime(client, tools, config, checkpointer)` with async `stream(messages, *, thread_id)`, `get_state(thread_id)`, and `resume(thread_id, decision)` methods.
 - `stream` yields existing `AgentEvent` dataclasses. `events.py` owns the dataclasses; `loop.py` re-exports them during migration.
 
-- [ ] **Step 1: Add a compatibility test comparing event names and payload fields**
-- [ ] **Step 2: Run `uv run pytest packages/agent_core/tests/test_graph_runtime.py -q` and confirm failure**
-- [ ] **Step 3: Move event dataclass definitions to `events.py` and re-export from `loop.py`**
-- [ ] **Step 4: Adapt graph stream/custom/interrupt events to `TextDelta`, step, tool, approval, and loop events**
+- [x] **Step 1: Add a compatibility test comparing event names and payload fields**
+- [x] **Step 2: Run `uv run pytest packages/agent_core/tests/test_graph_runtime.py -q` and confirm failure**
+- [x] **Step 3: Move event dataclass definitions to `events.py` and re-export from `loop.py`**
+- [x] **Step 4: Adapt graph stream/custom/interrupt events to `TextDelta`, step, tool, approval, and loop events**
 
 The adapter must emit each tool event with the originating `call_id`; interrupt payloads map back to `ApprovalPending` and decisions map to `ApprovalResolved`.
 
-- [ ] **Step 5: Implement `stream`, `get_state`, and `resume` using one stable `thread_id`**
-- [ ] **Step 6: Run runtime and existing protocol tests**
+- [x] **Step 5: Implement `stream`, `get_state`, and `resume` using one stable `thread_id`**
+- [x] **Step 6: Run runtime and existing protocol tests**
 
 Run: `uv run pytest packages/agent_core/tests/test_graph_runtime.py packages/agent_core/tests/test_loop.py -q`
 Expected: PASS; existing loop tests remain valid while the graph runtime emits compatible events.
 
-- [ ] **Step 7: Commit the public runtime interface**
+- [x] **Step 7: Commit the public runtime interface**
 
 ```bash
 git add packages/agent_core/src/agent_core/events.py packages/agent_core/src/agent_core/graph_runtime.py packages/agent_core/src/agent_core/loop.py packages/agent_core/tests/test_graph_runtime.py
@@ -286,9 +286,9 @@ git commit -m "feat: expose LangGraph runtime events"
 
 ### M6 checkpoint
 
-- [ ] Graph runtime passes focused stub-client, tool, approval, and event contract tests using explicit `InMemorySaver`.
-- [ ] `uv run ruff check packages/agent_core` passes.
-- [ ] Do not switch API/CLI/eval consumers yet.
+- [x] Graph runtime passes focused stub-client, tool, approval, and event contract tests using explicit `InMemorySaver`.
+- [x] `uv run ruff check packages/agent_core` passes.
+- [x] Do not switch API/CLI/eval consumers yet.
 
 ## Task 7: Add API-owned PostgreSQL checkpointer configuration
 
@@ -303,15 +303,15 @@ git commit -m "feat: expose LangGraph runtime events"
 - Produces `thread_id_for_session(session_id: str) -> str` using a namespaced SHA-256 digest no longer than the saver limit.
 - Produces async context manager `open_checkpointer(database_url) -> AsyncIterator[AsyncPostgresSaver]`; `setup()` completes before it is returned.
 
-- [ ] **Step 1: Add tests for stable/bounded thread IDs and missing database URL**
-- [ ] **Step 2: Run `uv run pytest apps/api/tests/test_checkpoint.py -q` and confirm failure**
-- [ ] **Step 3: Add `langgraph-checkpoint-postgres` to API dependencies and update `uv.lock`**
+- [x] **Step 1: Add tests for stable/bounded thread IDs and missing database URL**
+- [x] **Step 2: Run `uv run pytest apps/api/tests/test_checkpoint.py -q` and confirm failure**
+- [x] **Step 3: Add `langgraph-checkpoint-postgres` to API dependencies and update `uv.lock`**
 
 Run: `uv add --package erpilot-api langgraph-checkpoint-postgres`
 
-- [ ] **Step 4: Implement saver construction, `.setup()`, strict serializer configuration, and connection cleanup**
-- [ ] **Step 5: Add `ERPILOT_CHECKPOINT_DATABASE_URL` to `.env.example` without a real credential**
-- [ ] **Step 6: Run focused config tests and commit**
+- [x] **Step 4: Implement saver construction, `.setup()`, strict serializer configuration, and connection cleanup**
+- [x] **Step 5: Add `ERPILOT_CHECKPOINT_DATABASE_URL` to `.env.example` without a real credential**
+- [x] **Step 6: Run focused config tests and commit**
 
 Run: `uv run pytest apps/api/tests/test_checkpoint.py -q`
 
@@ -333,13 +333,13 @@ git commit -m "feat: configure PostgreSQL graph checkpoints"
 - `create_app` accepts an injected saver for tests; production lifespan opens the PostgreSQL saver and closes it after requests finish.
 - PostgreSQL is an explicit API requirement; test/demo in-memory saver injection is never selected by production fallback.
 
-- [ ] **Step 1: Add API-factory tests for injected saver and startup failure**
-- [ ] **Step 2: Run the focused API tests and confirm the production lifecycle is not wired**
-- [ ] **Step 3: Add FastAPI lifespan ownership and pass saver to `LangGraphRuntime` factory**
-- [ ] **Step 4: Add a local `postgres` service in `compose.yaml` with healthcheck and a non-production database**
-- [ ] **Step 5: Add PostgreSQL service to CI and run integration tests only after it is healthy**
-- [ ] **Step 6: Document `docker compose up -d postgres` and required API environment configuration**
-- [ ] **Step 7: Verify failure is fail-closed and commit**
+- [x] **Step 1: Add API-factory tests for injected saver and startup failure**
+- [x] **Step 2: Run the focused API tests and confirm the production lifecycle is not wired**
+- [x] **Step 3: Add FastAPI lifespan ownership and pass saver to `LangGraphRuntime` factory**
+- [x] **Step 4: Add a local `postgres` service in `compose.yaml` with healthcheck and a non-production database**
+- [x] **Step 5: Add PostgreSQL service to CI and run integration tests only after it is healthy**
+- [x] **Step 6: Document `docker compose up -d postgres` and required API environment configuration**
+- [x] **Step 7: Verify failure is fail-closed and commit**
 
 Run: `docker compose up -d postgres` then `uv run pytest apps/api/tests/test_api.py -q`
 Expected: PASS with PostgreSQL; a missing/unavailable URL fails application lifespan and never selects memory storage.
@@ -360,12 +360,12 @@ git commit -m "feat: wire PostgreSQL saver into API lifespan"
 - Consumes `open_checkpointer` and `LangGraphRuntime` from earlier tasks.
 - Produces a deterministic integration proof that a pending interrupt can be resumed by a newly constructed runtime using the same PostgreSQL thread.
 
-- [ ] **Step 1: Add a test that interrupts an approval graph and closes the first saver/runtime**
-- [ ] **Step 2: Reopen the saver/runtime and assert the pending payload and call arguments are unchanged**
-- [ ] **Step 3: Resume with a denial and assert zero handler calls**
-- [ ] **Step 4: Resume a separate approved run and assert the same `client_token` reaches the handler**
-- [ ] **Step 5: Run `uv run pytest apps/api/tests/test_checkpoint.py -q` against the isolated CI/local PostgreSQL service**
-- [ ] **Step 6: Commit the cross-instance proof**
+- [x] **Step 1: Add a test that interrupts an approval graph and closes the first saver/runtime**
+- [x] **Step 2: Reopen the saver/runtime and assert the pending payload and call arguments are unchanged**
+- [x] **Step 3: Resume with a denial and assert zero handler calls**
+- [x] **Step 4: Resume a separate approved run and assert the same `client_token` reaches the handler**
+- [x] **Step 5: Run `uv run pytest apps/api/tests/test_checkpoint.py -q` against the isolated CI/local PostgreSQL service**
+- [x] **Step 6: Commit the cross-instance proof**
 
 ```bash
 git add apps/api/tests/test_checkpoint.py .github/workflows/ci.yml compose.yaml
@@ -387,20 +387,20 @@ git commit -m "test: prove Postgres approval checkpoint recovery"
 - New `POST /api/chat/approve/stream` accepts `session_id`, `pending_id`, `approved`, and optional `reason`, then streams resumed AgentEvents.
 - Legacy `POST /api/chat/approve` keeps `{ok: boolean}` for an active in-process waiter.
 
-- [ ] **Step 1: Add service tests for graph-owned messages and completed-history seeding from SQLite RunStore**
-- [ ] **Step 2: Add route tests for snapshot shape, 404 unknown session, 409 stale/repeated approval, and legacy `{ok}` semantics**
-- [ ] **Step 3: Run focused API tests and confirm the graph endpoints are absent**
-- [ ] **Step 4: Switch `ChatService` to graph stream/resume while keeping SQLite only as the completed-history/display projection**
+- [x] **Step 1: Add service tests for graph-owned messages and completed-history seeding from SQLite RunStore**
+- [x] **Step 2: Add route tests for snapshot shape, 404 unknown session, 409 stale/repeated approval, and legacy `{ok}` semantics**
+- [x] **Step 3: Run focused API tests and confirm the graph endpoints are absent**
+- [x] **Step 4: Switch `ChatService` to graph stream/resume while keeping SQLite only as the completed-history/display projection**
 
 When a checkpoint exists, load its messages. Only when none exists, seed from completed SQLite session history; never reconstruct or replay an incomplete legacy run.
 
-- [ ] **Step 5: Implement live broker continuation and state/approval-stream routes**
-- [ ] **Step 6: Verify event errors and REST errors use the shapes in the spec**
+- [x] **Step 5: Implement live broker continuation and state/approval-stream routes**
+- [x] **Step 6: Verify event errors and REST errors use the shapes in the spec**
 
 Run: `uv run pytest apps/api/tests/test_api.py apps/api/tests/test_run_store.py -q`
 Expected: PASS for active approval continuation, post-disconnect resume, old `{ok}` response, and unchanged RunStore SQLite behavior.
 
-- [ ] **Step 7: Commit API graph orchestration**
+- [x] **Step 7: Commit API graph orchestration**
 
 ```bash
 git add apps/api/src/erpilot_api/service.py apps/api/src/erpilot_api/main.py apps/api/src/erpilot_api/run_store.py apps/api/tests/test_api.py apps/api/tests/test_run_store.py
@@ -419,13 +419,13 @@ git commit -m "feat: resume API approval through LangGraph"
 - `streamApprovalResume(sessionId, pendingId, approved, reason?)` consumes the same SSE event union as `streamChat`.
 - Existing active SSE approval uses `submitApproval`; disconnected/stale UI uses the resume stream.
 
-- [ ] **Step 1: Add protocol tests for state snapshot JSON, approval stream fields, event parsing, and server error events**
-- [ ] **Step 2: Run `npm test` in `apps/web` and confirm missing client functions fail type checking/tests**
-- [ ] **Step 3: Implement typed snapshot and approval-resume fetch helpers**
-- [ ] **Step 4: Hydrate the conversation and pending cards from snapshot when the app loads**
-- [ ] **Step 5: Route approval through the connected endpoint only while the chat SSE remains active; otherwise consume the resume SSE**
-- [ ] **Step 6: Run `npm test` and `npm run build` in `apps/web`**
-- [ ] **Step 7: Commit frontend resume support**
+- [x] **Step 1: Add protocol tests for state snapshot JSON, approval stream fields, event parsing, and server error events**
+- [x] **Step 2: Run `npm test` in `apps/web` and confirm missing client functions fail type checking/tests**
+- [x] **Step 3: Implement typed snapshot and approval-resume fetch helpers**
+- [x] **Step 4: Hydrate the conversation and pending cards from snapshot when the app loads**
+- [x] **Step 5: Route approval through the connected endpoint only while the chat SSE remains active; otherwise consume the resume SSE**
+- [x] **Step 6: Run `npm test` and `npm run build` in `apps/web`**
+- [x] **Step 7: Commit frontend resume support**
 
 ```bash
 git add apps/web/src/protocol.ts apps/web/src/App.tsx apps/web/tests/protocol.test.mjs
@@ -444,12 +444,12 @@ git commit -m "feat: resume graph approvals in the web client"
 - CLI builds graph runtime with an explicit saver and a unique thread ID per new conversation.
 - Trace recorder consumes the shared event/runtime protocol, not the concrete `AgentLoop` class.
 
-- [ ] **Step 1: Add CLI and trace tests that inject `InMemorySaver` and a deterministic LLM stub**
-- [ ] **Step 2: Run focused tests and confirm current AgentLoop constructors are the only path**
-- [ ] **Step 3: Update CLI construction and approval decision resume to use graph runtime**
-- [ ] **Step 4: Update trace recorder to pass a stable run thread and serialize shared AgentEvents**
-- [ ] **Step 5: Run `uv run pytest apps/cli/tests/test_cli.py packages/agent_core/tests/test_trace.py -q`**
-- [ ] **Step 6: Commit CLI/trace cutover**
+- [x] **Step 1: Add CLI and trace tests that inject `InMemorySaver` and a deterministic LLM stub**
+- [x] **Step 2: Run focused tests and confirm current AgentLoop constructors are the only path**
+- [x] **Step 3: Update CLI construction and approval decision resume to use graph runtime**
+- [x] **Step 4: Update trace recorder to pass a stable run thread and serialize shared AgentEvents**
+- [x] **Step 5: Run `uv run pytest apps/cli/tests/test_cli.py packages/agent_core/tests/test_trace.py -q`**
+- [x] **Step 6: Commit CLI/trace cutover**
 
 ```bash
 git add apps/cli/src/erpilot_cli/main.py apps/cli/tests/test_cli.py packages/agent_core/src/agent_core/trace.py packages/agent_core/tests/test_trace.py
@@ -468,11 +468,11 @@ git commit -m "feat: use LangGraph runtime in CLI and traces"
 - Eval runner creates one isolated `InMemorySaver` per case and a deterministic thread ID scoped to that case.
 - Demo runner uses explicit memory state and does not call a real model unless the existing command is explicitly configured to do so.
 
-- [ ] **Step 1: Add runner tests proving case state cannot leak between cases**
-- [ ] **Step 2: Update eval and demo runtime construction while preserving existing case-level tool gates**
-- [ ] **Step 3: Run `uv run pytest packages/evals/tests/test_runner.py packages/agent_core/tests/test_smoke.py -q`**
-- [ ] **Step 4: Run a no-network scripted demo and inspect its trace/event order**
-- [ ] **Step 5: Commit eval/demo cutover**
+- [x] **Step 1: Add runner tests proving case state cannot leak between cases**
+- [x] **Step 2: Update eval and demo runtime construction while preserving existing case-level tool gates**
+- [x] **Step 3: Run `uv run pytest packages/evals/tests/test_runner.py packages/agent_core/tests/test_smoke.py -q`**
+- [x] **Step 4: Run a no-network scripted demo and inspect its trace/event order**
+- [x] **Step 5: Commit eval/demo cutover**
 
 ```bash
 git add packages/evals/src/evals/runner.py packages/evals/tests/test_runner.py packages/agent_core/src/agent_core/__main__.py packages/agent_core/tests/test_smoke.py
@@ -494,17 +494,17 @@ git commit -m "feat: use LangGraph runtime in evals and demos"
 - No production consumer imports `AgentLoop` after this task.
 - AgentEvent types remain importable from `agent_core.events`; compatibility re-exports stay only if a documented consumer needs them.
 
-- [ ] **Step 1: Search all tracked source/tests for `AgentLoop` imports**
+- [x] **Step 1: Search all tracked source/tests for `AgentLoop` imports**
 
 Run: `git grep -n AgentLoop -- apps packages`
 Expected before cleanup: only legacy implementation/tests and the consumers explicitly listed in earlier tasks.
 
-- [ ] **Step 2: Migrate MCP bridge integration tests to `LangGraphRuntime`**
-- [ ] **Step 3: Remove the old loop implementation and update package exports**
-- [ ] **Step 4: Add ADR-0009 as accepted only after implementation is complete; update ADR-0008 wording to preserve its historical rationale and record the approved later migration**
-- [ ] **Step 5: Update README commands/configuration and tool-card sync text**
-- [ ] **Step 6: Run `git grep -n AgentLoop -- apps packages`; confirm no production imports remain**
-- [ ] **Step 7: Commit cleanup and docs**
+- [x] **Step 2: Migrate MCP bridge integration tests to `LangGraphRuntime`**
+- [x] **Step 3: Remove the old loop implementation and update package exports**
+- [x] **Step 4: Add ADR-0009 as accepted only after implementation is complete; update ADR-0008 wording to preserve its historical rationale and record the approved later migration**
+- [x] **Step 5: Update README commands/configuration and tool-card sync text**
+- [x] **Step 6: Run `git grep -n AgentLoop -- apps packages`; confirm no production imports remain**
+- [x] **Step 7: Commit cleanup and docs**
 
 ```bash
 git add packages/agent_core/src/agent_core/loop.py packages/agent_core/src/agent_core/__init__.py packages/mcp_erp/tests/test_mcp_erp.py docs/adr/0009-langgraph-runtime.md docs/adr/0008-persistent-run-recovery.md docs/tool-cards.md README.md
@@ -516,13 +516,13 @@ git commit -m "refactor: retire handwritten agent loop"
 **Files:**
 - No planned code changes; fix only failures within the owning earlier task.
 
-- [ ] **Step 1: Run `uv run ruff check .`**
-- [ ] **Step 2: Run `uv run pytest`**
-- [ ] **Step 3: Run PostgreSQL saver/API integration tests with isolated PostgreSQL**
-- [ ] **Step 4: Run `npm test` and `npm run build` in `apps/web`**
-- [ ] **Step 5: Run the scripted no-network demo and review the approval/denial event sequence**
-- [ ] **Step 6: Inspect `git diff --check`, `git status`, and the final diff for secrets or unintended ERP schema changes**
-- [ ] **Step 7: Summarize any unrun real-model evaluation as unverified; do not claim the skipped recovery acceptance passed**
+- [x] **Step 1: Run `uv run ruff check .`**
+- [x] **Step 2: Run `uv run pytest`**
+- [x] **Step 3: Run PostgreSQL saver/API integration tests with isolated PostgreSQL**
+- [x] **Step 4: Run `npm test` and `npm run build` in `apps/web`**
+- [x] **Step 5: Run the scripted no-network demo and review the approval/denial event sequence**
+- [x] **Step 6: Inspect `git diff --check`, `git status`, and the final diff for secrets or unintended ERP schema changes**
+- [x] **Step 7: Summarize any unrun real-model evaluation as unverified; do not claim the skipped recovery acceptance passed**
 
 ## Dependency Order
 

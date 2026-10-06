@@ -1,34 +1,41 @@
-"""Erpilot API：agent 宿主 + SSE 流式对话（M1 第 4 周最小链路）。
+"""Erpilot API：LangGraph 会话、checkpoint 和 SSE 流式审批。
 
 路由：
 - GET  /healthz           存活探针
-- POST /api/chat/stream   SSE 流式对话（事件协议见 events.py 模块 docstring）
+- POST /api/chat/stream   SSE 流式对话
+- GET  /api/sessions/{id}/state 会话快照
+- POST /api/chat/approve/stream 审批后续段
+- POST /api/sessions/{id}/resume/stream 从中断节点继续
 
 启动：
-    uv run --package erpilot-api uvicorn erpilot_api.main:app --reload
+    uv run --package erpilot-api python -m erpilot_api
 联调前端：cd apps/web && npm install && npm run dev（vite 把 /api 代理到本服务）
 """
 
 import os
 import time
 from collections.abc import AsyncIterator, Callable, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
 from uuid import uuid4
 
 from agent_core.approval import ApprovalDecision, StreamApprovalGate
 from agent_core.demo_tools import DEMO_TOOLS
+from agent_core.events import LoopEnd
 from agent_core.llm import DEFAULT_MODEL, LLMClient, LLMConfig
-from agent_core.loop import LoopEnd
 from agent_core.prices import cost_of
 from agent_core.tools import Tool
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
+from starlette.background import BackgroundTask
 
+from erpilot_api.checkpoint import open_checkpointer
 from erpilot_api.events import encode_event, sse_frame
 from erpilot_api.run_store import RunStore
-from erpilot_api.service import ChatService
+from erpilot_api.service import ChatService, SessionError
 
 DEFAULT_TRACE_DIR = Path("traces")
 
@@ -46,6 +53,10 @@ class ApproveRequest(BaseModel):
     pending_id: str = Field(min_length=1, description="待审批请求 id")
     approved: bool = Field(description="true=批准执行，false=拒绝")
     reason: str = Field(default="", description="拒绝原因（转述给模型与用户）")
+
+
+class ResumeRequest(ApproveRequest):
+    session_id: str = Field(min_length=1)
 
 
 def _resolve_tools(
@@ -77,6 +88,7 @@ def create_app(
     tools: Sequence[Tool] | None = None,
     approval_gate: StreamApprovalGate | None = None,
     run_store_path: Path | None = None,
+    checkpointer=None,
 ) -> FastAPI:
     """应用工厂：测试注入 mock 的 LLMClient 工厂、临时 trace 目录与工具集。"""
     resolved_tools, env_gate = _resolve_tools(tools)
@@ -86,13 +98,36 @@ def create_app(
         trace_dir=trace_dir or DEFAULT_TRACE_DIR,
         tools=resolved_tools,
         approval_gate=approval_gate or env_gate,
-        # T04 stores read-only runs. Write runs need durable approval/token
-        # checkpoints before this store can safely own their lifecycle (T05).
-        run_store=(None if any(t.risk for t in resolved_tools) else RunStore(
+        checkpointer=checkpointer,
+        run_store=RunStore(
             run_store_path or (trace_dir / "runs.db" if trace_dir else Path("data/runs.db"))
-        )),
+        ),
     )
-    app = FastAPI(title="Erpilot API", version="0.1.0")
+
+    @asynccontextmanager
+    async def lifespan(app):
+        if checkpointer is not None:
+            yield
+        else:
+            async with open_checkpointer(
+                os.environ.get("ERPILOT_CHECKPOINT_DATABASE_URL", "")
+            ) as saver:
+                service._checkpointer = saver
+                yield
+                service._checkpointer = None
+
+    app = FastAPI(title="Erpilot API", version="0.1.0", lifespan=lifespan)
+    app.state.service = service
+
+    @app.exception_handler(SessionError)
+    async def session_error(request: Request, exc: SessionError):
+        return JSONResponse(
+            status_code=exc.status, content={"error": {"code": exc.code, "message": str(exc)}}
+        )
+
+    @app.get("/api/sessions/{session_id}/state")
+    async def session_state(session_id: str):
+        return await service.session_state(session_id)
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
@@ -101,11 +136,31 @@ def create_app(
     @app.post("/api/chat/stream")
     async def chat_stream(req: ChatRequest) -> EventSourceResponse:
         session_id = req.session_id or uuid4().hex
+        return event_response(session_id, service.stream_run(session_id, req.message))
 
+    @app.post("/api/chat/approve/stream")
+    async def resume_approval(req: ResumeRequest) -> EventSourceResponse:
+        release = await service.reserve_resume(req.session_id, req.pending_id)
+        return event_response(
+            req.session_id,
+            service.stream_resume(
+                req.session_id,
+                req.pending_id,
+                req.approved,
+                req.reason,
+                reserved=True,
+            ),
+            release,
+        )
+
+    @app.post("/api/sessions/{session_id}/resume/stream")
+    async def continue_interrupted_session(session_id: str) -> EventSourceResponse:
+        return event_response(session_id, service.stream_retry(session_id))
+
+    def event_response(session_id, stream, release=None):
         async def generate() -> AsyncIterator[dict[str, str]]:
             yield sse_frame("start", {"session_id": session_id, "model": service.model})
             t0 = time.perf_counter()
-            stream = service.stream_run(session_id, req.message)
             try:
                 async for event in stream:
                     encoded = encode_event(event)
@@ -123,12 +178,18 @@ def create_app(
                                 "trace": str(service.last_trace) if service.last_trace else None,
                             },
                         )
-            except Exception as exc:  # LLM 网络错误 / 缺 API key 等：流内报错后收口
-                yield sse_frame("error", {"message": str(exc)})
+            except SessionError as exc:
+                yield sse_frame("error", {"code": exc.code, "message": str(exc)})
+            except Exception as exc:
+                yield sse_frame("error", {"code": "execution_error", "message": str(exc)})
             finally:
                 await stream.aclose()
+                if release:
+                    release()
 
-        return EventSourceResponse(generate())
+        return EventSourceResponse(
+            generate(), background=BackgroundTask(release) if release else None
+        )
 
     @app.post("/api/chat/approve")
     async def approve(req: ApproveRequest) -> dict[str, object]:

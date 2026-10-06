@@ -5,8 +5,7 @@ def test_package_imports() -> None:
     assert agent_core.__doc__ is not None
 
 
-def test_loop_stub_documents_goals() -> None:
-    from agent_core import loop
+def test_runtime_config_exposes_graph_limits() -> None:
+    from agent_core.runtime_config import LoopConfig
 
-    # M1 实现开始后，这里会被真实的 loop 行为测试取代
-    assert "agent loop" in loop.__doc__
+    assert LoopConfig().max_steps > 0

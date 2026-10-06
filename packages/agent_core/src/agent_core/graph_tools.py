@@ -5,7 +5,7 @@ import json
 from copy import deepcopy
 from uuid import uuid4
 
-from agent_core.loop import _error_payload
+from agent_core.graph_helpers import error_payload
 
 
 def prepare_tool_calls(calls, tools):
@@ -22,7 +22,7 @@ def prepare_tool_calls(calls, tools):
         }
         if tool is None:
             record.update(
-                content=_error_payload("unknown_tool", f"未注册的工具：{call.name}"), ok=False
+                content=error_payload("unknown_tool", f"未注册的工具：{call.name}"), ok=False
             )
         else:
             try:
@@ -37,7 +37,7 @@ def prepare_tool_calls(calls, tools):
                         record["arguments"]["client_token"] = token
             except Exception as exc:
                 record.update(
-                    content=_error_payload("validation", f"参数校验失败：{exc}"), ok=False
+                    content=error_payload("validation", f"参数校验失败：{exc}"), ok=False
                 )
         prepared.append(record)
     return prepared
@@ -59,10 +59,10 @@ async def execute_tool_call(call, tools, config):
             result = await asyncio.wait_for(tool.handler(args), config.tool_timeout)
         except TimeoutError:
             kind = "timeout"
-            content = _error_payload(kind, f"工具执行超时（>{config.tool_timeout}s）")
+            content = error_payload(kind, f"工具执行超时（>{config.tool_timeout}s）")
         except Exception as exc:
             kind = "execution"
-            content = _error_payload(kind, f"工具执行出错：{exc}")
+            content = error_payload(kind, f"工具执行出错：{exc}")
         else:
             content = (
                 result

@@ -20,8 +20,7 @@ step_end 不下发——它是 trace 的计量记录，前端无需感知。
 import json
 from typing import Any
 
-from agent_core.llm import TextDelta
-from agent_core.loop import (
+from agent_core.events import (
     AgentEvent,
     ApprovalPending,
     ApprovalResolved,
@@ -31,6 +30,7 @@ from agent_core.loop import (
     ToolCallFinished,
     ToolCallStarted,
 )
+from agent_core.llm import TextDelta
 
 
 def encode_event(event: AgentEvent) -> tuple[str, dict[str, Any]] | None:

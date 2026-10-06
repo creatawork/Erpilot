@@ -10,19 +10,18 @@ from langgraph.types import interrupt
 
 from agent_core.approval import ApprovalDecision, _denial_payload
 from agent_core.context import compress_messages
-from agent_core.graph_approval import ResumeDecision, make_approval_payload
-from agent_core.graph_state import AgentState
-from agent_core.graph_tools import execute_tool_call, prepare_tool_calls
-from agent_core.llm import StreamEnd, TextDelta, ToolCall, Usage
-from agent_core.loop import (
+from agent_core.events import (
     ApprovalResolved,
     StepEnd,
     StepStarted,
     ToolCallFinished,
     ToolCallStarted,
-    _assistant_toolcall_message,
-    _merge_usage,
 )
+from agent_core.graph_approval import ResumeDecision, make_approval_payload
+from agent_core.graph_helpers import assistant_toolcall_message, merge_usage
+from agent_core.graph_state import AgentState
+from agent_core.graph_tools import execute_tool_call, prepare_tool_calls
+from agent_core.llm import StreamEnd, TextDelta, ToolCall, Usage
 
 
 def build_graph(client, tools, config, checkpointer, *, approval_enabled=False):
@@ -54,14 +53,14 @@ def build_graph(client, tools, config, checkpointer, *, approval_enabled=False):
         writer(StepEnd(step, usage, round((time.perf_counter() - started) * 1000, 1)))
         text = "".join(parts)
         messages.append(
-            _assistant_toolcall_message(text, calls)
+            assistant_toolcall_message(text, calls)
             if calls
             else {
                 "role": "assistant",
                 "content": text,
             }
         )
-        total = _merge_usage(Usage(**state["usage"]) if state["usage"] else None, usage)
+        total = merge_usage(Usage(**state["usage"]) if state["usage"] else None, usage)
         return {
             "messages": messages,
             "step": step,
@@ -132,6 +131,7 @@ def build_graph(client, tools, config, checkpointer, *, approval_enabled=False):
 
     def collect(state):
         results = {r["call_id"]: r for r in state["tool_results"]}
+        calls = {c["call_id"]: c for c in state["pending_calls"]}
         return {
             "messages": [
                 *state["messages"],
@@ -142,6 +142,19 @@ def build_graph(client, tools, config, checkpointer, *, approval_enabled=False):
                         "content": results[call["call_id"]]["content"],
                     }
                     for call in state["pending_calls"]
+                ],
+            ],
+            "tool_history": [
+                *state["tool_history"],
+                *[
+                    {
+                        "call_id": result["call_id"],
+                        "name": result["name"],
+                        "arguments": calls[result["call_id"]]["arguments"],
+                        "content": result["content"],
+                        "ok": result["ok"],
+                    }
+                    for result in state["tool_results"]
                 ],
             ],
             "pending_calls": [],

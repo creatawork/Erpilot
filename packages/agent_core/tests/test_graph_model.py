@@ -1,7 +1,7 @@
 from agent_core.graph import build_graph
 from agent_core.graph_state import initial_state
 from agent_core.llm import StreamEnd, TextDelta, Usage
-from agent_core.loop import LoopConfig
+from agent_core.runtime_config import LoopConfig
 from langgraph.checkpoint.memory import InMemorySaver
 
 

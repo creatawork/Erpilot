@@ -31,6 +31,9 @@ class Tool:
     # batch_confirm / single_confirm，审批门（approval.guarded）据此拦截
     risk: str | None = None
     retry_safe: bool = False  # 写工具必须由适配层提供稳定幂等键，才能自动重试
+    # Graph composition can execute the original handler only after its durable interrupt.
+    approved_handler: Callable[[BaseModel], Awaitable[object]] | None = None
+    approval_gate: object | None = None
 
     def openai_schema(self) -> dict[str, Any]:
         """OpenAI tools 参数格式：{"type": "function", "function": {...}}。"""
@@ -50,8 +53,6 @@ def tool(
     """装饰器：把 async 函数注册成 Tool，调用时以 params 模型校验入参。"""
 
     def decorator(fn: Callable[[BaseModel], Awaitable[object]]) -> Tool:
-        return Tool(
-            name=name, description=description, params_model=params, handler=fn, risk=risk
-        )
+        return Tool(name=name, description=description, params_model=params, handler=fn, risk=risk)
 
     return decorator

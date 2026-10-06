@@ -61,7 +61,63 @@ export type SSEEvent =
   | { event: "approval_pending"; data: ApprovalPendingPayload }
   | { event: "approval_resolved"; data: ApprovalResolvedPayload }
   | { event: "done"; data: DonePayload }
-  | { event: "error"; data: { message: string } };
+  | { event: "error"; data: { code?: string; message: string } };
+
+export interface SessionMessage {
+  role: string;
+  content?: string | null;
+  tool_call_id?: string;
+  tool_calls?: { id: string; function: { name: string; arguments: string } }[];
+}
+
+export interface SessionToolResult {
+  call_id: string;
+  name: string;
+  content: string;
+  ok: boolean;
+}
+
+export interface SessionState {
+  session_id: string;
+  status: "completed" | "waiting_approval" | "running" | "interrupted";
+  messages: SessionMessage[];
+  pending_approvals: ApprovalPendingPayload[];
+  tool_results: SessionToolResult[];
+}
+
+async function responseError(resp: Response): Promise<Error> {
+  const body = await resp.json().catch(() => null);
+  return new Error(body?.error?.message ?? `HTTP ${resp.status}`);
+}
+
+export async function loadSessionState(sessionId: string, signal?: AbortSignal): Promise<SessionState | null> {
+  const resp = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/state`, { signal });
+  if (resp.status === 404) return null;
+  if (!resp.ok) throw await responseError(resp);
+  const data: unknown = await resp.json();
+  if (!data || typeof data !== "object" || !("messages" in data) ||
+      !("pending_approvals" in data) || !Array.isArray(data.messages) ||
+      !Array.isArray(data.pending_approvals) || !("tool_results" in data) ||
+      !Array.isArray(data.tool_results)) throw new Error("会话状态格式无效");
+  return data as SessionState;
+}
+
+export async function* streamApprovalResume(
+  sessionId: string, pendingId: string, approved: boolean, reason = "", signal?: AbortSignal,
+): AsyncGenerator<SSEEvent> {
+  const resp = await fetch("/api/chat/approve/stream", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId, pending_id: pendingId, approved, reason }), signal,
+  });
+  yield* readSSE(resp);
+}
+
+export async function* streamInterruptedResume(sessionId: string): AsyncGenerator<SSEEvent> {
+  const resp = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/resume/stream`, {
+    method: "POST",
+  });
+  yield* readSSE(resp);
+}
 
 export async function submitApproval(pendingId: string, approved: boolean): Promise<void> {
   const resp = await fetch("/api/chat/approve", {
@@ -99,13 +155,16 @@ export async function* streamChat(
     body: JSON.stringify({ message, session_id: sessionId }),
     signal,
   });
-  if (!resp.ok || !resp.body) {
-    throw new Error(`HTTP ${resp.status}`);
-  }
+  yield* readSSE(resp);
+}
+
+async function* readSSE(resp: Response): AsyncGenerator<SSEEvent> {
+  if (!resp.ok) throw await responseError(resp);
+  if (!resp.body) throw new Error("响应缺少事件流");
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  while (true) {
+  try { while (true) {
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
@@ -118,5 +177,8 @@ export async function* streamChat(
       if (parsed) yield parsed;
       sep = buffer.match(/\r?\n\r?\n/);
     }
+  } } finally {
+    await reader.cancel();
+    reader.releaseLock();
   }
 }

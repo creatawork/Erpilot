@@ -96,14 +96,21 @@ class RunStore:
                 conn.execute(
                     "INSERT INTO run(run_id, session_id, user_input, status, checkpoint_version, "
                     "messages_json, trace_path) VALUES (?, ?, ?, 'running', ?, ?, ?)",
-                    (run_id, session_id, user_input, SCHEMA_VERSION,
-                     _json([*history, {"role": "user", "content": user_input}]), trace_path),
+                    (
+                        run_id,
+                        session_id,
+                        user_input,
+                        SCHEMA_VERSION,
+                        _json([*history, {"role": "user", "content": user_input}]),
+                        trace_path,
+                    ),
                 )
             except sqlite3.IntegrityError as exc:
                 raise ActiveRunError(f"session {session_id} already has an active run") from exc
             conn.execute(
                 "UPDATE run_session SET active_run_id=?, updated_at=CURRENT_TIMESTAMP "
-                "WHERE session_id=?", (run_id, session_id),
+                "WHERE session_id=?",
+                (run_id, session_id),
             )
         return run_id
 
@@ -132,6 +139,17 @@ class RunStore:
                 (_json(messages), row[0]),
             )
 
+    def project_run(self, run_id: str, messages: list, status: str) -> None:
+        """Display projection only; graph checkpoints remain the execution authority."""
+        if status not in ("running", "waiting_approval"):
+            raise ValueError("unsupported projection status")
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE run SET messages_json=?, status=?, revision=revision+1, "
+                "updated_at=CURRENT_TIMESTAMP WHERE run_id=?",
+                (_json(messages), status, run_id),
+            )
+
     def fail_run(self, run_id: str, error: str) -> None:
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -140,11 +158,22 @@ class RunStore:
                 raise KeyError(run_id)
             conn.execute(
                 "UPDATE run SET status='failed', error=?, revision=revision+1, "
-                "updated_at=CURRENT_TIMESTAMP WHERE run_id=?", (error, run_id),
+                "updated_at=CURRENT_TIMESTAMP WHERE run_id=?",
+                (error, run_id),
             )
             conn.execute(
                 "UPDATE run_session SET active_run_id=NULL, updated_at=CURRENT_TIMESTAMP "
-                "WHERE session_id=?", (row[0],),
+                "WHERE session_id=?",
+                (row[0],),
+            )
+
+    def update_session_history(self, session_id: str, messages: list) -> None:
+        """Refresh the completed-history projection after continuing a checkpoint."""
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE run_session SET history_json=?, updated_at=CURRENT_TIMESTAMP "
+                "WHERE session_id=?",
+                (_json(messages), session_id),
             )
 
     def get_run(self, run_id: str) -> dict[str, Any] | None:

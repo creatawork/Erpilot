@@ -10,6 +10,7 @@ class AgentState(TypedDict):
     usage: dict[str, int] | None
     pending_calls: list[dict[str, Any]]
     tool_results: list[dict[str, Any]]
+    tool_history: list[dict[str, Any]]
     completed: bool
     final_answer: str
 
@@ -21,6 +22,7 @@ def initial_state(messages: list[dict[str, Any]]) -> AgentState:
         usage=None,
         pending_calls=[],
         tool_results=[],
+        tool_history=[],
         completed=False,
         final_answer="",
     )

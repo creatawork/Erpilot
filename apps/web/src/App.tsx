@@ -1,30 +1,19 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import "./App.css";
 import {
   type ApprovalPendingPayload,
   type ApprovalResolvedPayload,
-  type DonePayload,
   type ToolFinishedPayload,
   type ToolStartedPayload,
+  type SSEEvent,
+  loadSessionState,
+  streamInterruptedResume,
+  streamApprovalResume,
   streamChat,
   submitApproval,
 } from "./protocol";
 
-interface ToolItem {
-  id: string;
-  name: string;
-  arguments: string;
-  finished: ToolFinishedPayload | null;
-  approval: ApprovalPendingPayload | null;
-  approvalResolved: ApprovalResolvedPayload | null;
-}
-
-interface Turn {
-  role: "user" | "assistant";
-  text: string;
-  tools: ToolItem[];
-  done?: DonePayload;
-}
+import { hydrateTurns, type Turn } from "./session";
 
 function newSessionId(): string {
   return crypto.randomUUID?.() ?? Math.random().toString(36).slice(2);
@@ -47,6 +36,10 @@ export default function App() {
   const [status, setStatus] = useState<string>("");
   const [error, setError] = useState<string>("");
   const [busy, setBusy] = useState(false);
+  const [hydrating, setHydrating] = useState(true);
+  const [interrupted, setInterrupted] = useState(false);
+  const liveConnection = useRef(false);
+
   const [submittingApprovals, setSubmittingApprovals] = useState<Set<string>>(new Set());
   const approvalInFlight = useRef(new Set<string>());
   const listRef = useRef<HTMLDivElement>(null);
@@ -57,37 +50,7 @@ export default function App() {
     });
   };
 
-  const respondApproval = useCallback(
-    async (pendingId: string, approved: boolean) => {
-      if (approvalInFlight.current.has(pendingId)) return;
-      approvalInFlight.current.add(pendingId);
-      setSubmittingApprovals(new Set(approvalInFlight.current));
-      setError("");
-      try {
-        await submitApproval(pendingId, approved);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "审批提交失败，请重试。");
-      } finally {
-        approvalInFlight.current.delete(pendingId);
-        setSubmittingApprovals(new Set(approvalInFlight.current));
-      }
-    },
-    [],
-  );
-
-  const send = useCallback(async () => {
-    const message = input.trim();
-    if (!message || busy) return;
-    setInput("");
-    setError("");
-    setBusy(true);
-    setTurns(prev => [
-      ...prev,
-      { role: "user", text: message, tools: [] },
-      { role: "assistant", text: "", tools: [] },
-    ]);
-    scrollToEnd();
-
+  const consumeEvents = useCallback(async (events: AsyncIterable<SSEEvent>) => {
     const updateAssistant = (fn: (turn: Turn) => Turn) => {
       setTurns(prev => {
         const next = [...prev];
@@ -98,8 +61,7 @@ export default function App() {
       scrollToEnd();
     };
 
-    try {
-      for await (const ev of streamChat(message, sessionIdRef.current)) {
+      for await (const ev of events) {
         switch (ev.event) {
           case "start":
             setStatus(`${ev.data.model} · 会话 ${ev.data.session_id.slice(0, 8)}`);
@@ -137,7 +99,8 @@ export default function App() {
             updateAssistant(t => ({
               ...t,
               tools: t.tools.map(x =>
-                x.id === pending.call_id ? { ...x, approval: pending } : x,
+                x.id === pending.call_id ? { ...x, approval: pending,
+                  arguments: JSON.stringify(pending.arguments) } : x,
               ),
             }));
             setStatus(`待审批：${pending.tool}（${pending.risk}）`);
@@ -157,6 +120,7 @@ export default function App() {
           case "done":
             updateAssistant(t => ({ ...t, done: ev.data }));
             setStatus("");
+            setInterrupted(false);
             break;
           case "error":
             setError(ev.data.message);
@@ -164,13 +128,97 @@ export default function App() {
             break;
         }
       }
+  }, []);
+
+  const respondApproval = useCallback(
+    async (pendingId: string, approved: boolean) => {
+      if (approvalInFlight.current.has(pendingId)) return;
+      approvalInFlight.current.add(pendingId);
+      setSubmittingApprovals(new Set(approvalInFlight.current));
+      setError("");
+      try {
+        if (liveConnection.current) {
+          await submitApproval(pendingId, approved);
+        } else {
+          setBusy(true);
+          liveConnection.current = true;
+          try {
+            await consumeEvents(streamApprovalResume(sessionIdRef.current, pendingId, approved));
+          } finally {
+            liveConnection.current = false;
+            setBusy(false);
+          }
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "审批提交失败，请重试。");
+      } finally {
+        approvalInFlight.current.delete(pendingId);
+        setSubmittingApprovals(new Set(approvalInFlight.current));
+      }
+    },
+    [consumeEvents],
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    loadSessionState(sessionIdRef.current, controller.signal).then(snapshot => {
+      if (!controller.signal.aborted && snapshot) {
+        setTurns(hydrateTurns(snapshot));
+        setInterrupted(snapshot.status === "interrupted");
+        setStatus(snapshot.status === "waiting_approval"
+          ? "待审批：请确认下方操作"
+          : snapshot.status === "interrupted" ? "任务中断，可继续恢复" : "");
+      }
+    }).catch(e => {
+      if (!controller.signal.aborted) setError(e instanceof Error ? e.message : String(e));
+    }).finally(() => {
+      if (!controller.signal.aborted) setHydrating(false);
+    });
+    return () => controller.abort();
+  }, []);
+
+  const hasPending = turns.some(turn => turn.tools.some(tool => tool.approval && !tool.approvalResolved));
+
+  const continueInterrupted = useCallback(async () => {
+    if (busy || !interrupted) return;
+    setBusy(true);
+    setError("");
+    setStatus("正在恢复未完成任务…");
+    liveConnection.current = true;
+    try {
+      await consumeEvents(streamInterruptedResume(sessionIdRef.current));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      liveConnection.current = false;
+      setBusy(false);
+    }
+  }, [busy, interrupted, consumeEvents]);
+
+  const send = useCallback(async () => {
+    const message = input.trim();
+    if (!message || busy || hydrating || hasPending || interrupted) return;
+    setInput("");
+    setError("");
+    setBusy(true);
+    setTurns(prev => [
+      ...prev,
+      { role: "user", text: message, tools: [] },
+      { role: "assistant", text: "", tools: [] },
+    ]);
+    scrollToEnd();
+
+    liveConnection.current = true;
+    try {
+      await consumeEvents(streamChat(message, sessionIdRef.current));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setStatus("");
     } finally {
+      liveConnection.current = false;
       setBusy(false);
     }
-  }, [input, busy]);
+  }, [input, busy, hydrating, hasPending, interrupted, consumeEvents]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -183,7 +231,7 @@ export default function App() {
     <div className="app">
       <header>
         <h1>Erpilot 掌柜助手</h1>
-        <span className="status">{status || (busy ? "生成中…" : "")}</span>
+        <span className="status" role="status">{status || (hydrating ? "加载会话…" : busy ? "生成中…" : "")}</span>
       </header>
 
       <div className="chat" ref={listRef}>
@@ -260,19 +308,25 @@ export default function App() {
             </div>
           ),
         )}
-        {error && <div className="error">{error}</div>}
+        {error && <div className="error" role="alert">{error}</div>}
       </div>
 
       <footer>
+        {interrupted && (
+          <button onClick={() => void continueInterrupted()} disabled={busy || hydrating}>
+            继续恢复
+          </button>
+        )}
         <textarea
+          aria-label="消息"
           value={input}
           placeholder="输入消息，Enter 发送，Shift+Enter 换行"
           rows={2}
           onChange={e => setInput(e.target.value)}
           onKeyDown={onKeyDown}
-          disabled={busy}
+          disabled={busy || hydrating || hasPending || interrupted}
         />
-        <button onClick={() => void send()} disabled={busy || !input.trim()}>
+        <button onClick={() => void send()} disabled={busy || hydrating || hasPending || interrupted || !input.trim()}>
           发送
         </button>
       </footer>

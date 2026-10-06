@@ -17,10 +17,12 @@ def _mock_client(order_id: str):
     def handler(request):
         body = json.loads(request.content)
         if any(m["role"] == "tool" for m in body["messages"]):
-            return sse_response([
-                chunk(delta={"content": f"订单 {order_id} 状态：待发货"}),
-                chunk(usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}),
-            ])
+            return sse_response(
+                [
+                    chunk(delta={"content": f"订单 {order_id} 状态：待发货"}),
+                    chunk(usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}),
+                ]
+            )
         return sse_response(
             tool_call_chunks("call_1", "get_order", json.dumps({"order_id": order_id}))
         )
@@ -28,9 +30,7 @@ def _mock_client(order_id: str):
     return make_client(handler)
 
 
-async def test_run_case_passes_on_tool_and_text(
-    resolved, tools, tmp_path: Path
-) -> None:
+async def test_run_case_passes_on_tool_and_text(resolved, tools, tmp_path: Path) -> None:
     case = _case(
         question="查一下订单 {order_id} 的状态",
         expect_tools_any=["get_order"],
@@ -48,6 +48,43 @@ async def test_run_case_passes_on_tool_and_text(
     assert result.total_tokens > 0
     assert result.cost is not None and result.cost > 0
     assert result.error is None
+
+
+async def test_each_eval_case_gets_an_isolated_graph_checkpoint(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import evals.runner as runner
+    from langgraph.checkpoint.memory import InMemorySaver as MemorySaver
+
+    savers = []
+
+    def make_saver():
+        saver = MemorySaver()
+        savers.append(saver)
+        return saver
+
+    monkeypatch.setattr(runner, "InMemorySaver", make_saver)
+    seen_questions = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        seen_questions.append(body["messages"][-1]["content"])
+        return sse_response([chunk(delta={"content": "完成"})])
+
+    client = make_client(handler)
+    for case_id, question in (("case-a", "问题 A"), ("case-b", "问题 B")):
+        result, _ = await run_case(
+            _case(id=case_id, question=question),
+            client=client,
+            tools=[],
+            resolved={},
+            trace_dir=tmp_path,
+        )
+        assert result.passed, result.failed_checks
+
+    assert seen_questions == ["问题 A", "问题 B"]
+    assert len(savers) == 2
+    assert savers[0] is not savers[1]
 
 
 async def test_run_case_failure_records_failed_checks(resolved, tools, tmp_path) -> None:
@@ -70,7 +107,11 @@ async def test_run_case_survives_llm_error(resolved, tools, tmp_path) -> None:
 
     case = _case(expect_tools_any=["get_order"])
     result, _ = await run_case(
-        case, client=make_client(handler), tools=tools, resolved=resolved, trace_dir=tmp_path,
+        case,
+        client=make_client(handler),
+        tools=tools,
+        resolved=resolved,
+        trace_dir=tmp_path,
         retries=0,
     )
     assert not result.passed
@@ -90,18 +131,25 @@ async def test_run_case_retries_transient_then_succeeds(resolved, tools, tmp_pat
             return Response(500, content=b"upstream error")
         body = json.loads(request.content)
         if any(m["role"] == "tool" for m in body["messages"]):
-            return sse_response([
-                chunk(delta={"content": f"订单 {resolved['order_id']} 状态：待发货"}),
-                chunk(usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}),
-            ])
+            return sse_response(
+                [
+                    chunk(delta={"content": f"订单 {resolved['order_id']} 状态：待发货"}),
+                    chunk(usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}),
+                ]
+            )
         return sse_response(
             tool_call_chunks("call_1", "get_order", json.dumps({"order_id": resolved["order_id"]}))
         )
 
     case = _case(expect_tools_any=["get_order"])
     result, _ = await run_case(
-        case, client=make_client(handler, max_retries=0), tools=tools, resolved=resolved,
-        trace_dir=tmp_path, retries=2, backoff=0,
+        case,
+        client=make_client(handler, max_retries=0),
+        tools=tools,
+        resolved=resolved,
+        trace_dir=tmp_path,
+        retries=2,
+        backoff=0,
     )
     assert result.passed, result.failed_checks
     assert result.attempts == 2
@@ -120,8 +168,13 @@ async def test_run_case_retry_exhausted_records_last_error(resolved, tools, tmp_
 
     case = _case(expect_tools_any=["get_order"])
     result, _ = await run_case(
-        case, client=make_client(handler, max_retries=0), tools=tools, resolved=resolved,
-        trace_dir=tmp_path, retries=2, backoff=0,
+        case,
+        client=make_client(handler, max_retries=0),
+        tools=tools,
+        resolved=resolved,
+        trace_dir=tmp_path,
+        retries=2,
+        backoff=0,
     )
     assert not result.passed
     assert result.attempts == 3
@@ -141,8 +194,13 @@ async def test_run_case_does_not_retry_deterministic_error(resolved, tools, tmp_
 
     case = _case(expect_tools_any=["get_order"])
     result, _ = await run_case(
-        case, client=make_client(handler, max_retries=0), tools=tools, resolved=resolved,
-        trace_dir=tmp_path, retries=2, backoff=0,
+        case,
+        client=make_client(handler, max_retries=0),
+        tools=tools,
+        resolved=resolved,
+        trace_dir=tmp_path,
+        retries=2,
+        backoff=0,
     )
     assert not result.passed
     assert result.attempts == 1
@@ -158,9 +216,14 @@ async def test_budget_circuit_breaker_skips_without_api_call(resolved, tools, tm
     cases = [_case(expect_tools_any=["get_order"]) for _ in range(3)]
     budget = Budget(limit_cny=0.0)
     results = [
-        r async for r, _ in run_all(
-            cases, client=make_client(handler), tools=tools,
-            resolved=resolved, trace_dir=tmp_path, budget=budget,
+        r
+        async for r, _ in run_all(
+            cases,
+            client=make_client(handler),
+            tools=tools,
+            resolved=resolved,
+            trace_dir=tmp_path,
+            budget=budget,
         )
     ]
     assert len(results) == 3
@@ -182,15 +245,27 @@ async def test_success_claim_cannot_hide_business_error(tmp_path):
     def handler(request):
         body = json.loads(request.content)
         if any(m["role"] == "tool" for m in body["messages"]):
-            return sse_response([chunk(delta={"content": "已成功完成"}), chunk(usage={
-                "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
-            })])
+            return sse_response(
+                [
+                    chunk(delta={"content": "已成功完成"}),
+                    chunk(
+                        usage={
+                            "prompt_tokens": 10,
+                            "completion_tokens": 5,
+                            "total_tokens": 15,
+                        }
+                    ),
+                ]
+            )
         return sse_response(tool_call_chunks("w1", "adjust_stock", '{"sku":"A1","delta":5}'))
 
     case = _case(expect_successful_tools=["adjust_stock"], must_mention=["成功"])
     result, _ = await run_case(
-        case, client=make_client(handler), tools=[Tool("adjust_stock", "write", Args, broken)],
-        resolved={}, trace_dir=tmp_path,
+        case,
+        client=make_client(handler),
+        tools=[Tool("adjust_stock", "write", Args, broken)],
+        resolved={},
+        trace_dir=tmp_path,
     )
     assert not result.passed
     assert any("expect_successful_tools" in f for f in result.failed_checks)
@@ -200,13 +275,25 @@ async def test_success_claim_cannot_hide_business_error(tmp_path):
 
 async def test_expected_business_error_requires_an_observed_tool_result(tmp_path):
     def handler(request):
-        return sse_response([chunk(delta={"content": "库存不足"}), chunk(usage={
-            "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
-        })])
+        return sse_response(
+            [
+                chunk(delta={"content": "库存不足"}),
+                chunk(
+                    usage={
+                        "prompt_tokens": 10,
+                        "completion_tokens": 5,
+                        "total_tokens": 15,
+                    }
+                ),
+            ]
+        )
 
     result, _ = await run_case(
         _case(expect_error_codes=["insufficient_stock"], must_mention=["库存不足"]),
-        client=make_client(handler), tools=[], resolved={}, trace_dir=tmp_path,
+        client=make_client(handler),
+        tools=[],
+        resolved={},
+        trace_dir=tmp_path,
     )
     assert not result.passed
     assert any("expect_error_codes" in item for item in result.failed_checks)
@@ -225,21 +312,32 @@ async def test_expected_business_error_accepts_matching_tool_result(tmp_path):
     def handler(request):
         body = json.loads(request.content)
         if any(m["role"] == "tool" for m in body["messages"]):
-            return sse_response([chunk(delta={"content": "库存不足"}), chunk(usage={
-                "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
-            })])
+            return sse_response(
+                [
+                    chunk(delta={"content": "库存不足"}),
+                    chunk(
+                        usage={
+                            "prompt_tokens": 10,
+                            "completion_tokens": 5,
+                            "total_tokens": 15,
+                        }
+                    ),
+                ]
+            )
         return sse_response(tool_call_chunks("w1", "adjust_stock", '{"sku":"A1"}'))
 
     result, _ = await run_case(
         _case(expect_error_codes=["insufficient_stock"], must_mention=["库存不足"]),
-        client=make_client(handler), tools=[Tool("adjust_stock", "write", Args, reject)],
-        resolved={}, trace_dir=tmp_path,
+        client=make_client(handler),
+        tools=[Tool("adjust_stock", "write", Args, reject)],
+        resolved={},
+        trace_dir=tmp_path,
     )
     assert result.passed, result.failed_checks
 
 
 async def test_write_run_error_does_not_replay_run_and_keeps_partial_metering(tmp_path):
-    from agent_core.approval import RISK_SINGLE_CONFIRM
+    from agent_core.approval import RISK_SINGLE_CONFIRM, AutoApproveGate, guarded
     from agent_core.tools import Tool
     from httpx2 import Response
     from pydantic import BaseModel
@@ -260,9 +358,16 @@ async def test_write_run_error_does_not_replay_run_and_keeps_partial_metering(tm
         return sse_response(tool_call_chunks("w1", "write", "{}"))
 
     result, _ = await run_case(
-        _case(), client=make_client(handler, max_retries=0),
-        tools=[Tool("write", "write", Args, write, risk=RISK_SINGLE_CONFIRM)],
-        resolved={}, trace_dir=tmp_path, backoff=0,
+        _case(),
+        client=make_client(handler, max_retries=0),
+        tools=[
+            guarded(
+                Tool("write", "write", Args, write, risk=RISK_SINGLE_CONFIRM), AutoApproveGate()
+            )
+        ],
+        resolved={},
+        trace_dir=tmp_path,
+        backoff=0,
     )
     assert writes == ["committed"]
     assert not result.passed and result.attempts == 1

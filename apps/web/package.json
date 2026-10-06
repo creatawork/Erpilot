@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "test": "tsc src/protocol.ts --outDir .test-build --target ES2022 --module ESNext --skipLibCheck && node --test tests/*.test.mjs",
+    "test": "tsc src/protocol.ts src/session.ts --outDir .test-build --target ES2022 --module ESNext --skipLibCheck && node --test tests/*.test.mjs",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview"

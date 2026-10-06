@@ -5,9 +5,10 @@
 > 本文档与 server 工具集有同步测试把关（`test_tool_cards_doc_matches_server_tools`）——
 > 新增或删除工具必须同步改这里，否则测试失败。
 > 写工具仅在 `include_writes=True` 时注册（默认关闭）；agent 侧执行受审批门
-> （`agent_core.approval`）拦截，风险等级 `single_confirm` / `batch_confirm`
+> （`LangGraphRuntime` 的审批中断）拦截，风险等级 `single_confirm` / `batch_confirm`
 > 由 bridge 标注——审批拒绝时返回 `{"approval": "denied", ...}`，
-> 模型必须如实说明未执行。
+> 模型必须如实说明未执行。图状态会 checkpoint 规范化调用参数，并通过
+> `interrupt` 等待审批；恢复请求只提交决策，不接受客户端提供的工具名或参数。
 
 ## 错误契约 v1
 

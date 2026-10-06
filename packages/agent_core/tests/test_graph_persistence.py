@@ -1,7 +1,7 @@
 import pytest
 from agent_core.graph import build_graph
 from agent_core.graph_state import initial_state
-from agent_core.loop import LoopConfig
+from agent_core.runtime_config import LoopConfig
 from agent_core.tools import Tool
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
@@ -32,8 +32,9 @@ async def test_business_commit_before_result_checkpoint_replays_original_token()
     graph = build_graph(Client(), tools, LoopConfig(), saver, approval_enabled=True)
     pending = (await graph.ainvoke(initial_state([]), config))["__interrupt__"][0].value
     with pytest.raises(RuntimeError, match="checkpoint unavailable"):
-        await graph.ainvoke(Command(resume={"pending_id": pending["pending_id"],
-                                           "approved": True}), config)
+        await graph.ainvoke(
+            Command(resume={"pending_id": pending["pending_id"], "approved": True}), config
+        )
     assert received == [pending["arguments"]]
     # Saver pending writes can recover a completed node without replaying its handler.
     saver.fail = False

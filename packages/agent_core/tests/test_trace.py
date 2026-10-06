@@ -5,16 +5,9 @@ from pathlib import Path
 
 import httpx2
 import pytest
-from agent_core.llm import TextDelta, Usage
-from agent_core.loop import (
-    AgentLoop,
-    LoopEnd,
-    StepEnd,
-    StepStarted,
-    ToolCall,
-    ToolCallFinished,
-    ToolCallStarted,
-)
+from agent_core.events import LoopEnd, StepEnd, StepStarted, ToolCallFinished, ToolCallStarted
+from agent_core.graph_runtime import LangGraphRuntime
+from agent_core.llm import TextDelta, ToolCall, Usage
 from agent_core.testing import USAGE, chunk, make_client, sse_response, tool_call_chunks
 from agent_core.tools import tool
 from agent_core.trace import (
@@ -24,6 +17,7 @@ from agent_core.trace import (
     new_trace_path,
     summarize,
 )
+from langgraph.checkpoint.memory import InMemorySaver
 from openai import BadRequestError
 from pydantic import BaseModel
 
@@ -56,7 +50,9 @@ def _handler_pair(requests: list[httpx2.Request], *, first_args: str):
 
 
 async def _recorded_run(tmp_path, handler) -> tuple[list, list]:
-    agent = AgentLoop(make_client(handler), tools=[get_order_status])
+    agent = LangGraphRuntime(
+        make_client(handler), tools=[get_order_status], checkpointer=InMemorySaver()
+    )
     messages: list = [{"role": "user", "content": "查订单 123 的状态"}]
     recorder = JsonlTraceRecorder(tmp_path / "run.jsonl", model="glm-5.3-flash")
     events = [e async for e in recorder.run(agent, messages)]
@@ -140,7 +136,9 @@ async def test_exception_is_recorded_then_reraised(tmp_path) -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(400, json={"error": {"message": "bad request"}})
 
-    agent = AgentLoop(make_client(handler), tools=[get_order_status])
+    agent = LangGraphRuntime(
+        make_client(handler), tools=[get_order_status], checkpointer=InMemorySaver()
+    )
     recorder = JsonlTraceRecorder(tmp_path / "bad.jsonl", model="glm-5.3-flash")
 
     with pytest.raises(BadRequestError):  # openai SDK 对 4xx 不重试，直接抛
@@ -169,8 +167,10 @@ async def test_recorder_appends_and_creates_dirs(tmp_path) -> None:
     """同一个文件可追加多次 run（按行流水，不覆盖），深层目录自动创建。"""
     target = tmp_path / "a" / "b" / "run.jsonl"
     for _ in range(2):
-        agent = AgentLoop(
-            make_client(_handler_pair([], first_args='{"order_id": "1"}')), tools=[get_order_status]
+        agent = LangGraphRuntime(
+            make_client(_handler_pair([], first_args='{"order_id": "1"}')),
+            tools=[get_order_status],
+            checkpointer=InMemorySaver(),
         )
         recorder = JsonlTraceRecorder(target, model="glm-5.3-flash")
         [e async for e in recorder.run(agent, [{"role": "user", "content": "hi"}])]
@@ -192,7 +192,7 @@ async def test_recorder_writes_approval_records(tmp_path: Path) -> None:
         StreamApprovalGate,
         guarded,
     )
-    from agent_core.loop import AgentLoop, ApprovalPending
+    from agent_core.events import ApprovalPending
     from agent_core.testing import USAGE, chunk, make_client, sse_response, tool_call_chunks
     from pydantic import BaseModel
 
@@ -210,7 +210,9 @@ async def test_recorder_writes_approval_records(tmp_path: Path) -> None:
         return sse_response(tool_call_chunks("call_w", "create_order_x", '{"sku": "A1001"}'))
 
     gate = StreamApprovalGate()
-    agent = AgentLoop(make_client(handler), tools=[guarded(create_order_x, gate)])
+    agent = LangGraphRuntime(
+        make_client(handler), tools=[guarded(create_order_x, gate)], checkpointer=InMemorySaver()
+    )
     path = tmp_path / "approval.jsonl"
     recorder = JsonlTraceRecorder(path, "glm-5.3-flash")
 

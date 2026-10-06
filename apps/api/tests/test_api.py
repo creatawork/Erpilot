@@ -1,6 +1,6 @@
 """API 链路单测：SSE 事件协议、会话历史延续、trace 落盘、流内错误上报。
 
-LLM 在 HTTP 边界 mock（agent_core.testing），整条 FastAPI → AgentLoop → trace
+LLM 在 HTTP 边界 mock（agent_core.testing），整条 FastAPI → LangGraphRuntime → trace
 链路都跑真代码，不烧 token。
 """
 
@@ -10,6 +10,7 @@ import re
 import httpx2
 from agent_core.testing import USAGE, chunk, make_client, sse_response, tool_call_chunks
 from erpilot_api.main import create_app
+from langgraph.checkpoint.memory import InMemorySaver
 
 
 def _handler_pair(requests: list[httpx2.Request]):
@@ -32,6 +33,7 @@ def _handler_pair(requests: list[httpx2.Request]):
 
 def _app(requests: list[httpx2.Request], tmp_path):
     return create_app(
+        checkpointer=InMemorySaver(),
         client_factory=lambda: make_client(_handler_pair(requests)),
         trace_dir=tmp_path,
     )
@@ -116,14 +118,19 @@ async def test_session_history_survives_service_reconstruction(tmp_path) -> None
     store = RunStore(tmp_path / "runs.db")
     kwargs = dict(
         client_factory=lambda: make_client(_handler_pair(requests)),
-        model="glm-5.3-flash", trace_dir=tmp_path, tools=DEMO_TOOLS, run_store=store,
+        model="glm-5.3-flash",
+        trace_dir=tmp_path,
+        tools=DEMO_TOOLS,
+        run_store=store,
     )
-    first = ChatService(**kwargs)
+    first = ChatService(checkpointer=InMemorySaver(), **kwargs)
     async for _ in first.stream_run("s1", "查订单 123"):
         pass
     assert store.get_session("s1")["history"][-1]["content"] == "订单 123 已发货"
 
-    second = ChatService(**{**kwargs, "run_store": RunStore(tmp_path / "runs.db")})
+    second = ChatService(
+        checkpointer=InMemorySaver(), **{**kwargs, "run_store": RunStore(tmp_path / "runs.db")}
+    )
     async for _ in second.stream_run("s1", "再查一次"):
         pass
     roles = [m["role"] for m in requests[2]["messages"]]
@@ -134,7 +141,11 @@ async def test_llm_error_becomes_error_event(tmp_path) -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(400, json={"error": {"message": "bad request"}})
 
-    app = create_app(client_factory=lambda: make_client(handler), trace_dir=tmp_path)
+    app = create_app(
+        checkpointer=InMemorySaver(),
+        client_factory=lambda: make_client(handler),
+        trace_dir=tmp_path,
+    )
     events = await _post_sse(app, {"message": "hi"})
 
     names = [name for name, _ in events]
@@ -163,7 +174,10 @@ async def test_chat_stream_uses_injected_tools(tmp_path) -> None:
         return sse_response(_tcc("call_9", "echo_ping", '{"word": "hi"}'))
 
     app = create_app(
-        client_factory=lambda: make_client(handler), trace_dir=tmp_path, tools=[echo_ping]
+        checkpointer=InMemorySaver(),
+        client_factory=lambda: make_client(handler),
+        trace_dir=tmp_path,
+        tools=[echo_ping],
     )
     events = await _post_sse(app, {"message": "测试工具注入"})
 
@@ -234,12 +248,13 @@ async def test_approval_flow_via_chat_service(tmp_path) -> None:
     SSE 帧编码由 test_encode_approval_events 单测把关。
     """
     from agent_core.approval import ApprovalDecision
-    from agent_core.loop import ApprovalPending
+    from agent_core.events import ApprovalPending
     from erpilot_api.service import ChatService
 
     requests: list[httpx2.Request] = []
     gate = StreamApprovalGate()
     service = ChatService(
+        checkpointer=InMemorySaver(),
         client_factory=lambda: make_client(_write_handler(requests)),
         model="glm-5.3-flash",
         trace_dir=tmp_path,
@@ -266,7 +281,7 @@ async def test_approval_flow_via_chat_service(tmp_path) -> None:
 async def test_encode_approval_events() -> None:
     """approval_pending / approval_resolved 的 SSE 帧编码（协议 v1 扩展）。"""
     from agent_core.approval import RISK_SINGLE_CONFIRM as RISK
-    from agent_core.loop import ApprovalPending, ApprovalResolved
+    from agent_core.events import ApprovalPending, ApprovalResolved
     from erpilot_api.events import encode_event
 
     pending = ApprovalPending(
@@ -307,6 +322,7 @@ async def test_encode_approval_events() -> None:
 
 async def test_approve_unknown_pending_id_returns_ok_false(tmp_path) -> None:
     app = create_app(
+        checkpointer=InMemorySaver(),
         client_factory=lambda: make_client(_write_handler([])),
         trace_dir=tmp_path,
         tools=[],  # 无写工具 → 无门
@@ -317,15 +333,18 @@ async def test_approve_unknown_pending_id_returns_ok_false(tmp_path) -> None:
     assert resp.json() == {"ok": False}
 
 
-async def test_closing_service_stream_releases_approval_and_repairs_history(tmp_path):
-    from agent_core.loop import ApprovalPending
+async def test_closing_service_stream_preserves_checkpoint_and_releases_waiter(tmp_path):
+    from agent_core.events import ApprovalPending
     from erpilot_api.service import ChatService
 
     gate = StreamApprovalGate()
     service = ChatService(
+        checkpointer=InMemorySaver(),
         client_factory=lambda: make_client(_write_handler([])),
-        model="glm-5.3-flash", trace_dir=tmp_path,
-        tools=[guarded(_create_order_api, gate)], approval_gate=gate,
+        model="glm-5.3-flash",
+        trace_dir=tmp_path,
+        tools=[guarded(_create_order_api, gate)],
+        approval_gate=gate,
     )
     stream = service.stream_run("s1", "write")
     async for event in stream:
@@ -333,4 +352,6 @@ async def test_closing_service_stream_releases_approval_and_repairs_history(tmp_
             await stream.aclose()
             break
     assert not gate._waiters
-    assert [m["role"] for m in service._sessions["s1"]] == ["system"]
+    state = await service.session_state("s1")
+    assert state["status"] == "waiting_approval"
+    assert state["pending_approvals"]

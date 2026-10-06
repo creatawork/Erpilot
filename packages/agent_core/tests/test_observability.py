@@ -9,11 +9,12 @@ from collections.abc import Callable
 
 import httpx2
 import pytest
-from agent_core.loop import AgentLoop
+from agent_core.graph_runtime import LangGraphRuntime
 from agent_core.observability import LangfuseTraceSink, langfuse_sink_from_env
 from agent_core.testing import BASE_URL, chunk, make_client, sse_response, tool_call_chunks
 from agent_core.tools import tool
 from agent_core.trace import JsonlTraceRecorder, load_records
+from langgraph.checkpoint.memory import InMemorySaver
 from openai import APIStatusError
 from pydantic import BaseModel
 
@@ -67,19 +68,55 @@ class FakeLangfuse:
 
 def _feed(sink: LangfuseTraceSink) -> None:
     """按 trace.py 记录模型喂一遍正常完成的 run（一步含一次工具调用）。"""
-    sink.write({"type": "run_start", "run_id": "abc123", "model": "glm-5.3-flash",
-                "ts": "t", "messages": [{"role": "user", "content": "q"}]})
+    sink.write(
+        {
+            "type": "run_start",
+            "run_id": "abc123",
+            "model": "glm-5.3-flash",
+            "ts": "t",
+            "messages": [{"role": "user", "content": "q"}],
+        }
+    )
     sink.write({"type": "step_start", "run_id": "abc123", "step": 1, "ts": "t"})
-    sink.write({"type": "tool_call", "run_id": "abc123", "step": 1, "ts": "t",
-                "id": "c1", "name": "get_order", "arguments": "{}",
-                "content": "{}", "ok": True, "duration_ms": 1.0})
-    sink.write({"type": "step_end", "run_id": "abc123", "step": 1, "ts": "t",
-                "text": "查到了", "usage": {"prompt_tokens": 10, "completion_tokens": 5,
-                                            "total_tokens": 15},
-                "cost": 0.001, "duration_ms": 9.0})
-    sink.write({"type": "run_end", "run_id": "abc123", "ts": "t", "steps": 1,
-                "completed": True, "usage": {"total_tokens": 15}, "cost": 0.001,
-                "duration_ms": 20.0, "messages": [{"role": "assistant", "content": "查到了"}]})
+    sink.write(
+        {
+            "type": "tool_call",
+            "run_id": "abc123",
+            "step": 1,
+            "ts": "t",
+            "id": "c1",
+            "name": "get_order",
+            "arguments": "{}",
+            "content": "{}",
+            "ok": True,
+            "duration_ms": 1.0,
+        }
+    )
+    sink.write(
+        {
+            "type": "step_end",
+            "run_id": "abc123",
+            "step": 1,
+            "ts": "t",
+            "text": "查到了",
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            "cost": 0.001,
+            "duration_ms": 9.0,
+        }
+    )
+    sink.write(
+        {
+            "type": "run_end",
+            "run_id": "abc123",
+            "ts": "t",
+            "steps": 1,
+            "completed": True,
+            "usage": {"total_tokens": 15},
+            "cost": 0.001,
+            "duration_ms": 20.0,
+            "messages": [{"role": "assistant", "content": "查到了"}],
+        }
+    )
 
 
 def test_normal_run_mapping_and_flush() -> None:
@@ -90,9 +127,15 @@ def test_normal_run_mapping_and_flush() -> None:
 
     log = lf.log
     # run → trace（session_id = run_id），step → span + generation，tool_call → span
-    assert log[0] == ("trace", "erpilot-agent-run",
-                      {"session_id": "abc123", "input": [{"role": "user", "content": "q"}],
-                       "metadata": {"model": "glm-5.3-flash"}})
+    assert log[0] == (
+        "trace",
+        "erpilot-agent-run",
+        {
+            "session_id": "abc123",
+            "input": [{"role": "user", "content": "q"}],
+            "metadata": {"model": "glm-5.3-flash"},
+        },
+    )
     assert any(e[0] == "span" and e[1] == "step-1" for e in log)
     assert any(e[0] == "span" and e[1] == "tool:get_order" for e in log)
     gen = next(e for e in log if e[0] == "generation")
@@ -101,8 +144,13 @@ def test_normal_run_mapping_and_flush() -> None:
     assert gen[2]["usage"] == {"input": 10, "output": 5, "total": 15}
     assert gen[2]["metadata"] == {"cost": 0.001, "duration_ms": 9.0}
     # run_end → update（带最终回答与 metadata.completed），收尾后 close → flush 一次
-    assert any(e[0] == "update" and e[1] is None and e[2].get("output") == "查到了"
-               and e[2].get("metadata", {}).get("completed") is True for e in log)
+    assert any(
+        e[0] == "update"
+        and e[1] is None
+        and e[2].get("output") == "查到了"
+        and e[2].get("metadata", {}).get("completed") is True
+        for e in log
+    )
     assert lf.flushed == 1
 
 
@@ -110,8 +158,15 @@ def test_run_error_marks_level_error() -> None:
     lf = FakeLangfuse()
     sink = LangfuseTraceSink(client=lf)
     sink.write({"type": "run_start", "run_id": "x", "model": "m", "ts": "t", "messages": []})
-    sink.write({"type": "run_error", "run_id": "x", "ts": "t",
-                "error": "APIError: 502", "duration_ms": 5.0})
+    sink.write(
+        {
+            "type": "run_error",
+            "run_id": "x",
+            "ts": "t",
+            "error": "APIError: 502",
+            "duration_ms": 5.0,
+        }
+    )
     assert any(e[0] == "update" and e[1] == "ERROR" for e in lf.log)
 
 
@@ -157,13 +212,13 @@ def _two_step_handler() -> Callable[[httpx2.Request], httpx2.Response]:
     def handler(request: httpx2.Request) -> httpx2.Response:
         body = json.loads(request.content)
         if any(m["role"] == "tool" for m in body["messages"]):
-            return sse_response([
-                chunk(delta={"content": "已发货"}),
-                chunk(usage={"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}),
-            ])
-        return sse_response(
-            tool_call_chunks("call_1", "get_order_status", '{"order_id": "123"}')
-        )
+            return sse_response(
+                [
+                    chunk(delta={"content": "已发货"}),
+                    chunk(usage={"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}),
+                ]
+            )
+        return sse_response(tool_call_chunks("call_1", "get_order_status", '{"order_id": "123"}'))
 
     return handler
 
@@ -177,10 +232,10 @@ def _failing_handler() -> Callable[[httpx2.Request], httpx2.Response]:
 
 
 async def _run(tmp_path, handler, sinks: list) -> None:
-    agent = AgentLoop(make_client(handler), tools=[get_order_status])
-    recorder = JsonlTraceRecorder(
-        tmp_path / "run.jsonl", model="glm-5.3-flash", sinks=sinks
+    agent = LangGraphRuntime(
+        make_client(handler), tools=[get_order_status], checkpointer=InMemorySaver()
     )
+    recorder = JsonlTraceRecorder(tmp_path / "run.jsonl", model="glm-5.3-flash", sinks=sinks)
     return [e async for e in recorder.run(agent, [{"role": "user", "content": "q"}])]
 
 
@@ -192,8 +247,7 @@ async def test_recorder_forwards_records_and_closes_sink(tmp_path) -> None:
     records = load_records(tmp_path / "run.jsonl")
     assert records[-1]["type"] == "run_end"  # 本地留档完整
     assert any(e[0] == "trace" for e in lf.log)  # 远程侧收到全流程
-    assert any(e[0] == "update" and e[2].get("metadata", {}).get("completed")
-               for e in lf.log)
+    assert any(e[0] == "update" and e[2].get("metadata", {}).get("completed") for e in lf.log)
     assert lf.flushed == 1  # run 结束后自动 close
 
 

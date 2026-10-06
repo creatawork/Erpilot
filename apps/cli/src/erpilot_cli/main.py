@@ -16,14 +16,13 @@ import asyncio
 import json
 import os
 from pathlib import Path
+from uuid import uuid4
 
 import typer
 from agent_core.approval import ApprovalDecision, StreamApprovalGate
 from agent_core.demo_tools import DEFAULT_PROMPT, DEMO_TOOLS, system_prompt
 from agent_core.dotenv import find_dotenv, load_dotenv
-from agent_core.llm import LLMClient, LLMConfig, TextDelta
-from agent_core.loop import (
-    AgentLoop,
+from agent_core.events import (
     ApprovalPending,
     ApprovalResolved,
     LoopEnd,
@@ -31,6 +30,8 @@ from agent_core.loop import (
     ToolCallFinished,
     ToolCallStarted,
 )
+from agent_core.graph_runtime import LangGraphRuntime
+from agent_core.llm import LLMClient, LLMConfig, TextDelta
 from agent_core.prices import cost_of
 from agent_core.tools import Tool
 from agent_core.trace import (
@@ -39,6 +40,7 @@ from agent_core.trace import (
     load_records,
     new_trace_path,
 )
+from langgraph.checkpoint.memory import InMemorySaver
 from mcp_erp import build_agent_tools
 from rich.console import Console
 from rich.panel import Panel
@@ -110,7 +112,12 @@ def chat(
     if writes:
         gate = StreamApprovalGate()
     tools = _resolve_tools(tools_mode, writes=writes, gate=gate)
-    agent = AgentLoop(LLMClient(config), tools=tools)
+    agent = LangGraphRuntime(
+        LLMClient(config),
+        tools=tools,
+        checkpointer=InMemorySaver(),
+        approval_enabled=gate is not None,
+    )
     messages: list = [
         {"role": "system", "content": system_prompt(any(t.risk for t in tools))},
         {"role": "user", "content": text},
@@ -148,14 +155,14 @@ def _render_approval_card(event: ApprovalPending) -> None:
 
 
 async def _stream_chat(
-    agent: AgentLoop,
+    agent: LangGraphRuntime,
     messages: list,
     recorder: JsonlTraceRecorder,
     *,
     gate: StreamApprovalGate | None = None,
 ) -> LoopEnd | None:
     end: LoopEnd | None = None
-    async for event in recorder.run(agent, messages):
+    async for event in recorder.run(agent, messages, thread_id=uuid4().hex):
         match event:
             case TextDelta(text=delta):
                 console.print(delta, end="", markup=False, soft_wrap=True)

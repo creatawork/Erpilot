@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: erpilot
+      POSTGRES_USER: erpilot
+      POSTGRES_PASSWORD: erpilot_local
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - checkpoints:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U erpilot -d erpilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+volumes:
+  checkpoints:

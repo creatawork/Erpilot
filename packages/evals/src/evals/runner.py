@@ -16,9 +16,11 @@ from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
 
 from agent_core.demo_tools import SYSTEM_PROMPT
+from agent_core.events import LoopEnd, StepEnd, ToolCallFinished, ToolCallStarted
+from agent_core.graph_runtime import LangGraphRuntime
 from agent_core.llm import LLMClient, TextDelta, Usage
-from agent_core.loop import AgentLoop, LoopEnd, StepEnd, ToolCallFinished, ToolCallStarted
 from agent_core.trace import JsonlTraceRecorder, new_trace_path
+from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy.engine import Engine
 
 from evals.checks import evaluate_case
@@ -43,7 +45,12 @@ class Budget:
 
 
 _TRANSIENT_MARKERS = (
-    "timeout", "timed out", "server_error", "rate limit", "overloaded", "connection",
+    "timeout",
+    "timed out",
+    "server_error",
+    "rate limit",
+    "overloaded",
+    "connection",
 )
 
 
@@ -65,8 +72,14 @@ def is_transient(exc: Exception) -> bool:
 
 
 def _run_error_result(
-    case: EvalCase, exc: Exception, tool_calls: list[str], duration_ms: float, attempts: int,
-    *, usage: Usage | None = None, cost: float | None = None,
+    case: EvalCase,
+    exc: Exception,
+    tool_calls: list[str],
+    duration_ms: float,
+    attempts: int,
+    *,
+    usage: Usage | None = None,
+    cost: float | None = None,
     tool_results: Sequence[ToolResult] = (),
 ) -> CaseResult:
     return CaseResult(
@@ -81,7 +94,9 @@ def _run_error_result(
         attempts=attempts,
         error=f"{type(exc).__name__}: {exc}",
         total_tokens=usage.total_tokens if usage else 0,
-        cost=cost, cost_complete=False, tool_results=list(tool_results),
+        cost=cost,
+        cost_complete=False,
+        tool_results=list(tool_results),
     )
 
 
@@ -119,7 +134,7 @@ async def run_case(
     all_tool_results: list[ToolResult] = []
 
     for attempt in range(1, retries + 2):
-        agent = AgentLoop(client, tools=list(tools))
+        agent = LangGraphRuntime(client, tools=list(tools), checkpointer=InMemorySaver())
         messages: list = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": case.question},
@@ -134,7 +149,7 @@ async def run_case(
         steps = 0
         completed = False
         try:
-            async for event in recorder.run(agent, messages):
+            async for event in recorder.run(agent, messages, thread_id=f"eval:{case.id}:{attempt}"):
                 match event:
                     case TextDelta(text=t):
                         step_text.append(t)
@@ -163,10 +178,15 @@ async def run_case(
                             payload = json.loads(content)
                         except (ValueError, TypeError):
                             payload = content
-                        tool_results.append(ToolResult(
-                            call_id=cid, name=name, arguments=arguments.get(cid, {}),
-                            content=payload, ok=ok,
-                        ))
+                        tool_results.append(
+                            ToolResult(
+                                call_id=cid,
+                                name=name,
+                                arguments=arguments.get(cid, {}),
+                                content=payload,
+                                ok=ok,
+                            )
+                        )
                         all_tool_results.append(tool_results[-1])
                     case LoopEnd(steps=s, completed=c):
                         steps, completed = s, c
@@ -177,16 +197,25 @@ async def run_case(
                 await asyncio.sleep(backoff * attempt)
                 continue
             result = _run_error_result(
-                case, exc, tool_calls, duration_ms, attempt, usage=measured,
-                cost=_cost_of(client, measured), tool_results=all_tool_results,
+                case,
+                exc,
+                tool_calls,
+                duration_ms,
+                attempt,
+                usage=measured,
+                cost=_cost_of(client, measured),
+                tool_results=all_tool_results,
             )
             if case.state and before is not None and state_engine is not None:
                 result.failed_checks.extend(check_state(case.state, before, snapshot(state_engine)))
             return result, trace_path
 
         failed = evaluate_case(
-            case, tool_calls=tool_calls, visible_text="".join(visible_parts),
-            steps=steps, completed=completed,
+            case,
+            tool_calls=tool_calls,
+            visible_text="".join(visible_parts),
+            steps=steps,
+            completed=completed,
         )
         for name in dict.fromkeys(t.name for t in tool_results if not t.ok):
             if not any(t.name == name and t.succeeded for t in tool_results):
@@ -266,8 +295,12 @@ async def run_all(
             )
             continue
         result, trace_path = await run_case(
-            case, client=client, tools=tools, resolved=resolved,
-            trace_dir=trace_dir, sinks=sinks,
+            case,
+            client=client,
+            tools=tools,
+            resolved=resolved,
+            trace_dir=trace_dir,
+            sinks=sinks,
         )
         if budget is not None:
             budget.record(result.cost)

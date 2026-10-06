@@ -88,5 +88,3 @@ AgentEvent = (
     | ApprovalResolved
     | LoopEnd
 )
-
-

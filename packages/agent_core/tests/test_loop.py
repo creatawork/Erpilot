@@ -1,4 +1,4 @@
-"""AgentLoop 单测：单/多工具回合、max_steps 防护、超时、错误回填、并行、上下文压缩。"""
+"""LangGraphRuntime 单测：单/多工具回合、max_steps 防护、超时、错误回填、并行、上下文压缩。"""
 
 import asyncio
 import json
@@ -6,17 +6,18 @@ import json
 import httpx2
 import pytest
 from agent_core.context import DROPPED_NOTE, ContextPolicy
-from agent_core.llm import TextDelta, ToolCall, Usage
-from agent_core.loop import (
-    AgentLoop,
-    LoopConfig,
+from agent_core.events import (
+    ApprovalPending,
+    ApprovalResolved,
     LoopEnd,
     StepEnd,
     StepStarted,
     ToolCallFinished,
     ToolCallStarted,
-    ToolRetryPolicy,
 )
+from agent_core.graph_runtime import LangGraphRuntime
+from agent_core.llm import TextDelta, ToolCall, Usage
+from agent_core.runtime_config import LoopConfig, ToolRetryPolicy
 from agent_core.testing import (
     USAGE,
     chunk,
@@ -26,6 +27,7 @@ from agent_core.testing import (
     tool_call_chunks,
 )
 from agent_core.tools import tool
+from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import BaseModel
 
 
@@ -65,7 +67,7 @@ async def boom(params: EmptyInput) -> str:
     raise RuntimeError("库存连接断了")
 
 
-async def _run(agent: AgentLoop, prompt: str = "hi") -> list:
+async def _run(agent: LangGraphRuntime, prompt: str = "hi") -> list:
     return [e async for e in agent.run([{"role": "user", "content": prompt}])]
 
 
@@ -92,9 +94,10 @@ def _handler_pair(requests: list[httpx2.Request], *, first_args: str):
 async def test_single_tool_task_round_trip() -> None:
     """ "查订单 123"单工具任务：请求注入 schema → 执行 → 回填 → 最终回答。"""
     requests: list[httpx2.Request] = []
-    agent = AgentLoop(
+    agent = LangGraphRuntime(
         make_client(_handler_pair(requests, first_args='{"order_id": "123"}')),
         tools=[get_order_status],
+        checkpointer=InMemorySaver(),
     )
     messages: list = [{"role": "user", "content": "查订单 123 的状态"}]
 
@@ -142,8 +145,11 @@ async def test_max_steps_guard_stops_loop() -> None:
         requests.append(request)
         return sse_response(tool_call_chunks("call_1", "get_order_status", '{"order_id": "1"}'))
 
-    agent = AgentLoop(
-        make_client(handler), tools=[get_order_status], config=LoopConfig(max_steps=2)
+    agent = LangGraphRuntime(
+        make_client(handler),
+        tools=[get_order_status],
+        config=LoopConfig(max_steps=2),
+        checkpointer=InMemorySaver(),
     )
 
     events = await _run(agent)
@@ -161,10 +167,11 @@ async def test_tool_timeout_returns_error_backfill() -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
         return sse_response(tool_call_chunks("call_1", "slow_tool", "{}"))
 
-    agent = AgentLoop(
+    agent = LangGraphRuntime(
         make_client(handler),
         tools=[slow_tool],
         config=LoopConfig(max_steps=1, tool_timeout=0.05, retry=ToolRetryPolicy(retries=0)),
+        checkpointer=InMemorySaver(),
     )
 
     events = await _run(agent)
@@ -179,10 +186,11 @@ async def test_tool_exception_is_backfilled_not_raised() -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
         return sse_response(tool_call_chunks("call_1", "boom", "{}"))
 
-    agent = AgentLoop(
+    agent = LangGraphRuntime(
         make_client(handler),
         tools=[boom],
         config=LoopConfig(max_steps=1, retry=ToolRetryPolicy(retries=0)),
+        checkpointer=InMemorySaver(),
     )
 
     events = await _run(agent)
@@ -199,7 +207,9 @@ async def test_unknown_tool_is_backfilled() -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
         return sse_response(tool_call_chunks("call_1", "delete_everything", "{}"))
 
-    agent = AgentLoop(make_client(handler), config=LoopConfig(max_steps=1))
+    agent = LangGraphRuntime(
+        make_client(handler), config=LoopConfig(max_steps=1), checkpointer=InMemorySaver()
+    )
 
     events = await _run(agent)
 
@@ -215,8 +225,11 @@ async def test_invalid_arguments_are_backfilled() -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
         return sse_response(tool_call_chunks("call_1", "get_order_status", '{"nope": 1}'))
 
-    agent = AgentLoop(
-        make_client(handler), tools=[get_order_status], config=LoopConfig(max_steps=1)
+    agent = LangGraphRuntime(
+        make_client(handler),
+        tools=[get_order_status],
+        config=LoopConfig(max_steps=1),
+        checkpointer=InMemorySaver(),
     )
 
     events = await _run(agent)
@@ -230,13 +243,15 @@ async def test_invalid_arguments_are_backfilled() -> None:
 
 def test_duplicate_tool_names_are_rejected() -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
-        raise AssertionError("构造 AgentLoop 时不应发起请求")
+        raise AssertionError("构造 LangGraphRuntime 时不应发起请求")
 
     duplicate = tool(name="get_order_status", description="x", params=EmptyInput)(
         get_order_status.handler
     )
     with pytest.raises(ValueError, match="工具重名"):
-        AgentLoop(make_client(handler), tools=[get_order_status, duplicate])
+        LangGraphRuntime(
+            make_client(handler), tools=[get_order_status, duplicate], checkpointer=InMemorySaver()
+        )
 
 
 # ---- 第 3 周：重试策略、并行调用、上下文压缩 ----
@@ -256,12 +271,13 @@ async def test_transient_error_is_retried_until_success() -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
         return sse_response(tool_call_chunks("call_1", "flaky", "{}"))
 
-    agent = AgentLoop(
+    agent = LangGraphRuntime(
         make_client(handler),
         tools=[flaky],
         config=LoopConfig(
             max_steps=1, tool_timeout=0.05, retry=ToolRetryPolicy(retries=1, backoff=0)
         ),
+        checkpointer=InMemorySaver(),
     )
 
     events = await _run(agent)
@@ -290,7 +306,9 @@ async def test_parallel_tool_calls_complete_out_of_order() -> None:
             )
         )
 
-    agent = AgentLoop(make_client(handler), tools=[slow_report, fast_report])
+    agent = LangGraphRuntime(
+        make_client(handler), tools=[slow_report, fast_report], checkpointer=InMemorySaver()
+    )
 
     events = await _run(agent)
 
@@ -319,10 +337,11 @@ async def test_context_compression_applied_in_place() -> None:
             return sse_response([chunk(delta={"content": "好的"}), chunk(usage=USAGE)])
         return sse_response(tool_call_chunks("call_1", "get_order_status", '{"order_id": "1"}'))
 
-    agent = AgentLoop(
+    agent = LangGraphRuntime(
         make_client(handler),
         tools=[get_order_status],
         config=LoopConfig(max_steps=2, context=ContextPolicy(max_tokens=30, keep_last_messages=2)),
+        checkpointer=InMemorySaver(),
     )
     messages: list = [{"role": "user", "content": "问" * 300}]  # ≈101 tokens，超 30 预算
 
@@ -342,7 +361,6 @@ from agent_core.approval import (  # noqa: E402
     StreamApprovalGate,
     guarded,
 )
-from agent_core.loop import ApprovalPending, ApprovalResolved  # noqa: E402
 
 
 class WriteInput(BaseModel):
@@ -360,7 +378,7 @@ async def create_order_t(params: WriteInput) -> dict[str, str]:
 
 
 async def _run_with_approval(
-    agent: AgentLoop,
+    agent: LangGraphRuntime,
     gate: StreamApprovalGate,
     decision: ApprovalDecision,
     prompt: str = "hi",
@@ -395,8 +413,10 @@ def _write_handler_pair(requests: list[httpx2.Request], *, call_id: str = "call_
 async def test_suspended_approval_approved_executes_and_backfills() -> None:
     requests: list[httpx2.Request] = []
     gate = StreamApprovalGate()
-    agent = AgentLoop(
-        make_client(_write_handler_pair(requests)), tools=[guarded(create_order_t, gate)]
+    agent = LangGraphRuntime(
+        make_client(_write_handler_pair(requests)),
+        tools=[guarded(create_order_t, gate)],
+        checkpointer=InMemorySaver(),
     )
 
     messages: list = [{"role": "user", "content": "下单"}]
@@ -435,8 +455,10 @@ async def test_suspended_approval_approved_executes_and_backfills() -> None:
 async def test_suspended_approval_denied_backfills_not_executed() -> None:
     requests: list[httpx2.Request] = []
     gate = StreamApprovalGate()
-    agent = AgentLoop(
-        make_client(_write_handler_pair(requests)), tools=[guarded(create_order_t, gate)]
+    agent = LangGraphRuntime(
+        make_client(_write_handler_pair(requests)),
+        tools=[guarded(create_order_t, gate)],
+        checkpointer=InMemorySaver(),
     )
 
     async for event in agent.run([{"role": "user", "content": "下单"}]):
@@ -447,8 +469,10 @@ async def test_suspended_approval_denied_backfills_not_executed() -> None:
 
     finished = None
     # 重新跑一轮拿事件（上一轮迭代未收集，仅验证回填内容）：
-    agent = AgentLoop(
-        make_client(_write_handler_pair(requests)), tools=[guarded(create_order_t, gate)]
+    agent = LangGraphRuntime(
+        make_client(_write_handler_pair(requests)),
+        tools=[guarded(create_order_t, gate)],
+        checkpointer=InMemorySaver(),
     )
     async for event in agent.run([{"role": "user", "content": "下单"}]):
         if isinstance(event, ToolCallFinished):
@@ -471,10 +495,11 @@ async def test_approval_wait_time_does_not_burn_tool_timeout() -> None:
     """人的思考时间不计 tool_timeout：决策慢到超过超时上限，执行照样成功。"""
     requests: list[httpx2.Request] = []
     gate = StreamApprovalGate()
-    agent = AgentLoop(
+    agent = LangGraphRuntime(
         make_client(_write_handler_pair(requests)),
         tools=[guarded(create_order_t, gate)],
         config=LoopConfig(tool_timeout=0.1),
+        checkpointer=InMemorySaver(),
     )
 
     finished = None
@@ -511,7 +536,11 @@ async def test_parallel_round_mixes_read_and_suspended_write() -> None:
             )
         )
 
-    agent = AgentLoop(make_client(handler), tools=[fast_report, guarded(create_order_t, gate)])
+    agent = LangGraphRuntime(
+        make_client(handler),
+        tools=[fast_report, guarded(create_order_t, gate)],
+        checkpointer=InMemorySaver(),
+    )
     events: list = []
     async for event in agent.run([{"role": "user", "content": "hi"}]):
         events.append(event)
@@ -532,8 +561,10 @@ async def test_parallel_round_mixes_read_and_suspended_write() -> None:
 @pytest.mark.parametrize("close_early", [False, True])
 async def test_approval_waiters_released_on_completion_and_close(close_early):
     gate = StreamApprovalGate()
-    agent = AgentLoop(
-        make_client(_write_handler_pair([])), tools=[guarded(create_order_t, gate)]
+    agent = LangGraphRuntime(
+        make_client(_write_handler_pair([])),
+        tools=[guarded(create_order_t, gate)],
+        checkpointer=InMemorySaver(),
     )
     stream = agent.run([{"role": "user", "content": "write"}])
     async for event in stream:
@@ -546,7 +577,7 @@ async def test_approval_waiters_released_on_completion_and_close(close_early):
 
 
 async def test_non_replayable_write_does_not_retry_uncertain_result():
-    from agent_core.llm import ToolCall
+    from agent_core.approval import AutoApproveGate, guarded
     from agent_core.tools import Tool
 
     calls = []
@@ -555,36 +586,42 @@ async def test_non_replayable_write_does_not_retry_uncertain_result():
         calls.append(args.sku)
         raise ConnectionError("result lost after commit")
 
-    original = create_order_t
-    write_tool = Tool(
-        "write", "write", original.params_model, write, risk=RISK_SINGLE_CONFIRM,
+    tool = guarded(
+        Tool("write", "write", WriteInput, write, risk=RISK_SINGLE_CONFIRM), AutoApproveGate()
     )
-    loop = AgentLoop(None, tools=[write_tool], config=LoopConfig(
-        retry=ToolRetryPolicy(retries=2, backoff=0),
-    ))
-    _, ok = await loop._execute(ToolCall(id="w1", name="write", arguments='{"sku":"A1"}'))
-    assert not ok
+
+    def response(request):
+        body = json.loads(request.content)
+        if any(message["role"] == "tool" for message in body["messages"]):
+            return sse_response([chunk(delta={"content": "done"}), chunk(usage=USAGE)])
+        return sse_response(tool_call_chunks("w1", "write", '{"sku":"A1"}'))
+
+    runtime = LangGraphRuntime(
+        make_client(response),
+        tools=[tool],
+        config=LoopConfig(retry=ToolRetryPolicy(retries=2, backoff=0)),
+        checkpointer=InMemorySaver(),
+    )
+    events = [event async for event in runtime.run([{"role": "user", "content": "write"}])]
+    finished = next(event for event in events if isinstance(event, ToolCallFinished))
+    assert not finished.ok
     assert calls == ["A1"]
 
 
-async def test_anyio_disconnect_releases_approval_while_slow_tool_is_pending():
-    import anyio
-    from agent_core.llm import ToolCall
-
+async def test_closing_graph_approval_stream_leaves_no_live_gate_waiter():
     gate = StreamApprovalGate()
-    agent = AgentLoop(None, tools=[guarded(create_order_t, gate), slow_report])
 
-    async def consume():
-        async for _ in agent._tool_round([
-            ToolCall(id="w1", name="create_order_t", arguments='{"sku":"A1"}'),
-            ToolCall(id="r1", name="slow_report", arguments="{}"),
-        ], []):
-            pass
+    def response(_request):
+        return sse_response(tool_call_chunks("w1", "create_order_t", '{"sku":"A1"}'))
 
-    async with anyio.create_task_group() as group:
-        group.start_soon(consume)
-        await anyio.sleep(0.01)
-        group.cancel_scope.cancel()
+    runtime = LangGraphRuntime(
+        make_client(response), tools=[guarded(create_order_t, gate)], checkpointer=InMemorySaver()
+    )
+    stream = runtime.run([{"role": "user", "content": "write"}])
+    async for event in stream:
+        if isinstance(event, ApprovalPending):
+            await stream.aclose()
+            break
     assert not gate._waiters
 
 
@@ -592,12 +629,18 @@ async def test_cancellation_releases_all_parallel_approvals():
     gate = StreamApprovalGate()
 
     def handler(request):
-        return sse_response(multi_tool_chunks([
-            ("w1", "create_order_t", '{"sku":"A1001"}'),
-            ("w2", "create_order_t", '{"sku":"B2002"}'),
-        ]))
+        return sse_response(
+            multi_tool_chunks(
+                [
+                    ("w1", "create_order_t", '{"sku":"A1001"}'),
+                    ("w2", "create_order_t", '{"sku":"B2002"}'),
+                ]
+            )
+        )
 
-    agent = AgentLoop(make_client(handler), tools=[guarded(create_order_t, gate)])
+    agent = LangGraphRuntime(
+        make_client(handler), tools=[guarded(create_order_t, gate)], checkpointer=InMemorySaver()
+    )
     stream = agent.run([{"role": "user", "content": "write"}])
     async for event in stream:
         if isinstance(event, ApprovalPending):

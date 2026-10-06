@@ -13,15 +13,18 @@ import asyncio
 import sys
 from pathlib import Path
 
+from langgraph.checkpoint.memory import InMemorySaver
+
 from agent_core.demo_tools import DEFAULT_PROMPT, DEMO_TOOLS, SYSTEM_PROMPT
 from agent_core.dotenv import find_dotenv, load_dotenv
+from agent_core.events import LoopEnd, ToolCallFinished, ToolCallStarted
+from agent_core.graph_runtime import LangGraphRuntime
 from agent_core.llm import LLMClient, LLMConfig, TextDelta
-from agent_core.loop import AgentLoop, LoopEnd, ToolCallFinished, ToolCallStarted
 from agent_core.prices import cost_of
 
 
 async def _demo(config: LLMConfig, prompt: str) -> None:
-    agent = AgentLoop(LLMClient(config), tools=DEMO_TOOLS)
+    agent = LangGraphRuntime(LLMClient(config), tools=DEMO_TOOLS, checkpointer=InMemorySaver())
     print(f"模型：{config.model}")
     print("---")
     end: LoopEnd | None = None
