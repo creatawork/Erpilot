@@ -5,6 +5,7 @@ from hashlib import sha256
 
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+from psycopg_pool import AsyncConnectionPool
 
 
 def thread_id_for_session(session_id: str) -> str:
@@ -15,12 +16,18 @@ def thread_id_for_session(session_id: str) -> str:
 async def open_checkpointer(database_url: str):
     if not database_url:
         raise RuntimeError("缺少 ERPILOT_CHECKPOINT_DATABASE_URL：API 需要 PostgreSQL checkpoints")
+    pool = AsyncConnectionPool(
+        conninfo=database_url,
+        kwargs={"autocommit": True, "prepare_threshold": 0},
+        open=False,
+    )
     stack = AsyncExitStack()
     try:
-        saver = await stack.enter_async_context(AsyncPostgresSaver.from_conn_string(
-            database_url,
+        await stack.enter_async_context(pool)
+        saver = AsyncPostgresSaver(
+            pool,
             serde=JsonPlusSerializer(allowed_msgpack_modules=[]),
-        ))
+        )
         await saver.setup()
     except Exception as exc:
         await stack.aclose()

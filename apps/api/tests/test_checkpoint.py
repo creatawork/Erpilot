@@ -1,3 +1,4 @@
+import asyncio
 import os
 from uuid import uuid4
 
@@ -22,21 +23,27 @@ async def test_missing_checkpoint_database_url_fails_closed():
 
 
 async def test_request_error_is_not_reported_as_checkpoint_startup_failure(monkeypatch):
-    from contextlib import asynccontextmanager
-
     from erpilot_api import checkpoint
 
     class Saver:
+        def __init__(self, conn, serde=None):
+            pass
+
         async def setup(self):
             pass
 
-    @asynccontextmanager
-    async def saver_context(*args, **kwargs):
-        yield Saver()
+    class Pool:
+        def __init__(self, **kwargs):
+            pass
 
-    monkeypatch.setattr(
-        checkpoint.AsyncPostgresSaver, "from_conn_string", saver_context
-    )
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+    monkeypatch.setattr(checkpoint, "AsyncConnectionPool", Pool)
+    monkeypatch.setattr(checkpoint, "AsyncPostgresSaver", Saver)
     with pytest.raises(ValueError, match="request failed"):
         async with checkpoint.open_checkpointer("postgresql://unused"):
             raise ValueError("request failed")
@@ -60,6 +67,26 @@ async def test_api_accepts_explicit_test_saver(tmp_path):
     app = create_app(tools=[], trace_dir=tmp_path, checkpointer=saver)
     async with app.router.lifespan_context(app):
         assert app.state.service._checkpointer is saver
+
+
+async def test_checkpoint_pool_recovers_after_cancelled_connection(postgres_url):
+    from psycopg_pool import AsyncConnectionPool
+
+    async with open_checkpointer(postgres_url) as saver:
+        assert isinstance(saver.conn, AsyncConnectionPool)
+
+        async with saver.conn.connection() as conn:
+            query = asyncio.create_task(conn.execute("SELECT pg_sleep(10)"))
+            await asyncio.sleep(0.05)
+            query.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await query
+
+        state = await asyncio.wait_for(
+            saver.aget_tuple({"configurable": {"thread_id": "cancelled-query-recovery"}}),
+            timeout=5,
+        )
+        assert state is None
 
 
 @pytest_asyncio.fixture
