@@ -159,7 +159,7 @@ export function applyTurnEvent(
       } else {
         blocks.push({ id: nextBlockId(), type: "reasoning", step: ev.data.step, text: ev.data.text });
       }
-      return { ...turn, blocks };
+      return withPhase("analyzing", { blocks });
     }
     case "tool_started": {
       const { id, name, arguments: args } = ev.data;
@@ -256,7 +256,9 @@ export function phaseLabel(turn: AssistantTurn): string {
   switch (turn.phase) {
     case "connecting": return "正在连接…";
     case "started": return "请求已接收";
-    case "analyzing": return turn.step > 0 ? `正在分析请求 · 第 ${turn.step} 轮` : "正在分析请求";
+    case "analyzing": return turn.blocks.at(-1)?.type === "reasoning"
+      ? `正在思考 · 第 ${turn.step} 轮`
+      : turn.step > 0 ? `正在分析请求 · 第 ${turn.step} 轮` : "正在分析请求";
     case "generating": return "正在生成回复";
     case "awaiting_approval": return "等待你的批准";
     case "approved": return "已批准，等待执行";

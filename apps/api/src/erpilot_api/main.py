@@ -18,7 +18,7 @@ import time
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -136,6 +136,16 @@ def create_app(
     def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/api/runtime")
+    def runtime_info() -> dict[str, Any]:
+        return {
+            "data_source": "custom" if tools is not None else (
+                "mcp" if os.environ.get("ERPILOT_TOOLS", "").lower() == "mcp" else "demo"
+            ),
+            "writes_enabled": any(tool.risk is not None for tool in resolved_tools),
+            "reasoning_enabled": os.environ.get("ERPILOT_THINKING", "").lower() in _WRITES_ENV,
+        }
+
     @app.post("/api/chat/stream")
     async def chat_stream(req: ChatRequest) -> EventSourceResponse:
         session_id = req.session_id or uuid4().hex
@@ -190,7 +200,7 @@ def create_app(
                     except TimeoutError:
                         # 心跳只代表连接存活，不代表模型或工具取得进展；不落展示日志
                         yield sse_frame(
-                            "heartbeat", {"at": datetime.now(timezone.utc).isoformat()}
+                            "heartbeat", {"at": datetime.now(UTC).isoformat()}
                         )
                         continue
                     if item is stream_end:

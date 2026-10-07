@@ -52,6 +52,8 @@ uv run erpilot replay traces/<某个>.jsonl        # 把 trace 还原成可读�
 # API + 前端：SSE 链路
 uv run --package erpilot-api python -m erpilot_api
 # 启用审批写入时再设置 ERPILOT_WRITES=1；缺少/无法连接 checkpoint DB 时 API 会拒绝启动
+# .env 设置 ERPILOT_TOOLS=mcp 连接真实 ERP，ERPILOT_THINKING=1 显示供应商思考增量。
+# 页面顶部显示数据源及写入能力；切换工具模式后使用“新会话”，避免混用旧历史。
 # 验证：http://127.0.0.1:8000/healthz
 cd apps/web && npm install && npm run dev      # http://localhost:5173
 

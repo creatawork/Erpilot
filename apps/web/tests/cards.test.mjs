@@ -9,6 +9,19 @@ buildSync({entryPoints: ["src/components/AssistantMessage.tsx"], bundle: true,
   packages: "external", jsx: "automatic"});
 const { AssistantMessage } = await import("../.test-build/assistant-message.mjs");
 
+test("live reasoning is expanded while completed reasoning is collapsed", () => {
+  for (const live of [true, false]) {
+    const html = renderToStaticMarkup(React.createElement(AssistantMessage, {
+      turn: {role: "assistant", phase: live ? "analyzing" : "completed", step: 1,
+        blocks: [{id: "r", type: "reasoning", step: 1, text: "正在核对实际库存"}],
+        tools: {}, phaseAt: 0, done: null, error: null},
+      now: 1000, live, stalled: false, submittingApprovals: new Set(), onRespond() {},
+    }));
+    assert.equal(/<details class="reasoning" open="">/.test(html), live);
+    if (live) assert.match(html, /正在思考/);
+  }
+});
+
 test("invalid business cards retain raw result details", () => {
   for (const display of [
     {version: 1, kind: "future", outcome: "succeeded"},

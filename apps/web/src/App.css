@@ -439,6 +439,9 @@ button:disabled {
   }
 }
 
+.runtime-label { font-size: 12px; color: var(--dim); }
+.new-session { margin-left: auto; padding: 4px 10px; font-size: 12px; align-self: center; }
+
 /* ---- 思考过程面板（阶段二，设计 5.1）---- */
 
 .reasoning {

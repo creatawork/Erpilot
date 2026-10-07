@@ -21,7 +21,7 @@ export function WorkTimeline(
     return (
       <details className="process done">
         <summary>
-          已完成 · 第 {steps} 轮 · {(duration_ms / 1000).toFixed(1)}s
+          回复完成 · 第 {steps} 轮 · {(duration_ms / 1000).toFixed(1)}s
           {usage ? ` · ${usage.prompt_tokens}+${usage.completion_tokens} tok` : ""}
           {cost != null ? ` · ≈¥${cost.toFixed(4)}` : ""}
         </summary>

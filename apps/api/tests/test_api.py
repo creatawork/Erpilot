@@ -8,9 +8,24 @@ import json
 import re
 
 import httpx2
+from agent_core.demo_tools import DEMO_TOOLS
 from agent_core.testing import USAGE, chunk, make_client, sse_response, tool_call_chunks
 from erpilot_api.main import create_app
 from langgraph.checkpoint.memory import InMemorySaver
+
+
+async def test_runtime_reports_actual_tool_mode_and_write_capability(tmp_path, monkeypatch):
+    monkeypatch.delenv("ERPILOT_TOOLS", raising=False)
+    monkeypatch.setenv("ERPILOT_WRITES", "1")
+    monkeypatch.setenv("ERPILOT_THINKING", "1")
+    app = create_app(checkpointer=InMemorySaver(), trace_dir=tmp_path)
+    async with httpx2.AsyncClient(
+        transport=httpx2.ASGITransport(app), base_url="http://test"
+    ) as client:
+        response = await client.get("/api/runtime")
+    assert response.status_code == 200
+    assert response.json() == {"data_source": "demo", "writes_enabled": False,
+                               "reasoning_enabled": True}
 
 
 def _handler_pair(requests: list[httpx2.Request]):
@@ -36,6 +51,7 @@ def _app(requests: list[httpx2.Request], tmp_path):
         checkpointer=InMemorySaver(),
         client_factory=lambda: make_client(_handler_pair(requests)),
         trace_dir=tmp_path,
+        tools=DEMO_TOOLS,
     )
 
 
@@ -146,6 +162,7 @@ async def test_llm_error_becomes_error_event(tmp_path) -> None:
         checkpointer=InMemorySaver(),
         client_factory=lambda: make_client(handler),
         trace_dir=tmp_path,
+        tools=[],
     )
     events = await _post_sse(app, {"message": "hi"})
 

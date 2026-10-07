@@ -119,7 +119,9 @@ export function AssistantMessage({
       <WorkTimeline turn={turn} now={now} stalled={stalled} />
       {turn.blocks.map(block => {
         if (block.type === "reasoning") {
-          return <ReasoningPanel key={block.id} step={block.step} text={block.text} />;
+          return <ReasoningPanel key={block.id} step={block.step} text={block.text}
+            live={live && (turn.phase === "analyzing" || turn.phase === "generating") &&
+              block === turn.blocks[turn.blocks.length - 1]} />;
         }
         if (block.type === "text") {
           if (!block.text) return null;

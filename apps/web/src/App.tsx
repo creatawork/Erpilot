@@ -58,6 +58,7 @@ export default function App() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<string>("");
+  const [runtimeLabel, setRuntimeLabel] = useState("数据源未确认");
   const [error, setError] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [restoreState, setRestoreState] = useState<RestoreState>("loading");
@@ -154,6 +155,7 @@ export default function App() {
         case "start":
           setStatus(`${ev.data.model}`);
           setSessionStatus("running");
+          updateLastAssistant(t => applyTurnEvent(t, ev));
           break;
         case "step":
         case "reasoning_delta":
@@ -254,6 +256,19 @@ export default function App() {
       throw e;
     }
   }, [applySnapshot]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/runtime", {signal: controller.signal}).then(async response => {
+      if (!response.ok) throw new Error("runtime unavailable");
+      const runtime = await response.json();
+      if (controller.signal.aborted) return;
+      const source = runtime.data_source === "mcp" ? "真实 ERP" :
+        runtime.data_source === "demo" ? "演示数据" : "数据源未确认";
+      setRuntimeLabel(`${source} · ${runtime.writes_enabled ? "写入需审批" : "只读"}`);
+    }).catch(() => {});
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -390,6 +405,9 @@ export default function App() {
     <div className="app">
       <header>
         <h1>Erpilot 掌柜助手</h1>
+        <span className="runtime-label">{runtimeLabel}</span>
+        <button className="new-session" onClick={startNewSession}
+          disabled={busy || hasPending || interrupted}>新会话</button>
         <span className="status" role="status">
           {status || (restoreState === "loading" ? "加载会话…" : busy ? "生成中…" : "")}
         </span>
