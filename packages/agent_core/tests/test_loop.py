@@ -14,6 +14,7 @@ from agent_core.events import (
     StepStarted,
     ToolCallFinished,
     ToolCallStarted,
+    ToolExecuting,
 )
 from agent_core.graph_runtime import LangGraphRuntime
 from agent_core.llm import TextDelta, ToolCall, Usage
@@ -109,6 +110,7 @@ async def test_single_tool_task_round_trip() -> None:
         ToolCallStarted(
             call=ToolCall(id="call_1", name="get_order_status", arguments='{"order_id": "123"}')
         ),
+        ToolExecuting(call_id="call_1", name="get_order_status"),
         ToolCallFinished(
             call_id="call_1",
             name="get_order_status",
@@ -436,6 +438,7 @@ async def test_suspended_approval_approved_executes_and_backfills() -> None:
         "ToolCallStarted",
         "ApprovalPending",
         "ApprovalResolved",
+        "ToolExecuting",
         "ToolCallFinished",
         "StepStarted",
         "TextDelta",

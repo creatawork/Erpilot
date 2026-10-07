@@ -12,12 +12,15 @@
 联调前端：cd apps/web && npm install && npm run dev（vite 把 /api 代理到本服务）
 """
 
+import asyncio
 import os
 import time
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from agent_core.approval import ApprovalDecision, StreamApprovalGate
@@ -158,22 +161,53 @@ def create_app(
         return event_response(session_id, service.stream_retry(session_id))
 
     def event_response(session_id, stream, release=None):
+        heartbeat_interval = float(os.environ.get("ERPILOT_HEARTBEAT_SECONDS", "10") or 10)
+
         async def generate() -> AsyncIterator[dict[str, str]]:
             yield sse_frame("start", {"session_id": session_id, "model": service.model})
             t0 = time.perf_counter()
+            queue: asyncio.Queue[Any] = asyncio.Queue()
+            stream_end = object()
+
+            async def produce() -> None:
+                # 生产者把流推进到收口，心跳等待不取消底层迭代（设计 5.4）——
+                # 反复取消异步迭代会连带取消模型请求或工具调用
+                try:
+                    async for event in stream:
+                        await queue.put(event)
+                except asyncio.CancelledError:
+                    raise
+                except BaseException as exc:  # noqa: BLE001 —— 异常转交消费端统一编码
+                    await queue.put(exc)
+                finally:
+                    await queue.put(stream_end)
+
+            producer = asyncio.create_task(produce())
             try:
-                async for event in stream:
-                    encoded = encode_event(event)
+                while True:
+                    try:
+                        item = await asyncio.wait_for(queue.get(), timeout=heartbeat_interval)
+                    except TimeoutError:
+                        # 心跳只代表连接存活，不代表模型或工具取得进展；不落展示日志
+                        yield sse_frame(
+                            "heartbeat", {"at": datetime.now(timezone.utc).isoformat()}
+                        )
+                        continue
+                    if item is stream_end:
+                        break
+                    if isinstance(item, BaseException):
+                        raise item
+                    encoded = encode_event(item)
                     if encoded is not None:
                         yield sse_frame(*encoded)
-                    if isinstance(event, LoopEnd):
+                    if isinstance(item, LoopEnd):
                         yield sse_frame(
                             "done",
                             {
-                                "steps": event.steps,
-                                "completed": event.completed,
-                                "usage": asdict(event.usage) if event.usage else None,
-                                "cost": cost_of(service.model, event.usage),
+                                "steps": item.steps,
+                                "completed": item.completed,
+                                "usage": asdict(item.usage) if item.usage else None,
+                                "cost": cost_of(service.model, item.usage),
                                 "duration_ms": round((time.perf_counter() - t0) * 1000, 1),
                                 "trace": str(service.last_trace) if service.last_trace else None,
                             },
@@ -183,6 +217,9 @@ def create_app(
             except Exception as exc:
                 yield sse_frame("error", {"code": "execution_error", "message": str(exc)})
             finally:
+                if not producer.done():
+                    producer.cancel()
+                await asyncio.gather(producer, return_exceptions=True)
                 await stream.aclose()
                 if release:
                     release()

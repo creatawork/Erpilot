@@ -47,10 +47,12 @@ from agent_core.events import (
     ApprovalPending,
     ApprovalResolved,
     LoopEnd,
+    ReasoningDelta,
     StepEnd,
     StepStarted,
     ToolCallFinished,
     ToolCallStarted,
+    ToolExecuting,
 )
 from agent_core.llm import TextDelta, ToolCall, Usage
 from agent_core.prices import cost_of
@@ -129,6 +131,8 @@ class JsonlTraceRecorder:
                             write({"type": "step_start", "run_id": run_id, "step": s, "ts": _now()})
                         case TextDelta(text=text):
                             step_text.append(text)
+                        case ReasoningDelta():
+                            pass  # 思考默认不保存（设计 5.1/5.3）
                         case StepEnd(step=s, usage=usage, duration_ms=ms):
                             write(
                                 {
@@ -144,6 +148,17 @@ class JsonlTraceRecorder:
                             )
                         case ToolCallStarted(call=call):
                             pending[call.id] = (time.perf_counter(), call)
+                        case ToolExecuting(call_id=cid, name=name):
+                            write(
+                                {
+                                    "type": "tool_executing",
+                                    "run_id": run_id,
+                                    "step": step,
+                                    "ts": _now(),
+                                    "call_id": cid,
+                                    "name": name,
+                                }
+                            )
                         case ToolCallFinished(call_id=cid, name=name, content=content, ok=ok):
                             t0, call = pending.pop(cid, (time.perf_counter(), None))
                             write(

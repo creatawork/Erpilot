@@ -3,20 +3,35 @@
 import asyncio
 import copy
 import os
+import time
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import aclosing
+from dataclasses import asdict
 from pathlib import Path
+from uuid import uuid4
 
 from agent_core.approval import ApprovalDecision, StreamApprovalGate
 from agent_core.demo_tools import system_prompt
-from agent_core.events import AgentEvent, ApprovalPending, LoopEnd
+from agent_core.events import (
+    AgentEvent,
+    ApprovalPending,
+    ApprovalResolved,
+    LoopEnd,
+    StepStarted,
+    TextDelta,
+    ToolCallFinished,
+    ToolCallStarted,
+    ToolExecuting,
+)
 from agent_core.graph_runtime import LangGraphRuntime
 from agent_core.llm import LLMClient
+from agent_core.prices import cost_of
 from agent_core.runtime_config import LoopConfig
 from agent_core.tools import Tool
 from agent_core.trace import JsonlTraceRecorder, TraceSink, new_trace_path
 
 from erpilot_api.checkpoint import thread_id_for_session
+from erpilot_api.presentation import build_presentation
 from erpilot_api.run_store import RunStore
 
 
@@ -24,6 +39,129 @@ class SessionError(RuntimeError):
     def __init__(self, status, code, message):
         super().__init__(message)
         self.status, self.code = status, code
+
+
+class _PresentationLogger:
+    """展示事件落库（设计 5.3）：UI 投影，不参与执行决策。
+
+    delta 按短时间窗口合并写入；节点边界、审批、done/error 前强制刷新；
+    思考片段（ReasoningDelta）、StepEnd 与计时刷新不落库。
+    seq 在运行内单调递增，event_id 供客户端合并去重。
+    """
+
+    _FLUSH_EVENTS = 8
+    _FLUSH_SECONDS = 0.5
+
+    def __init__(self, store: RunStore, session_id: str, run_id: str, model: str):
+        self._store, self._session_id, self._run_id = store, session_id, run_id
+        self._model = model
+        self._segment_id = uuid4().hex
+        self._seq = store.next_presentation_seq(run_id) - 1
+        self._pending: list[dict] = []
+        self._delta: list[str] = []
+        self._last_flush = time.monotonic()
+        self._started = time.monotonic()
+
+    def log_user_message(self, message: str, user_index: int) -> None:
+        self._boundary("user_message", {"text": message, "user_index": user_index})
+
+    def log_resume(self) -> None:
+        self._boundary("resume", {})
+
+    def log(self, event: AgentEvent) -> None:
+        match event:
+            case StepStarted(step=step):
+                self._boundary("step", {"step": step})
+            case TextDelta(text=text):
+                self._delta.append(text)
+                self._flush()
+            case ToolCallStarted(call=call):
+                self._boundary(
+                    "tool_started",
+                    {"id": call.id, "name": call.name, "arguments": call.arguments},
+                )
+            case ToolExecuting(call_id=cid, name=name):
+                self._boundary("tool_executing", {"id": cid, "name": name})
+            case ToolCallFinished(
+                call_id=cid, name=name, content=content, ok=ok, display=display
+            ):
+                self._boundary(
+                    "tool_finished",
+                    {"id": cid, "name": name, "content": content, "ok": ok, "display": display},
+                )
+            case ApprovalPending(
+                call_id=cid, pending_id=pid, tool=name, risk=risk, arguments=args
+            ):
+                self._boundary(
+                    "approval_pending",
+                    {"call_id": cid, "pending_id": pid, "tool": name, "risk": risk,
+                     "arguments": args},
+                )
+            case ApprovalResolved(
+                call_id=cid, pending_id=pid, tool=name, approved=approved, reason=reason
+            ):
+                self._boundary(
+                    "approval_resolved",
+                    {"call_id": cid, "pending_id": pid, "tool": name,
+                     "approved": approved, "reason": reason},
+                )
+            case LoopEnd(steps=steps, usage=usage, completed=completed):
+                self._boundary(
+                    "done",
+                    {
+                        "steps": steps,
+                        "completed": completed,
+                        "usage": asdict(usage) if usage else None,
+                        "cost": cost_of(self._model, usage),
+                        "duration_ms": round((time.monotonic() - self._started) * 1000, 1),
+                    },
+                )
+            case _:
+                pass  # ReasoningDelta / StepEnd：思考与计量不进展示日志
+
+    def log_error(self, message: str) -> None:
+        self._boundary("error", {"message": message})
+
+    def flush(self) -> None:
+        if self._delta:
+            self._append("delta", {"text": "".join(self._delta)})
+            self._delta = []
+        if self._pending:
+            self._store.append_presentation_events(self._pending)
+            self._pending = []
+        self._last_flush = time.monotonic()
+
+    def _boundary(self, etype: str, payload: dict) -> None:
+        self.flush()
+        self._append(etype, payload)
+        self._flush(force=True)
+
+    def _append(self, etype: str, payload: dict) -> None:
+        self._seq += 1
+        self._pending.append({
+            "event_id": uuid4().hex,
+            "session_id": self._session_id,
+            "run_id": self._run_id,
+            "segment_id": self._segment_id,
+            "seq": self._seq,
+            "type": etype,
+            "payload": payload,
+        })
+
+    def _flush(self, force: bool = False) -> None:
+        if self._delta and (
+            force or len(self._delta) >= 40
+            or time.monotonic() - self._last_flush > self._FLUSH_SECONDS
+        ):
+            self._append("delta", {"text": "".join(self._delta)})
+            self._delta = []
+        if self._pending and (
+            force or len(self._pending) >= self._FLUSH_EVENTS
+            or time.monotonic() - self._last_flush > self._FLUSH_SECONDS
+        ):
+            self._store.append_presentation_events(self._pending)
+            self._pending = []
+            self._last_flush = time.monotonic()
 
 
 def _sinks_from_env() -> list[TraceSink]:
@@ -103,30 +241,45 @@ class ChatService:
             saved = self._run_store.get_session(session_id) if self._run_store else None
             if not saved:
                 raise SessionError(404, "session_not_found", "会话不存在")
-            return {
+            state = {
                 "session_id": session_id,
                 "status": "completed",
                 "messages": saved["history"],
                 "pending_approvals": [],
                 "tool_results": [],
             }
-        pending = [i.value for task in snapshot.tasks for i in task.interrupts]
-        status = (
-            "waiting_approval"
-            if pending
-            else (
-                "running"
-                if self.lock(session_id).locked()
-                else ("interrupted" if snapshot.next else "completed")
+        else:
+            pending = [i.value for task in snapshot.tasks for i in task.interrupts]
+            status = (
+                "waiting_approval"
+                if pending
+                else (
+                    "running"
+                    if self.lock(session_id).locked()
+                    else ("interrupted" if snapshot.next else "completed")
+                )
             )
-        )
-        return {
-            "session_id": session_id,
-            "status": status,
-            "messages": snapshot.values["messages"],
-            "pending_approvals": pending,
-            "tool_results": snapshot.values.get("tool_history", []),
-        }
+            state = {
+                "session_id": session_id,
+                "status": status,
+                "messages": snapshot.values["messages"],
+                "pending_approvals": pending,
+                "tool_results": snapshot.values.get("tool_history", []),
+            }
+        presentation = self._presentation(session_id)
+        if presentation is not None:
+            state["presentation"] = presentation
+        return state
+
+    def _presentation(self, session_id):
+        """展示投影（设计 5.3）：可选字段，旧客户端忽略；缺失时前端走旧 messages。"""
+        if self._run_store is None:
+            return None
+        try:
+            return build_presentation(self._run_store.read_presentation_events(session_id))
+        except Exception:
+            # 投影读不出来不能拖垮状态恢复：回退旧 messages 转换
+            return None
 
     async def validate_resume(self, session_id, pending_id):
         if self.lock(session_id).locked():
@@ -242,13 +395,26 @@ class ChatService:
                 run_id = self._run_store.create_run(
                     session_id, message, messages[:-1], str(self.last_trace)
                 )
+            elif run_id is None and (decision is not None or continuation):
+                run_id = self._run_store.resume_run(session_id)
         stream = recorder.record(
             self._drive(runtime, messages, thread, decision, continuation), messages
         )
         finished = False
+        plogger = (
+            _PresentationLogger(self._run_store, session_id, run_id, self._model)
+            if self._run_store and run_id
+            else None
+        )
+        if plogger is not None and message is not None:
+            plogger.log_user_message(message, sum(m["role"] == "user" for m in messages) - 1)
+        elif plogger is not None:
+            plogger.log_resume()
         try:
             async with aclosing(stream) as events:
                 async for event in events:
+                    if plogger is not None:
+                        plogger.log(event)
                     if isinstance(event, ApprovalPending) and run_id:
                         snapshot = await runtime.get_state(thread)
                         self._run_store.project_run(
@@ -266,7 +432,14 @@ class ChatService:
                             self._run_store.update_session_history(session_id, messages)
                         finished = True
                     yield event
+        except BaseException as exc:
+            # 连接关闭不是运行终结；仅记录执行错误，恢复段会重新打开投影。
+            if plogger is not None and not isinstance(exc, (asyncio.CancelledError, GeneratorExit)):
+                plogger.log_error(f"{type(exc).__name__}: {exc}")
+            raise
         finally:
+            if plogger is not None:
+                plogger.flush()
             if run_id and not finished:
                 snapshot = await runtime.get_state(thread)
                 if any(task.interrupts for task in snapshot.tasks):

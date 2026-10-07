@@ -70,6 +70,7 @@ async def test_chat_stream_emits_protocol_events(tmp_path) -> None:
         "start",
         "step",
         "tool_started",
+        "tool_executing",
         "tool_finished",
         "step",
         "delta",
@@ -278,6 +279,35 @@ async def test_approval_flow_via_chat_service(tmp_path) -> None:
     assert requests[0]["messages"][0]["content"] == WRITES_PROMPT
 
 
+async def test_tool_executing_only_after_approval_and_before_handler(tmp_path) -> None:
+    """执行事件必须晚于批准且早于实际 handler；拒绝或校验失败不产出。"""
+    from agent_core.approval import ApprovalDecision
+    from agent_core.events import ApprovalResolved, ToolCallFinished, ToolExecuting
+    from erpilot_api.service import ChatService
+
+    requests: list[httpx2.Request] = []
+    gate = StreamApprovalGate()
+    service = ChatService(
+        checkpointer=InMemorySaver(),
+        client_factory=lambda: make_client(_write_handler(requests)),
+        model="glm-5.3-flash",
+        trace_dir=tmp_path,
+        tools=[guarded(_create_order_api, gate)],
+        approval_gate=gate,
+    )
+    events = []
+    async for event in service.stream_run("s1", "下单 A1001"):
+        events.append(event)
+        if type(event).__name__ == "ApprovalPending":
+            service.respond_approval(event.pending_id, ApprovalDecision(approved=True))
+
+    executing = next(i for i, e in enumerate(events) if isinstance(e, ToolExecuting))
+    resolved = next(i for i, e in enumerate(events) if isinstance(e, ApprovalResolved))
+    finished = next(i for i, e in enumerate(events) if isinstance(e, ToolCallFinished))
+    assert resolved < executing < finished
+    assert events[executing].call_id == "call_w" and events[executing].name == "create_order_api"
+
+
 async def test_encode_approval_events() -> None:
     """approval_pending / approval_resolved 的 SSE 帧编码（协议 v1 扩展）。"""
     from agent_core.approval import RISK_SINGLE_CONFIRM as RISK
@@ -355,3 +385,92 @@ async def test_closing_service_stream_preserves_checkpoint_and_releases_waiter(t
     state = await service.session_state("s1")
     assert state["status"] == "waiting_approval"
     assert state["pending_approvals"]
+
+
+# ---- 阶段二：心跳与展示投影 ----
+
+
+async def test_heartbeat_frames_appear_without_cancelling_stream(tmp_path, monkeypatch) -> None:
+    """工具执行期间无业务事件，SSE 包装层发心跳维持连接观察；
+    心跳不推进 graph step，业务事件序列与 done 收口不受影响。"""
+    import asyncio
+
+    from agent_core.tools import tool as tool_dec
+
+    class _Empty(_BM):
+        pass
+
+    @tool_dec(name="slow_heartbeat_tool", description="慢工具", params=_Empty)
+    async def _slow(params: _Empty) -> str:
+        await asyncio.sleep(0.2)
+        return "done"
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        body = json.loads(request.content)
+        if any(m["role"] == "tool" for m in body["messages"]):
+            return sse_response([chunk(delta={"content": "完成"}), chunk(usage=USAGE)])
+        return sse_response(tool_call_chunks("call_s", "slow_heartbeat_tool", "{}"))
+
+    monkeypatch.setenv("ERPILOT_HEARTBEAT_SECONDS", "0.05")
+    app = create_app(
+        checkpointer=InMemorySaver(),
+        client_factory=lambda: make_client(handler),
+        trace_dir=tmp_path,
+        tools=[_slow],
+    )
+    events = await _post_sse(app, {"message": "慢慢查"})
+    names = [name for name, _ in events]
+    assert names[0] == "start" and names[-1] == "done"
+    assert "heartbeat" in names
+    # 心跳之外，业务事件序列保持完整
+    assert [n for n in names if n != "heartbeat"] == [
+        "start", "step", "tool_started", "tool_executing", "tool_finished",
+        "step", "delta", "done",
+    ]
+
+
+async def test_snapshot_carries_presentation_projection(tmp_path) -> None:
+    """展示日志在运行中写入；快照返回可选 presentation 字段供刷新恢复。"""
+    requests: list[httpx2.Request] = []
+    app = _app(requests, tmp_path)
+    first = await _post_sse(app, {"message": "查订单 123 的状态"})
+    session_id = first[0][1]["session_id"]
+
+    transport = httpx2.ASGITransport(app=app)
+    async with httpx2.AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(f"/api/sessions/{session_id}/state")
+    presentation = resp.json()["presentation"]
+    assert presentation["version"] == 1
+    turn = presentation["turns"][-1]
+    assert turn["user_text"] == "查订单 123 的状态"
+    assert turn["terminal"] is True and turn["done"]["completed"] is True
+    # 正文与工具顺序与实时事件一致；思考不落库
+    assert "订单 123 已发货" in turn["blocks"][-1]["text"]
+    tool_blocks = [b for b in turn["blocks"] if b["type"] == "tool"]
+    assert tool_blocks and turn["tools"][tool_blocks[0]["callId"]]["status"] == "succeeded"
+
+
+async def test_presentation_survives_service_reconstruction(tmp_path) -> None:
+    """展示事件表持久化：换一个 service 实例仍能投影恢复。"""
+    from agent_core.demo_tools import DEMO_TOOLS
+    from erpilot_api.run_store import RunStore
+    from erpilot_api.service import ChatService
+
+    requests: list[httpx2.Request] = []
+    kwargs = dict(
+        client_factory=lambda: make_client(_handler_pair(requests)),
+        model="glm-5.3-flash",
+        trace_dir=tmp_path,
+        tools=DEMO_TOOLS,
+        run_store=RunStore(tmp_path / "runs.db"),
+    )
+    first = ChatService(checkpointer=InMemorySaver(), **kwargs)
+    async for _ in first.stream_run("s1", "查订单 123 的状态"):
+        pass
+    second = ChatService(
+        checkpointer=InMemorySaver(), **{**kwargs, "run_store": RunStore(tmp_path / "runs.db")}
+    )
+    state = await second.session_state("s1")
+    turn = state["presentation"]["turns"][-1]
+    assert turn["user_text"] == "查订单 123 的状态"
+    assert turn["blocks"][-1]["text"] == "订单 123 已发货"

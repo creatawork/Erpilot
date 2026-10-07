@@ -65,6 +65,10 @@ async def test_disconnected_approval_survives_service_reconstruction(tmp_path):
     assert state["pending_approvals"] == []
     assert state["tool_results"][0]["call_id"] == pending.call_id
     assert state["tool_results"][0]["ok"] is True
+    turn = state["presentation"]["turns"][0]
+    assert turn["terminal"] and turn["done"]["completed"]
+    assert turn["tools"][pending.call_id]["status"] == "succeeded"
+    assert turn["tools"][pending.call_id]["approvalResolved"]["approved"] is True
     assert RunStore(tmp_path / "runs.db").get_session("s1")["history"][-1]["content"] == "done"
 
 
@@ -100,6 +104,10 @@ async def test_interrupted_model_node_can_be_retried_from_its_checkpoint(tmp_pat
         assert resumed.status_code == 200 and "event: done" in resumed.text
         state = await client.get("/api/sessions/retry/state")
         assert state.json()["status"] == "completed"
+        turn = state.json()["presentation"]["turns"][0]
+        assert turn["error"] is None
+        assert turn["terminal"] and turn["done"]["completed"]
+        assert turn["blocks"] == [{"type": "text", "text": "recovered"}]
     assert calls == 2
     assert RunStore(run_store_path).get_session("retry")["history"][-1]["content"] == "recovered"
 

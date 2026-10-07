@@ -5,7 +5,14 @@ from pathlib import Path
 
 import httpx2
 import pytest
-from agent_core.events import LoopEnd, StepEnd, StepStarted, ToolCallFinished, ToolCallStarted
+from agent_core.events import (
+    LoopEnd,
+    StepEnd,
+    StepStarted,
+    ToolCallFinished,
+    ToolCallStarted,
+    ToolExecuting,
+)
 from agent_core.graph_runtime import LangGraphRuntime
 from agent_core.llm import TextDelta, ToolCall, Usage
 from agent_core.testing import USAGE, chunk, make_client, sse_response, tool_call_chunks
@@ -71,6 +78,7 @@ async def test_records_full_pipeline_and_passes_events_through(tmp_path) -> None
         "run_start",
         "step_start",
         "step_end",
+        "tool_executing",
         "tool_call",
         "step_start",
         "step_end",
@@ -82,6 +90,7 @@ async def test_records_full_pipeline_and_passes_events_through(tmp_path) -> None
         ToolCallStarted(
             call=ToolCall(id="call_1", name="get_order_status", arguments='{"order_id": "123"}')
         ),
+        ToolExecuting(call_id="call_1", name="get_order_status"),
         ToolCallFinished(
             call_id="call_1",
             name="get_order_status",

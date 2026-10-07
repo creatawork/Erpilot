@@ -36,6 +36,17 @@ class TextDelta:
 
 
 @dataclass(frozen=True, slots=True)
+class ReasoningDelta:
+    """一段增量思考文本（供应商 reasoning_content 字段）。
+
+    独立于正文：不拼入 TextDelta，不写进 final_answer。
+    端点或模型不提供思考内容时不会产出，消费方据此降级。
+    """
+
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
 class ToolCall:
     """一次完整的工具调用请求（流式增量归并后的结果）。
 
@@ -54,7 +65,7 @@ class StreamEnd:
     usage: Usage | None = None
 
 
-StreamEvent = TextDelta | ToolCall | StreamEnd
+StreamEvent = TextDelta | ReasoningDelta | ToolCall | StreamEnd
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +90,8 @@ class LLMConfig:
     api_key: str
     model: str = DEFAULT_MODEL
     base_url: str = DEFAULT_BASE_URL
+    # 思考展示是配置能力，默认关闭：确认端点/模型确实回 reasoning_content 后再开启
+    thinking: bool = False
 
     @classmethod
     def from_env(cls) -> "LLMConfig":
@@ -89,6 +102,7 @@ class LLMConfig:
             api_key=api_key,
             base_url=os.environ.get("LLM_BASE_URL", DEFAULT_BASE_URL),
             model=os.environ.get("LLM_MODEL", DEFAULT_MODEL),
+            thinking=os.environ.get("ERPILOT_THINKING", "").lower() in ("1", "true", "yes"),
         )
 
 
@@ -131,8 +145,8 @@ class LLMClient:
         messages: Sequence[ChatCompletionMessageParam],
         tools: Sequence[dict[str, Any]] | None = None,
     ) -> AsyncIterator[StreamEvent]:
-        """流式补全：逐段产出 TextDelta / ToolCall，最后恰好产出一个 StreamEnd。"""
-        extra = {"tools": list(tools)} if tools else {}
+        """流式补全：逐段产出 TextDelta / ReasoningDelta / ToolCall，最后恰好产出一个 StreamEnd。"""
+        extra: dict[str, Any] = {"tools": list(tools)} if tools else {}
         stream = await self._client.chat.completions.create(
             model=self._config.model,
             messages=list(messages),
@@ -147,8 +161,17 @@ class LLMClient:
         async with stream:
             async for chunk in stream:
                 choice = chunk.choices[0] if chunk.choices else None
-                if choice and choice.delta.content:
-                    yield TextDelta(choice.delta.content)
+                if choice and choice.delta:
+                    reasoning = getattr(choice.delta, "reasoning_content", None)
+                    if reasoning is None:
+                        # openai SDK 的 pydantic 模型把扩展字段收进 model_extra
+                        reasoning = (choice.delta.model_extra or {}).get("reasoning_content")
+                    # 实测 glm-5.3-flash 端点默认回 reasoning_content 且不接受 thinking
+                    # 请求参数；配置只控制是否解析产出，端点能力须另行实测
+                    if reasoning and self._config.thinking:
+                        yield ReasoningDelta(reasoning)
+                    if choice.delta.content:
+                        yield TextDelta(choice.delta.content)
                 if choice and choice.delta.tool_calls:
                     _accumulate_tool_calls(pending, choice.delta.tool_calls)
                 if chunk.usage is not None:
@@ -176,6 +199,8 @@ class LLMClient:
             match event:
                 case TextDelta(text=text):
                     parts.append(text)
+                case ReasoningDelta():
+                    pass  # 思考不进入最终结果
                 case ToolCall() as call:
                     calls.append(call)
                 case StreamEnd(usage=final_usage):

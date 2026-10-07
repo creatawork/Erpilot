@@ -5,6 +5,7 @@ import json
 import httpx2
 import pytest
 from agent_core.llm import (
+    ReasoningDelta,
     StreamEnd,
     StreamResult,
     StructuredResult,
@@ -205,3 +206,52 @@ async def test_structured_invalid_output_raises() -> None:
 
     with pytest.raises(ValidationError):
         await make_client(handler).structured([{"role": "user", "content": "hi"}], Person)
+
+
+# ---- 阶段二：思考字段（reasoning_content）----
+
+
+def _reasoning_chunks() -> list[dict]:
+    return [
+        chunk(delta={"role": "assistant", "content": "", "reasoning_content": "先算 9.9×8"}),
+        chunk(delta={"content": "", "reasoning_content": "≈79.2"}),
+        chunk(delta={"content": "79.2"}),
+        chunk(usage=USAGE),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_thinking_enabled_yields_reasoning_before_text() -> None:
+    """思考独立成事件：不拼入 TextDelta，先于正文出现。"""
+    client = make_client(lambda request: sse_response(_reasoning_chunks()))
+    import dataclasses
+
+    client._config = dataclasses.replace(client.config, thinking=True)
+    events = await _collect(client, [{"role": "user", "content": "9.9×8"}])
+    assert events == [
+        ReasoningDelta(text="先算 9.9×8"),
+        ReasoningDelta(text="≈79.2"),
+        TextDelta(text="79.2"),
+        StreamEnd(usage=Usage(prompt_tokens=13, completion_tokens=7, total_tokens=20)),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_thinking_disabled_drops_reasoning_silently() -> None:
+    """默认关闭：reasoning_content 被丢弃，正文流不受影响。"""
+    client = make_client(lambda request: sse_response(_reasoning_chunks()))
+    events = await _collect(client, [{"role": "user", "content": "9.9×8"}])
+    assert events == [
+        TextDelta(text="79.2"),
+        StreamEnd(usage=Usage(prompt_tokens=13, completion_tokens=7, total_tokens=20)),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_chat_excludes_reasoning_from_final_text() -> None:
+    import dataclasses
+
+    client = make_client(lambda request: sse_response(_reasoning_chunks()))
+    client._config = dataclasses.replace(client.config, thinking=True)
+    result = await client.chat([{"role": "user", "content": "9.9×8"}])
+    assert result.text == "79.2"

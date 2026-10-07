@@ -5,6 +5,7 @@ import json
 from copy import deepcopy
 from uuid import uuid4
 
+from agent_core.display import build_display
 from agent_core.graph_helpers import error_payload
 
 
@@ -77,4 +78,7 @@ async def execute_tool_call(call, tools, config):
             break
         if kind not in policy.retry_on:
             break
-    return {**deepcopy(call), "content": content, "ok": ok}
+    result = {**deepcopy(call), "content": content, "ok": ok}
+    # 展示适配器失败只回退 None，不影响业务结果
+    result["display"] = build_display(call["name"], call.get("arguments", {}), content, ok)
+    return result

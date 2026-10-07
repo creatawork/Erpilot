@@ -10,18 +10,23 @@ from langgraph.types import interrupt
 
 from agent_core.approval import ApprovalDecision, _denial_payload
 from agent_core.context import compress_messages
+from agent_core.display import build_display
 from agent_core.events import (
     ApprovalResolved,
     StepEnd,
     StepStarted,
     ToolCallFinished,
     ToolCallStarted,
+    ToolExecuting,
+)
+from agent_core.events import (
+    ReasoningDelta as ReasoningDeltaEvent,
 )
 from agent_core.graph_approval import ResumeDecision, make_approval_payload
 from agent_core.graph_helpers import assistant_toolcall_message, merge_usage
 from agent_core.graph_state import AgentState
 from agent_core.graph_tools import execute_tool_call, prepare_tool_calls
-from agent_core.llm import StreamEnd, TextDelta, ToolCall, Usage
+from agent_core.llm import ReasoningDelta, StreamEnd, TextDelta, ToolCall, Usage
 
 
 def build_graph(client, tools, config, checkpointer, *, approval_enabled=False):
@@ -46,6 +51,9 @@ def build_graph(client, tools, config, checkpointer, *, approval_enabled=False):
             if isinstance(event, TextDelta):
                 parts.append(event.text)
                 writer(event)
+            elif isinstance(event, ReasoningDelta):
+                # 思考独立转发，不并入正文；无思考字段的端点不产出
+                writer(ReasoningDeltaEvent(step, event.text))
             elif isinstance(event, ToolCall):
                 calls.append(event)
             elif isinstance(event, StreamEnd):
@@ -82,9 +90,18 @@ def build_graph(client, tools, config, checkpointer, *, approval_enabled=False):
         writer = get_stream_writer()
 
         async def execute(call):
+            # 带 content 的调用是校验失败/未知工具的占位结果，不实际执行，不发 executing。
+            if "content" not in call:
+                writer(ToolExecuting(call["call_id"], call["name"]))
             result = await execute_tool_call(call, registry, config)
             writer(
-                ToolCallFinished(result["call_id"], result["name"], result["content"], result["ok"])
+                ToolCallFinished(
+                    result["call_id"],
+                    result["name"],
+                    result["content"],
+                    result["ok"],
+                    result.get("display"),
+                )
             )
             return result
 
@@ -117,16 +134,22 @@ def build_graph(client, tools, config, checkpointer, *, approval_enabled=False):
             )
         )
         if decision.approved:
+            writer(ToolExecuting(call["call_id"], call["name"]))
             result = await execute_tool_call(call, registry, config)
         else:
+            content = _denial_payload(ApprovalDecision(False, decision.reason))
             result = {
                 **call,
                 "ok": True,
-                "content": _denial_payload(
-                    ApprovalDecision(False, decision.reason),
-                ),
+                "content": content,
+                "display": build_display(call["name"], call["arguments"], content, True),
             }
-        writer(ToolCallFinished(result["call_id"], result["name"], result["content"], result["ok"]))
+        writer(
+            ToolCallFinished(
+                result["call_id"], result["name"], result["content"], result["ok"],
+                result.get("display"),
+            )
+        )
         return {"tool_results": [*state["tool_results"], result]}
 
     def collect(state):
@@ -153,6 +176,7 @@ def build_graph(client, tools, config, checkpointer, *, approval_enabled=False):
                         "arguments": calls[result["call_id"]]["arguments"],
                         "content": result["content"],
                         "ok": result["ok"],
+                        "display": result.get("display"),
                     }
                     for result in state["tool_results"]
                 ],
