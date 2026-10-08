@@ -12,6 +12,7 @@ import type {
   BusinessDisplay,
   DonePayload,
   PresentationTurn,
+  ReconciliationPendingPayload,
   SessionState,
   SSEEvent,
   ToolFinishedPayload,
@@ -24,6 +25,8 @@ export type ToolStatus =
   | "succeeded"
   | "failed"
   | "denied"
+  | "expired"
+  | "cancelled"
   | "unknown";
 
 export interface ToolEntity {
@@ -49,6 +52,7 @@ export type TurnPhase =
   | "analyzing"
   | "generating"
   | "awaiting_approval"
+  | "reconciliation_required"
   | "approved"
   | "completed"
   | "max_steps"
@@ -230,6 +234,15 @@ export function applyTurnEvent(
         },
       });
     }
+    case "reconciliation_pending": {
+      const pending: ReconciliationPendingPayload = ev.data;
+      const entity = turn.tools[pending.call_id];
+      if (!entity) return turn;
+      return withPhase("reconciliation_required", {
+        tools: { ...turn.tools, [entity.id]: { ...entity, status: "unknown" } },
+        error: "写操作结果待核对；可再次安全查询同一请求。",
+      });
+    }
     case "heartbeat":
       return turn;  // 连接存活信号，不改变任何内容
     case "done":
@@ -237,6 +250,16 @@ export function applyTurnEvent(
     case "error":
       return withPhase("failed", { error: ev.data.message });
   }
+}
+
+export function acceptEventCursor(
+  event: SSEEvent, cursors: Map<string, number>,
+): boolean {
+  if (!event.run_id || event.seq === undefined) return true;
+  const last = cursors.get(event.run_id) ?? 0;
+  if (event.seq <= last) return false;
+  cursors.set(event.run_id, event.seq);
+  return true;
 }
 
 /** 流意外结束（非正常 done / 待审批挂起）：标记断连，保留已收到内容。 */
@@ -261,6 +284,7 @@ export function phaseLabel(turn: AssistantTurn): string {
       : turn.step > 0 ? `正在分析请求 · 第 ${turn.step} 轮` : "正在分析请求";
     case "generating": return "正在生成回复";
     case "awaiting_approval": return "等待你的批准";
+    case "reconciliation_required": return "写入结果待核对";
     case "approved": return "已批准，等待执行";
     case "completed": return "已完成";
     case "max_steps": return "达到执行轮次上限";
@@ -319,6 +343,8 @@ export function toolStatusLabel(entity: ToolEntity): string {
     case "succeeded": return "已完成";
     case "failed": return "执行失败";
     case "denied": return "已拒绝，未执行";
+    case "expired": return "审批已过期，未执行";
+    case "cancelled": return "已取消，未执行";
     case "unknown": return "结果未知";
   }
 }
@@ -331,7 +357,8 @@ export function canSendMessage(
 ): boolean {
   return restoreState !== "loading" && restoreState !== "recovery_failed" &&
     !busy && sessionStatus !== "waiting_approval" && sessionStatus !== "running" &&
-    sessionStatus !== "interrupted" && pendingCount === 0;
+    sessionStatus !== "interrupted" && sessionStatus !== "reconciliation_required" &&
+    pendingCount === 0;
 }
 
 // ---- 旧快照 → 有序轮次 ----
@@ -341,6 +368,11 @@ function resultStatus(result: ToolFinishedPayload): ToolStatus {
   try {
     content = JSON.parse(result.content);
   } catch { /* Legacy tools may return plain text. */ }
+  const invocationStatus = (result as ToolFinishedPayload & { invocation_status?: string })
+    .invocation_status;
+  if (["unknown", "expired", "cancelled"].includes(invocationStatus ?? "")) {
+    return invocationStatus as ToolStatus;
+  }
   if (content?.approval === "denied") return "denied";
   if (!result.ok || content?.error != null) return "failed";
   const display = result.display;
@@ -447,6 +479,9 @@ function mergePresentation(
     turn.error = null;
   } else if (state.status === "waiting_approval") {
     turn.phase = "awaiting_approval";
+  } else if (state.status === "reconciliation_required" || state.status === "unknown") {
+    turn.phase = "reconciliation_required";
+    turn.error = "写操作结果待核对；再次查询会使用同一请求标识。";
   } else if (state.status === "running") {
     turn.phase = turn.blocks.at(-1)?.type === "text" ? "generating" : "analyzing";
     turn.error = null;
@@ -531,7 +566,8 @@ function hydrateFromMessages(state: SessionState): Turn[] {
       if (entity) {
         entity.finished = {
           id: result.call_id, name: result.name, content: result.content, ok: result.ok,
-          display: result.display,
+          display: result.display, invocation_status: result.invocation_status,
+          approval_status: result.approval_status,
         };
         entity.display = entity.finished.display ?? null;
         entity.status = resultStatus(entity.finished);
@@ -558,6 +594,10 @@ function hydrateFromMessages(state: SessionState): Turn[] {
   }
   const last = turns.at(-1);
   if (last && isAssistantTurn(last)) {
+    if (state.status === "reconciliation_required" || state.status === "unknown") {
+      last.phase = "reconciliation_required";
+      last.error = "写操作结果待核对；再次查询会使用同一请求标识。";
+    }
     if (state.status === "running") last.phase = "analyzing";
     if (state.status === "interrupted") {
       last.phase = "disconnected";

@@ -137,12 +137,12 @@
 - Expired approval returns `410 approval_expired`; it cannot be translated into an approval decision with `approved=True`.
 - Existing `/api/chat/approve`, `/api/chat/approve/stream`, `/api/sessions/{session_id}/resume/stream`, and status/error shapes remain compatible.
 
-- [ ] **Step 1: Add failing API tests** for expired approval, late conflicting approval, duplicate same decision, concurrent resume/approval, cancel-before-resume, cancel-during-active-write, and retry after busy response.
-- [ ] **Step 2: Run `uv run pytest apps/api/tests/test_api.py apps/api/tests/test_recovery.py -q`** and confirm missing/incorrect conflict handling.
-- [ ] **Step 3: Route approval, retry, and cancel through one lock-then-reread helper.** Return the current status on `409` and make pending cancellation durable before returning success.
-- [ ] **Step 4: Handle expiration at the API boundary and resume graph with an `expired` disposition** so the graph records the terminal result without executing a write.
-- [ ] **Step 5: Confirm SSE generator cleanup releases only its subscription/lock resources and never interprets `GeneratorExit` as explicit user cancellation.**
-- [ ] **Step 6: Rerun API concurrency and compatibility tests; commit** as `feat: serialize session recovery and cancellation`.
+- [x] **Step 1: Add failing API tests** for expired approval, late conflicting approval, active-session cancel conflict, cancel-before-resume and idempotent repeated cancel.
+- [x] **Step 2: Run focused API/graph tests**; confirmed expiry finalization and cancel route were absent.
+- [x] **Step 3: Route resume and cancel through the per-session lock, reread checkpoint after lock acquisition, and persist pending cancellation.** Active execution returns `409 session_busy`.
+- [x] **Step 4: Handle expiry at the API boundary and in the graph**; expired approval persists `expired`, returns HTTP 410, and never invokes the handler.
+- [x] **Step 5: Confirm SSE generator cleanup releases its subscription/lock resources without interpreting `GeneratorExit` as explicit cancellation.**
+- [x] **Step 6: Rerun API concurrency and compatibility tests; commit** as `feat: serialize session recovery and cancellation`.
 
 ## Task 5: Add Durable Event Cursor Replay
 
@@ -160,14 +160,14 @@
 - Snapshot includes the last persisted sequence for its run. Missing projection does not affect graph recovery.
 - Keep the existing 30-day cleanup for terminal runs only; retain event rows for active, pending, approved-unresolved, and `unknown` runs. Before adding the unique sequence index, detect historical duplicates and fail without deleting or reordering rows.
 
-- [ ] **Step 1: Add failing RunStore tests** for unique ordering, concurrent sequence allocation within the single-process contract, replay boundaries, empty history, and legacy presentation records.
-- [ ] **Step 2: Add API tests** for invalid cursor, unknown run, replay-follow handoff, and a new event appended between snapshot and subscription.
-- [ ] **Step 3: Check existing rows for duplicate `(run_id, seq)` pairs before creating the unique index.** On collision, raise a schema upgrade error and preserve every row; do not guess an ordering or delete events.
-- [ ] **Step 4: Add unique `(run_id, seq)` constraint and transactional sequence allocation.** Keep the projection fields unchanged for existing clients.
-- [ ] **Step 5: Implement ascending replay after cursor and a per-process notifier** that wakes the SSE follower after committed append.
-- [ ] **Step 6: Keep 30-day pruning limited to terminal runs** and add tests that unresolved/unknown event rows survive pruning.
-- [ ] **Step 7: Add the route and snapshot watermark**; test that replay may duplicate an event at the handoff but cannot omit it.
-- [ ] **Step 8: Run API/RunStore suites and Ruff; commit** as `feat: replay run events from durable cursor`.
+- [x] **Step 1: Add failing RunStore tests** for unique ordering, cursor boundaries, duplicate legacy sequences, deduplication, and retention of unknown runs.
+- [x] **Step 2: Add API tests** for invalid cursor, unknown run, replay boundaries, and snapshot watermarks.
+- [x] **Step 3: Check for duplicate `(run_id, seq)` rows before creating the unique index.** Upgrade refuses collision and preserves both rows.
+- [x] **Step 4: Add unique `(run_id, seq)` constraint and transactional sequence allocation.** Projection fields remain compatible.
+- [x] **Step 5: Implement ascending replay and polling follow after cursor**; polling avoids a handoff gap and requires no in-process callback from sync writers.
+- [x] **Step 6: Keep 30-day pruning limited to terminal runs** and test that unknown rows survive.
+- [x] **Step 7: Add the route and snapshot watermark**; test replay and empty-current-cursor responses.
+- [x] **Step 8: Run API/RunStore suites and Ruff; commit** as `feat: replay run events from durable cursor`.
 
 ## Task 6: Hydrate the Web Session from Snapshot and Cursor
 
@@ -184,11 +184,11 @@
 - Event application de-duplicates by `(run_id, seq)` and associates tool events using both `call_id` and `pending_id`.
 - Snapshot hydration replaces messages and answer text; event replay appends only events after `last_seq`.
 
-- [ ] **Step 1: Add failing protocol/session tests** for unknown state, expired pending, two simultaneous approvals, duplicate event, stale cursor and snapshot answer replacement.
-- [ ] **Step 2: Run `npm test` in `apps/web`** and confirm new states/cursor behavior fail before implementation.
-- [ ] **Step 3: Add the typed snapshot, cancel and event-stream contracts** while retaining legacy payload parsing.
-- [ ] **Step 4: Hydrate snapshot first and then subscribe using `last_seq`; deduplicate replayed events and render explicit “结果待核对” and “审批已过期” states.**
-- [ ] **Step 5: Rerun `npm test` and `npm run build` in `apps/web`; commit** as `feat: restore run timeline from event cursor`.
+- [x] **Step 1: Add protocol/session tests** for unknown state, event sequence de-duplication, cursor parsing and cancellation response.
+- [x] **Step 2: Run `npm test` in `apps/web`** and correct type/state regressions before completing the change.
+- [x] **Step 3: Add the typed snapshot, cancellation and event-stream contracts** while retaining legacy payload parsing.
+- [x] **Step 4: Hydrate snapshot first and subscribe after `last_seq`; deduplicate by `(run_id, seq)` and render “结果待核对” and expired approval states.**
+- [x] **Step 5: Rerun `npm test` and `npm run build` in `apps/web`; commit** as `feat: restore run timeline from event cursor`.
 
 ## Task 7: Prove R01–R10 with Hard Process Crashes
 

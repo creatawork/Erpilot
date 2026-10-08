@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { submitApproval, loadSessionState, streamApprovalResume, streamInterruptedResume } from "../.test-build/protocol.js";
+import {
+  cancelSession,
+  submitApproval,
+  loadSessionState,
+  streamApprovalResume,
+  streamInterruptedResume,
+  streamRunEvents,
+} from "../.test-build/protocol.js";
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
@@ -77,6 +84,28 @@ test("interrupted session continuation uses its session resume stream", async ()
   const events = [];
   for await (const event of streamInterruptedResume("s1")) events.push(event);
   assert.deepEqual(events.map(event => event.event), ["done"]);
+});
+
+test("run event replay parses the durable sequence cursor and run identity", async () => {
+  globalThis.fetch = async url => {
+    assert.equal(url, "/api/runs/r1/events?after_seq=4");
+    return new Response('id: 5\nevent: reconciliation_pending\ndata: {"run_id":"r1","call_id":"c1","client_token":"t","code":"unknown","message":"check"}\n\n');
+  };
+  const events = [];
+  for await (const event of streamRunEvents("r1", 4)) events.push(event);
+  assert.equal(events[0].seq, 5);
+  assert.equal(events[0].run_id, "r1");
+  assert.equal(events[0].event, "reconciliation_pending");
+});
+
+test("cancel endpoint returns the refreshed session snapshot", async () => {
+  globalThis.fetch = async (url, options) => {
+    assert.equal(url, "/api/sessions/s1/cancel");
+    assert.equal(options.method, "POST");
+    return Response.json({session_id: "s1", status: "completed", messages: [],
+      pending_approvals: [], tool_results: []});
+  };
+  assert.equal((await cancelSession("s1")).status, "completed");
 });
 
 import { streamChat, ProtocolError } from "../.test-build/protocol.js";

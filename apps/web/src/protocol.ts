@@ -26,6 +26,8 @@ export interface ToolFinishedPayload {
   ok: boolean;
   /** 展示适配器产物（设计 5.2）；未知工具/契约不符/版本不识别时为 null 或未知 kind */
   display?: BusinessDisplay | null;
+  approval_status?: string | null;
+  invocation_status?: string | null;
 }
 
 /** 后端展示适配器协议（apps/api presentation / agent_core display 同步维护） */
@@ -77,6 +79,14 @@ export interface ApprovalPendingPayload {
   tool: string;
   risk: string;
   arguments: Record<string, unknown>;
+  expires_at?: string | null;
+}
+
+export interface ReconciliationPendingPayload {
+  call_id: string;
+  client_token: string;
+  code: string;
+  message: string;
 }
 
 export interface ApprovalResolvedPayload {
@@ -96,7 +106,7 @@ export interface DonePayload {
   trace: string | null;
 }
 
-export type SSEEvent =
+export type SSEEvent = (
   | { event: "start"; data: StartPayload }
   | { event: "step"; data: { step: number } }
   | { event: "delta"; data: { text: string } }
@@ -106,13 +116,16 @@ export type SSEEvent =
   | { event: "tool_finished"; data: ToolFinishedPayload }
   | { event: "approval_pending"; data: ApprovalPendingPayload }
   | { event: "approval_resolved"; data: ApprovalResolvedPayload }
+  | { event: "reconciliation_pending"; data: ReconciliationPendingPayload }
   | { event: "done"; data: DonePayload }
   | { event: "heartbeat"; data: { at: string } }
-  | { event: "error"; data: { code?: string; message: string } };
+  | { event: "error"; data: { code?: string; message: string } }
+) & { seq?: number; run_id?: string };
 
 const KNOWN_EVENTS = new Set([
   "start", "step", "delta", "reasoning_delta", "tool_started", "tool_executing",
-  "tool_finished", "approval_pending", "approval_resolved", "done", "heartbeat", "error",
+  "tool_finished", "approval_pending", "approval_resolved", "reconciliation_pending",
+  "done", "heartbeat", "error",
 ]);
 
 /** 已知事件的 data 不是合法 JSON：按可解释的协议错误处理，不静默丢弃。 */
@@ -137,14 +150,20 @@ export interface SessionToolResult {
   content: string;
   ok: boolean;
   display?: BusinessDisplay | null;
+  approval_status?: string | null;
+  invocation_status?: string | null;
 }
 
 export interface SessionState {
   session_id: string;
-  status: "completed" | "waiting_approval" | "running" | "interrupted";
+  status: "completed" | "waiting_approval" | "running" | "interrupted" |
+    "reconciliation_required" | "unknown";
   messages: SessionMessage[];
   pending_approvals: ApprovalPendingPayload[];
   tool_results: SessionToolResult[];
+  pending_reconciliation?: ReconciliationPendingPayload | null;
+  run_id?: string;
+  last_seq?: number;
   /** 展示投影（设计 5.3）：可选，旧快照没有；新客户端优先使用，缺失时走 messages 转换 */
   presentation?: PresentationSnapshot;
 }
@@ -153,7 +172,8 @@ export interface SessionState {
 export interface PresentationTool {
   name: string;
   arguments: string;
-  status: "prepared" | "waiting_approval" | "running" | "succeeded" | "failed" | "denied" | "unknown";
+  status: "prepared" | "waiting_approval" | "running" | "succeeded" | "failed" |
+    "denied" | "expired" | "cancelled" | "unknown";
   finished: ToolFinishedPayload | null;
   approval: ApprovalPendingPayload | null;
   approvalResolved: ApprovalResolvedPayload | null;
@@ -220,6 +240,23 @@ export async function* streamInterruptedResume(sessionId: string): AsyncGenerato
   yield* readSSE(resp);
 }
 
+export async function* streamRunEvents(
+  runId: string, afterSeq: number, signal?: AbortSignal,
+): AsyncGenerator<SSEEvent> {
+  const resp = await fetch(
+    `/api/runs/${encodeURIComponent(runId)}/events?after_seq=${afterSeq}`, { signal },
+  );
+  yield* readSSE(resp);
+}
+
+export async function cancelSession(sessionId: string): Promise<SessionState> {
+  const resp = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/cancel`, {
+    method: "POST",
+  });
+  if (!resp.ok) throw await responseError(resp);
+  return await resp.json() as SessionState;
+}
+
 export async function submitApproval(pendingId: string, approved: boolean): Promise<void> {
   const resp = await fetch("/api/chat/approve", {
     method: "POST",
@@ -235,9 +272,11 @@ export async function submitApproval(pendingId: string, approved: boolean): Prom
 
 function parseBlock(block: string): SSEEvent | null {
   let event: string | null = null;
+  let id: string | null = null;
   const dataLines: string[] = [];
   for (const line of block.split(/\r?\n/)) {
     if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("id:")) id = line.slice(3).trim();
     else if (line.startsWith("data:")) dataLines.push(line.slice(5).replace(/^ /, ""));
     // ": ping" 等注释行直接忽略（心跳不代表业务进度）
   }
@@ -255,7 +294,10 @@ function parseBlock(block: string): SSEEvent | null {
   } catch (err) {
     throw new ProtocolError(event, err);
   }
-  return { event, data } as SSEEvent;
+  const seq = id !== null && /^\d+$/.test(id) ? Number(id) : undefined;
+  const runId = data && typeof data === "object" && "run_id" in data &&
+    typeof data.run_id === "string" ? data.run_id : undefined;
+  return { event, data, ...(seq !== undefined ? { seq } : {}), ...(runId ? { run_id: runId } : {}) } as SSEEvent;
 }
 
 export async function* streamChat(

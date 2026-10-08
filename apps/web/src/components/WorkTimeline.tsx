@@ -46,7 +46,8 @@ export function WorkTimeline(
       </div>
     );
   }
-  if (turn.phase === "failed" || turn.phase === "disconnected") {
+  if (turn.phase === "failed" || turn.phase === "disconnected" ||
+      turn.phase === "reconciliation_required") {
     return (
       <div className="phase warn" role="status">
         {phaseLabel(turn)}

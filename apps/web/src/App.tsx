@@ -5,8 +5,10 @@ import {
   type SSEEvent,
   type SessionState,
   ApiError,
+  cancelSession,
   loadSessionState,
   streamInterruptedResume,
+  streamRunEvents,
   streamApprovalResume,
   streamChat,
   submitApproval,
@@ -17,6 +19,7 @@ import {
   type RestoreState,
   type Turn,
   applyTurnEvent,
+  acceptEventCursor,
   canSendMessage,
   hydrateTurns,
   isAssistantTurn,
@@ -65,6 +68,9 @@ export default function App() {
   const [interrupted, setInterrupted] = useState(false);
   const [sessionStatus, setSessionStatus] = useState<SessionState["status"] | null>(null);
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalPendingPayload[]>([]);
+  const [pendingReconciliation, setPendingReconciliation] = useState<SessionState["pending_reconciliation"]>(null);
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const lastSeqByRun = useRef(new Map<string, number>());
   const liveConnection = useRef(false);
 
   const [submittingApprovals, setSubmittingApprovals] = useState<Set<string>>(new Set());
@@ -146,6 +152,7 @@ export default function App() {
     };
 
     for await (const ev of events) {
+      if (!acceptEventCursor(ev, lastSeqByRun.current)) continue;
       lastEventAtRef.current = Date.now();
       if (ev.event !== "delta") flushDelta();
       switch (ev.event) {
@@ -188,12 +195,19 @@ export default function App() {
           updateLastAssistant(t => applyTurnEvent(t, ev));
           break;
         }
+        case "reconciliation_pending":
+          setPendingReconciliation(ev.data);
+          setSessionStatus("reconciliation_required");
+          setInterrupted(true);
+          updateLastAssistant(t => applyTurnEvent(t, ev));
+          break;
         case "done":
           updateLastAssistant(t => applyTurnEvent(t, ev));
           setStatus("");
           setInterrupted(false);
           setSessionStatus("completed");
           setPendingApprovals([]);
+          setPendingReconciliation(null);
           break;
         case "error":
           updateLastAssistant(t => applyTurnEvent(t, ev));
@@ -218,9 +232,16 @@ export default function App() {
   const applySnapshot = useCallback((snapshot: SessionState | null) => {
     if (snapshot) {
       setPendingApprovals(snapshot.pending_approvals);
+      setPendingReconciliation(snapshot.pending_reconciliation ?? null);
       setSessionStatus(snapshot.status);
-      setInterrupted(snapshot.status === "interrupted");
-      setStatus(snapshot.status === "waiting_approval"
+      setInterrupted(
+        snapshot.status === "interrupted" || snapshot.status === "reconciliation_required",
+      );
+      setActiveRunId(snapshot.run_id ?? null);
+      if (snapshot.run_id) lastSeqByRun.current.set(snapshot.run_id, snapshot.last_seq ?? 0);
+      setStatus(snapshot.status === "reconciliation_required"
+        ? "写入结果待核对，可再次安全查询"
+        : snapshot.status === "waiting_approval"
         ? "待审批：请确认下方操作"
         : snapshot.status === "interrupted" ? "任务中断，可继续恢复"
         : snapshot.status === "running" ? "任务仍在执行，正在同步状态…" : "");
@@ -233,6 +254,8 @@ export default function App() {
     } else {
       setTurns([]);
       setPendingApprovals([]);
+      setPendingReconciliation(null);
+      setActiveRunId(null);
       setSessionStatus(null);
       setInterrupted(false);
       setStatus("");
@@ -277,6 +300,19 @@ export default function App() {
   }, [refreshSession]);
 
   useEffect(() => {
+    if (restoreState !== "ready" || !activeRunId || sessionStatus === "completed") return;
+    const controller = new AbortController();
+    void consumeEvents(streamRunEvents(
+      activeRunId, lastSeqByRun.current.get(activeRunId) ?? 0, controller.signal,
+    )).catch(error => {
+      if (!controller.signal.aborted) {
+        setError(error instanceof Error ? error.message : String(error));
+      }
+    });
+    return () => controller.abort();
+  }, [restoreState, activeRunId, sessionStatus, consumeEvents]);
+
+  useEffect(() => {
     if (restoreState !== "ready" || sessionStatus !== "running") return;
     // 周期同步状态；活跃连接期间跳过（流本身就是事实来源），断连后自动恢复同步
     const timer = window.setInterval(() => {
@@ -287,7 +323,8 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [restoreState, sessionStatus, refreshSession]);
 
-  const hasPending = sessionStatus === "waiting_approval" || pendingApprovals.length > 0 ||
+  const hasPending = sessionStatus === "waiting_approval" ||
+    sessionStatus === "reconciliation_required" || pendingApprovals.length > 0 ||
     turns.some(t => isAssistantTurn(t) &&
       Object.values(t.tools).some(tool => tool.approval && !tool.approvalResolved));
   const canSend = canSendMessage(restoreState, sessionStatus, pendingApprovals.length, busy);
@@ -347,6 +384,18 @@ export default function App() {
     }
   }, [busy, interrupted, consumeEvents]);
 
+  const cancelPending = useCallback(async () => {
+    setBusy(true);
+    setError("");
+    try {
+      applySnapshot(await cancelSession(sessionIdRef.current));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "取消失败");
+    } finally {
+      setBusy(false);
+    }
+  }, [applySnapshot]);
+
   const startNewSession = useCallback(() => {
     const sessionId = newSessionId();
     localStorage.setItem(SESSION_KEY, sessionId);
@@ -354,6 +403,8 @@ export default function App() {
     sessionIdRef.current = sessionId;
     setTurns([]);
     setPendingApprovals([]);
+    setPendingReconciliation(null);
+    setActiveRunId(null);
     setSessionStatus(null);
     setInterrupted(false);
     setError("");
@@ -477,7 +528,12 @@ export default function App() {
         )}
         {interrupted && (
           <button onClick={() => void continueInterrupted()} disabled={busy || restoreState === "loading"}>
-            继续恢复
+            {sessionStatus === "reconciliation_required" ? "再次核对" : "继续恢复"}
+          </button>
+        )}
+        {(pendingApprovals.length > 0 || pendingReconciliation) && (
+          <button onClick={() => void cancelPending()} disabled={busy}>
+            取消待处理操作
           </button>
         )}
         <textarea

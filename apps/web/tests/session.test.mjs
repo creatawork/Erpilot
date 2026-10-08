@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   applyTurnEvent,
+  acceptEventCursor,
   canSendMessage,
   hydrateTurns,
   isTerminalPhase,
@@ -16,11 +17,37 @@ test("message sending stays blocked until recovery succeeds and while server rep
   assert.equal(canSendMessage("loading", null, 0, false), false);
   assert.equal(canSendMessage("recovery_failed", null, 0, false), false);
   assert.equal(canSendMessage("ready", "waiting_approval", 0, false), false);
+  assert.equal(canSendMessage("ready", "reconciliation_required", 0, false), false);
   assert.equal(canSendMessage("ready", "running", 0, false), false);
   assert.equal(canSendMessage("ready", "interrupted", 0, false), false);
   assert.equal(canSendMessage("ready", "completed", 1, false), false);
   assert.equal(canSendMessage("new", null, 0, false), true);
   assert.equal(canSendMessage("ready", "completed", 0, false), true);
+});
+
+test("event replay de-duplicates by run id and sequence while leaving live events alone", () => {
+  const cursor = new Map([['r1', 5]]);
+  assert.equal(acceptEventCursor({event: "delta", data: {text: "old"}, run_id: "r1", seq: 5}, cursor), false);
+  assert.equal(acceptEventCursor({event: "delta", data: {text: "new"}, run_id: "r1", seq: 6}, cursor), true);
+  assert.equal(cursor.get("r1"), 6);
+  assert.equal(acceptEventCursor({event: "delta", data: {text: "live"}}, cursor), true);
+});
+
+test("unknown recovery snapshot stays pending and is not presented as failure or success", () => {
+  const turns = hydrateTurns({session_id: "s", status: "reconciliation_required", messages: [
+    {role: "user", content: "改库存"},
+    {role: "assistant", tool_calls: [
+      {id: "w", function: {name: "adjust_stock", arguments: '{"sku":"A","delta":1}'}},
+    ]},
+    {role: "tool", tool_call_id: "w", content: '{"error":{"code":"reconciliation_unavailable"}}'},
+  ], pending_approvals: [], pending_reconciliation: {
+    call_id: "w", client_token: "stable", code: "reconciliation_unavailable", message: "待核对",
+  }, tool_results: [{call_id: "w", name: "adjust_stock", ok: false,
+    content: '{"error":{"code":"reconciliation_unavailable"}}',
+    invocation_status: "unknown"}],
+  });
+  assert.equal(turns[1].phase, "reconciliation_required");
+  assert.equal(turns[1].tools.w.status, "unknown");
 });
 
 test("hydration pairs tool results and restores normalized pending arguments", () => {

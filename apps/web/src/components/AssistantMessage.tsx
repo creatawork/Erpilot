@@ -18,15 +18,19 @@ const STATUS_ICON: Record<ToolEntity["status"], string> = {
   succeeded: "✓",
   failed: "✗",
   denied: "⊘",
+  expired: "⌛",
+  cancelled: "↩",
   unknown: "?",
 };
 
 function ToolCard({
   entity,
+  now,
   submittingApprovals,
   onRespond,
 }: {
   entity: ToolEntity;
+  now: number;
   submittingApprovals: Set<string>;
   onRespond: (pendingId: string, approved: boolean) => void;
 }) {
@@ -43,6 +47,7 @@ function ToolCard({
       {entity.approval && !entity.approvalResolved && (
         <ApprovalActions
           pending={entity.approval}
+          now={now}
           submittingApprovals={submittingApprovals}
           onRespond={onRespond}
         />
@@ -63,37 +68,46 @@ function ToolCard({
 
 function isSettled(entity: ToolEntity): boolean {
   return entity.status === "succeeded" || entity.status === "failed" ||
-    entity.status === "denied" || entity.status === "unknown";
+    entity.status === "denied" || entity.status === "expired" ||
+    entity.status === "cancelled" || entity.status === "unknown";
 }
 
 function ApprovalActions({
   pending,
+  now,
   submittingApprovals,
   onRespond,
 }: {
   pending: ApprovalPendingPayload;
+  now: number;
   submittingApprovals: Set<string>;
   onRespond: (pendingId: string, approved: boolean) => void;
 }) {
+  const expired = pending.expires_at != null && Date.parse(pending.expires_at) <= now;
   return (
     <div className="approval">
       <span className="approval-label">
-        待审批 · 风险等级 {pending.risk}
+        {expired ? "审批已过期" : "待审批"} · 风险等级 {pending.risk}
       </span>
-      <button
-        className="approve"
-        disabled={submittingApprovals.has(pending.pending_id)}
-        onClick={() => onRespond(pending.pending_id, true)}
-      >
-        批准
-      </button>
-      <button
-        className="deny"
-        disabled={submittingApprovals.has(pending.pending_id)}
-        onClick={() => onRespond(pending.pending_id, false)}
-      >
-        拒绝
-      </button>
+      {expired ? (
+        <button className="deny" disabled={submittingApprovals.has(pending.pending_id)}
+          onClick={() => onRespond(pending.pending_id, false)}>
+          收口过期审批
+        </button>
+      ) : (
+        <>
+          <button
+            className="approve"
+            disabled={submittingApprovals.has(pending.pending_id)}
+            onClick={() => onRespond(pending.pending_id, true)}
+          >批准</button>
+          <button
+            className="deny"
+            disabled={submittingApprovals.has(pending.pending_id)}
+            onClick={() => onRespond(pending.pending_id, false)}
+          >拒绝</button>
+        </>
+      )}
     </div>
   );
 }
@@ -138,6 +152,7 @@ export function AssistantMessage({
           <ToolCard
             key={block.id}
             entity={turn.tools[block.callId] ?? fallbackToolEntity(block.callId)}
+            now={now}
             submittingApprovals={submittingApprovals}
             onRespond={onRespond}
           />
