@@ -28,10 +28,16 @@ def _child(tmp_path, config, *, expected):
         cwd=Path(__file__).resolve().parents[3],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=45,
         check=False,
     )
-    assert result.returncode == expected, result.stdout + result.stderr
+    detail = result.stdout + result.stderr
+    marker = Path(config["marker"])
+    if marker.exists():
+        detail += "\n" + marker.read_text(encoding="utf-8")
+    assert result.returncode == expected, detail
     return json.loads(Path(config["marker"]).read_text(encoding="utf-8"))
 
 
@@ -105,7 +111,7 @@ def _business_snapshot(db_path: Path, operation: str, arguments: dict):
         )
     ],
 )
-def test_r03_to_r06_hard_crash_matrix(
+async def test_r03_to_r06_hard_crash_matrix(
     tmp_path, isolated_postgres_url, operation, crash, exit_code, expected_calls
 ):
     db_path = tmp_path / "erp-isolated.sqlite"
@@ -148,7 +154,7 @@ def test_r03_to_r06_hard_crash_matrix(
     with Session(engine) as session:
         mutation_rows = list(session.scalars(select(MutationRequestRow)))
     engine.dispose()
-    assert len(mutation_rows) == 1
+    assert len(mutation_rows) == 1, recovered
     assert _business_snapshot(db_path, operation, arguments) != before
 
 
@@ -197,7 +203,7 @@ async def test_r01_process_exit_after_approval_checkpoint_before_display(
         checkpoint_pending = [i.value for task in snapshot.tasks for i in task.interrupts][0]
         assert checkpoint_pending["pending_id"] == pending["pending_id"]
         assert checkpoint_pending["arguments"] == pending["arguments"]
-        assert checkpoint_pending["approval_expires_at"] == pending["expires_at"]
+        assert checkpoint_pending["expires_at"] == pending["expires_at"]
     assert _business_snapshot(db_path, "adjust_stock", arguments) == before
     assert not calls.exists()
 

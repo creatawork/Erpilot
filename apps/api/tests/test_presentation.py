@@ -35,7 +35,8 @@ def test_presentation_events_roundtrip_dedup_and_prune(tmp_path) -> None:
     events = store.read_presentation_events("s1")
     assert [e["seq"] for e in events] == [1, 2, 3]
 
-    # 保留期清理
+    # 活动 run 的展示事件即使过期也保留；结束后才按保留期清理。
+    store.finish_run(run_id, [], "done")
     conn = sqlite3.connect(tmp_path / "runs.db")
     conn.execute("UPDATE presentation_event SET occurred_at = datetime('now', '-31 days')")
     conn.commit()

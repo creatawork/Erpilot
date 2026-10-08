@@ -62,7 +62,7 @@ async def _run(config: dict) -> None:
 
     async def handler(args: Params) -> object:
         count_handler()
-        engine = make_engine(config["erp_db"])
+        engine = make_engine(Path(config["erp_db"]))
         try:
             mutations = ErpMutations(engine)
             payload = args.model_dump(exclude_none=True)
@@ -151,6 +151,9 @@ async def _run(config: dict) -> None:
 def main() -> None:
     if sys.argv[1] == "smoke":
         os._exit(79)
+    # psycopg async rejects the Windows Proactor loop that asyncio.run() selects.
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     asyncio.run(_run(json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))))
 
 
