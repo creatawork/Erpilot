@@ -59,7 +59,8 @@ class RunStore:
                 );
                 CREATE UNIQUE INDEX IF NOT EXISTS one_active_run_per_session
                     ON run(session_id)
-                    WHERE status IN ('running', 'waiting_approval', 'recovering');
+                    WHERE status IN ('running', 'waiting_approval', 'recovering',
+                                     'reconciliation_required', 'unknown');
             """)
             # 展示事件表（设计 5.3）：UI 投影数据，不替代 LangGraph checkpoint，
             # 不参与写操作决策。event_id 供客户端去重；seq 在运行内单调递增。
@@ -78,6 +79,19 @@ class RunStore:
                 CREATE INDEX IF NOT EXISTS presentation_by_session
                     ON presentation_event(session_id, seq);
             """)
+            duplicate = conn.execute(
+                "SELECT run_id, seq FROM presentation_event "
+                "GROUP BY run_id, seq HAVING COUNT(*) > 1 LIMIT 1"
+            ).fetchone()
+            if duplicate:
+                raise SchemaVersionError(
+                    "duplicate historical presentation sequence "
+                    f"for run {duplicate['run_id']} at seq {duplicate['seq']}"
+                )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS presentation_by_run_seq "
+                "ON presentation_event(run_id, seq)"
+            )
             conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         self.prune_presentation()
 
@@ -161,7 +175,7 @@ class RunStore:
 
     def project_run(self, run_id: str, messages: list, status: str) -> None:
         """Display projection only; graph checkpoints remain the execution authority."""
-        if status not in ("running", "waiting_approval"):
+        if status not in ("running", "waiting_approval", "reconciliation_required", "unknown"):
             raise ValueError("unsupported projection status")
         with self._connect() as conn:
             conn.execute(
@@ -253,27 +267,44 @@ class RunStore:
     def append_presentation_events(self, events: list[dict[str, Any]]) -> None:
         """批量写入展示事件；event_id 冲突忽略（重放/恢复段去重靠它）。"""
         if not events:
-            return
-        rows = [
-            (
-                event["event_id"],
-                event["session_id"],
-                event["run_id"],
-                event["segment_id"],
-                event["seq"],
-                event["type"],
-                _json(event["payload"]),
-                PRESENTATION_SCHEMA_VERSION,
-            )
-            for event in events
-        ]
+            return 0
+        run_ids = {event["run_id"] for event in events}
+        if len(run_ids) != 1:
+            raise ValueError("one presentation batch must belong to one run")
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            ids = [event["event_id"] for event in events]
+            existing = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT event_id FROM presentation_event WHERE event_id IN ("
+                    + ",".join("?" for _ in ids)
+                    + ")",
+                    ids,
+                )
+            }
+            new_events = [event for event in events if event["event_id"] not in existing]
+            run_id = events[0]["run_id"]
+            current = conn.execute(
+                "SELECT COALESCE(MAX(seq), 0) FROM presentation_event WHERE run_id=?",
+                (run_id,),
+            ).fetchone()[0]
+            rows = [
+                (
+                    event["event_id"], event["session_id"], event["run_id"],
+                    event["segment_id"], current + index, event["type"],
+                    _json(event["payload"]), PRESENTATION_SCHEMA_VERSION,
+                )
+                for index, event in enumerate(new_events, start=1)
+            ]
             conn.executemany(
-                "INSERT OR IGNORE INTO presentation_event"
+                "INSERT INTO presentation_event"
                 "(event_id, session_id, run_id, segment_id, seq, type, payload, schema_version) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(event_id) DO NOTHING",
                 rows,
             )
+            return int(current) + len(new_events)
 
     def read_presentation_events(self, session_id: str) -> list[dict[str, Any]]:
         with self._connect() as conn:
@@ -295,12 +326,52 @@ class RunStore:
             for row in rows
         ]
 
+    def read_events(self, run_id: str, after_seq: int = 0) -> list[dict[str, Any]]:
+        if after_seq < 0:
+            raise ValueError("after_seq must be non-negative")
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT event_id, session_id, run_id, segment_id, seq, type, payload, occurred_at "
+                "FROM presentation_event WHERE run_id=? AND seq>? ORDER BY seq",
+                (run_id, after_seq),
+            ).fetchall()
+        return [
+            {
+                "event_id": row["event_id"],
+                "session_id": row["session_id"],
+                "run_id": row["run_id"],
+                "segment_id": row["segment_id"],
+                "seq": row["seq"],
+                "type": row["type"],
+                "payload": json.loads(row["payload"]),
+                "occurred_at": row["occurred_at"],
+            }
+            for row in rows
+        ]
+
+    def last_seq(self, run_id: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(seq), 0) FROM presentation_event WHERE run_id=?",
+                (run_id,),
+            ).fetchone()
+        return int(row[0])
+
+    def latest_run(self, session_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT run_id, status FROM run WHERE session_id=? ORDER BY rowid DESC LIMIT 1",
+                (session_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
     def prune_presentation(self, days: int = PRESENTATION_RETENTION_DAYS) -> None:
         """默认保留 30 天；历史 messages 仍可展示，展示日志只服务近期恢复。"""
         with self._connect() as conn:
             conn.execute(
-                "DELETE FROM presentation_event "
-                "WHERE occurred_at < datetime('now', ?)",
+        "DELETE FROM presentation_event WHERE occurred_at < datetime('now', ?) "
+                "AND run_id IN (SELECT run_id FROM run "
+                "WHERE status IN ('completed', 'failed', 'cancelled'))",
                 (f"-{days} days",),
             )
 
