@@ -1,0 +1,66 @@
+{
+  "report_version": 2,
+  "created_at": "2026-10-08",
+  "revision": "eaf2830",
+  "source_hash": "eaf2830",
+  "scope": "ADR-0010 R01-R10 hard-crash matrix and component coverage",
+  "result": "matrix_passed_adr_still_proposed",
+  "blocking_reason": "Full pytest still fails on an uncommitted eval assertion expecting scorer v2.1 while SCORER_VERSION is v2.4. ADR-0010 stays proposed pending review.",
+  "commands": [
+    {
+      "command": "uv run pytest apps/api/tests/test_process_recovery.py -q --junitxml=reports/acceptance/2026-10-08-process-recovery.xml",
+      "result": "passed",
+      "notes": "19 passed, 0 skipped, 371s. Isolated database erpilot_test, per-test schema, temporary ERP SQLite."
+    },
+    {
+      "command": "uv run pytest apps/api/tests/test_process_recovery.py apps/api/tests/test_api.py apps/api/tests/test_run_store.py -q",
+      "result": "passed",
+      "notes": "46 passed, 0 skipped."
+    },
+    {
+      "command": "uv run ruff check .",
+      "result": "passed"
+    },
+    {
+      "command": "npm test && npm run build",
+      "cwd": "apps/web",
+      "result": "passed",
+      "notes": "49 web tests and production build passed."
+    },
+    {
+      "command": "uv run pytest -q",
+      "result": "failed",
+      "notes": "test_presentation_events_roundtrip_dedup_and_prune failed because active-run events are retained; the test now finishes the run and a focused rerun passed. test_baseline_checkpoint_survives_later_setup_failure still expects scorer v2.1 against uncommitted v2.4."
+    }
+  ],
+  "cases": {
+    "R01": {"status": "passed", "evidence": "test_r01_process_exit_after_approval_checkpoint_before_display"},
+    "R02": {"status": "passed", "evidence": "test_r02_restart_does_not_extend_approval_expiry"},
+    "R03": {"status": "passed", "evidence": "test_r03_to_r06_hard_crash_matrix[*-after_approval_checkpoint-71-1]"},
+    "R04": {"status": "passed", "evidence": "test_r03_to_r06_hard_crash_matrix[*-before_commit-72-2]"},
+    "R05": {"status": "passed", "evidence": "test_r03_to_r06_hard_crash_matrix[*-after_commit-73-1]"},
+    "R06": {"status": "passed", "evidence": "test_r03_to_r06_hard_crash_matrix[*-before_final_answer-74-1]"},
+    "R07": {"status": "passed_component", "evidence": "API expiry, unknown pending, and cancel-without-write tests"},
+    "R08": {"status": "passed_component", "evidence": "test_cancel_during_active_approval_stream_returns_busy"},
+    "R09": {"status": "passed_component", "evidence": "graph reconciler conflict, lookup failure, and schema mismatch tests in the full pytest run"},
+    "R10": {"status": "passed_component", "evidence": "RunStore cursor replay, terminal-only prune, and web sequence de-duplication"}
+  },
+  "write_tools": ["create_order", "cancel_order", "adjust_stock", "set_product_status"],
+  "r03_r06_tool_matrix": {
+    "create_order": "passed in the 19-test process run",
+    "cancel_order": "passed in the 19-test process run",
+    "adjust_stock": "passed in the 19-test process run",
+    "set_product_status": "passed in the 19-test process run"
+  },
+  "isolated_databases": {
+    "postgres": "erpilot_test on local Docker; schema dropped after each test",
+    "erp_sqlite": "temporary per test",
+    "junit": "reports/acceptance/2026-10-08-process-recovery.xml"
+  },
+  "zero_tolerance_invariants": {
+    "unapproved_write": "R01/R02 leave the business snapshot unchanged and do not call the handler",
+    "duplicate_business_mutation": "each recovered scenario leaves exactly one MutationRequestRow",
+    "failure_reported_as_success": "expired approval is invocation_status expired; R04 crash snapshot matches the pre-crash snapshot"
+  },
+  "adr_status": "proposed"
+}

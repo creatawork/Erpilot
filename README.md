@@ -101,9 +101,7 @@ M1 各周验收入口：第 1–3 周为 `python -m agent_core`（最简演示�
 
 ## 下一阶段规划
 
-M6–8 的 LangGraph + PostgreSQL HITL 已实施。下一阶段按评测驱动迭代与
-prompt injection 防护推进；完整恢复协议仍是后续独立工作。见
-[总体规划](tasks/plan.md)、[任务清单](tasks/todo.md) 与 [ADR-0009](docs/adr/0009-langgraph-runtime.md)。
+M6–8 的 LangGraph + PostgreSQL HITL 已实施。基线验收见[2026-10-07 报告](reports/acceptance/2026-10-07-baseline.md)。崩溃恢复矩阵已在隔离 PostgreSQL 上通过，见[2026-10-08 报告](reports/acceptance/2026-10-08-crash-recovery.md)；[ADR-0010](docs/adr/0010-crash-recovery-reconciliation-scope.md) 仍待评审。其后是评测迭代、prompt injection 防护，以及对外部署前的认证与审计。历史恢复协议见 [tasks/plan.md](tasks/plan.md)，当前运行时边界见 [ADR-0009](docs/adr/0009-langgraph-runtime.md)。
 
 ## 路线图
 
@@ -117,8 +115,14 @@ prompt injection 防护推进；完整恢复协议仍是后续独立工作。见
 
 ## 文章与决策
 
-- 所有架构决策记录在 `docs/adr/`（0001–0009，含 LangGraph/PostgreSQL HITL），范围冻结与启动计划见 [`docs/agent-project-plan.md`](docs/agent-project-plan.md)
+- 所有架构决策记录在 `docs/adr/`（0001–0010，含 LangGraph/PostgreSQL HITL 与崩溃恢复范围），范围冻结与启动计划见 [`docs/agent-project-plan.md`](docs/agent-project-plan.md)
 - 评测集：人工标注标准 [`docs/eval-annotation-guide.md`](docs/eval-annotation-guide.md) + 工具卡 [`docs/tool-cards.md`](docs/tool-cards.md) + 错误自愈记录 [`docs/error-recovery-log.md`](docs/error-recovery-log.md)
 - 系列文章发布于个人站点 [Vie](https://vie-vibe.cn)，文稿随仓库维护：
   1. 《手写 Agent Loop：从一次 API 调用到多步任务》—— [`docs/articles/01-handwritten-agent-loop.md`](docs/articles/01-handwritten-agent-loop.md)
 - 撰写规则见 [`docs/articles/writing-rules.md`](docs/articles/writing-rules.md)（禁虚构、客观口吻、技术正确性、发布前核对清单）
+
+## 崩溃恢复与对账
+
+graph checkpoint 保存执行状态，ERP mutation token 记录业务提交结果，RunStore 只保存展示投影。契约见 [ADR-0010](docs/adr/0010-crash-recovery-reconciliation-scope.md)。2026-10-08 在隔离 PostgreSQL 上，R01–R06 硬崩溃矩阵 19/19 通过，四种写工具的提交窗口都有同次证据；R07–R10 由确定性组件测试覆盖。ADR 仍是提案、待评审。证据见[崩溃恢复验收报告](reports/acceptance/2026-10-08-crash-recovery.md)。
+
+硬崩溃验收需要显式配置隔离的 `ERPILOT_TEST_CHECKPOINT_DATABASE_URL`。测试为每个场景创建独立 PostgreSQL schema，并使用临时 ERP SQLite 库。多 API worker、分布式执行权和自动业务补偿不在本阶段支持范围内。
