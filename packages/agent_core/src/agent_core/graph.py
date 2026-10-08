@@ -153,6 +153,12 @@ def build_graph(
         if decision.pending_id != call["pending_id"]:
             raise ValueError("stale approval pending_id")
         outcome = decision.resolved_outcome
+        if outcome == "approved" and call.get("approval_expires_at"):
+            now = (clock or (lambda: datetime.now(UTC)))()
+            if now.tzinfo is None or now.utcoffset() is None:
+                raise ValueError("approval clock must include a timezone")
+            if now >= datetime.fromisoformat(call["approval_expires_at"]):
+                outcome = "expired"
         writer = get_stream_writer()
         writer(
             ApprovalResolved(
@@ -295,7 +301,7 @@ def build_graph(
             })
         )
         if decision.call_id != call["call_id"] or not decision.retry:
-            return {"recovery_required": True}
+            return {"recovery_required": False}
 
         tool = registry.get(call["name"])
         schema_version = tool_schema_version(tool) if tool else None
@@ -399,6 +405,10 @@ def build_graph(
                 ],
             ],
             "pending_calls": [],
+            "completed": any(
+                result.get("invocation_status") == "unknown"
+                for result in state["tool_results"]
+            ),
         }
 
     graph = StateGraph(AgentState)
@@ -425,7 +435,9 @@ def build_graph(
     graph.add_conditional_edges(
         "collect",
         lambda s: END
-        if s.get("recovery_required") or s["step"] >= config.max_steps
+        if s.get("recovery_required")
+        or any(result.get("invocation_status") == "unknown" for result in s["tool_results"])
+        or s["step"] >= config.max_steps
         else "model",
     )
     return graph.compile(checkpointer=checkpointer)

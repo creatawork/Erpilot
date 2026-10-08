@@ -404,6 +404,142 @@ async def test_closing_service_stream_preserves_checkpoint_and_releases_waiter(t
     assert state["pending_approvals"]
 
 
+async def test_expired_approval_returns_410_and_persists_expired_outcome(tmp_path):
+    from datetime import UTC, datetime, timedelta
+
+    from agent_core.events import ApprovalPending
+
+    now = [datetime(2026, 10, 8, 13, 0, tzinfo=UTC)]
+    gate = StreamApprovalGate()
+    app = create_app(
+        checkpointer=InMemorySaver(),
+        client_factory=lambda: make_client(_write_handler([])),
+        trace_dir=tmp_path,
+        tools=[guarded(_create_order_api, gate)],
+        approval_gate=gate,
+        approval_ttl_seconds=30,
+        clock=lambda: now[0],
+    )
+    service = app.state.service
+    stream = service.stream_run("expired-session", "write")
+    pending = None
+    async for event in stream:
+        if isinstance(event, ApprovalPending):
+            pending = event
+            break
+    assert pending is not None
+    await stream.aclose()
+    now[0] += timedelta(seconds=31)
+
+    transport = httpx2.ASGITransport(app=app)
+    async with httpx2.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/chat/approve/stream",
+            json={
+                "session_id": "expired-session",
+                "pending_id": pending.pending_id,
+                "approved": True,
+            },
+        )
+
+    assert response.status_code == 410
+    assert response.json()["error"]["code"] == "approval_expired"
+    state = await service.session_state("expired-session")
+    assert not state["pending_approvals"]
+    assert state["tool_results"][-1]["invocation_status"] == "expired"
+
+
+async def test_cancel_pending_approval_persists_cancelled_and_never_writes(tmp_path):
+    from agent_core.approval import ApprovalDecision
+    from agent_core.events import ApprovalPending
+
+    gate = StreamApprovalGate()
+    app = create_app(
+        checkpointer=InMemorySaver(),
+        client_factory=lambda: make_client(_write_handler([])),
+        trace_dir=tmp_path,
+        tools=[guarded(_create_order_api, gate)],
+        approval_gate=gate,
+    )
+    service = app.state.service
+    stream = service.stream_run("cancel-session", "write")
+    pending = None
+    async for event in stream:
+        if isinstance(event, ApprovalPending):
+            pending = event
+            break
+    assert pending is not None
+    await stream.aclose()
+
+    transport = httpx2.ASGITransport(app=app)
+    async with httpx2.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/api/sessions/cancel-session/cancel")
+    assert response.status_code == 200
+    state = response.json()
+
+    assert state["status"] == "completed"
+    assert not state["pending_approvals"]
+    assert state["tool_results"][-1]["approval_status"] == "cancelled"
+    assert state["tool_results"][-1]["invocation_status"] == "cancelled"
+    assert not service.respond_approval(pending.pending_id, ApprovalDecision(approved=True))
+    assert (await service.cancel_session("cancel-session"))["status"] == "completed"
+    async with httpx2.AsyncClient(transport=transport, base_url="http://test") as client:
+        late = await client.post(
+            "/api/chat/approve/stream",
+            json={
+                "session_id": "cancel-session",
+                "pending_id": pending.pending_id,
+                "approved": True,
+            },
+        )
+    assert late.status_code == 409
+
+
+async def test_cancel_during_active_approval_stream_returns_busy(tmp_path):
+    from agent_core.events import ApprovalPending
+
+    gate = StreamApprovalGate()
+    app = create_app(
+        checkpointer=InMemorySaver(),
+        client_factory=lambda: make_client(_write_handler([])),
+        trace_dir=tmp_path,
+        tools=[guarded(_create_order_api, gate)],
+        approval_gate=gate,
+    )
+    stream = app.state.service.stream_run("busy-cancel-session", "write")
+    async for event in stream:
+        if isinstance(event, ApprovalPending):
+            break
+    transport = httpx2.ASGITransport(app=app)
+    async with httpx2.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/api/sessions/busy-cancel-session/cancel")
+    await stream.aclose()
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "session_busy"
+
+
+async def test_run_event_cursor_replays_then_stops_for_completed_run(tmp_path):
+    requests: list[httpx2.Request] = []
+    app = _app(requests, tmp_path)
+    events = await _post_sse(app, {"message": "查订单 123"})
+    session_id = events[0][1]["session_id"]
+    state = await app.state.service.session_state(session_id)
+    run_id, last_seq = state["run_id"], state["last_seq"]
+
+    transport = httpx2.ASGITransport(app=app)
+    async with httpx2.AsyncClient(transport=transport, base_url="http://test") as client:
+        replay = await client.get(f"/api/runs/{run_id}/events?after_seq=0")
+        empty = await client.get(f"/api/runs/{run_id}/events?after_seq={last_seq}")
+        missing = await client.get("/api/runs/missing/events")
+        invalid = await client.get(f"/api/runs/{run_id}/events?after_seq=-1")
+
+    replay_ids = [int(line[4:]) for line in replay.text.splitlines() if line.startswith("id: ")]
+    assert replay_ids == list(range(1, last_seq + 1))
+    assert empty.text == ""
+    assert missing.status_code == 404
+    assert invalid.status_code == 422
+
+
 # ---- 阶段二：心跳与展示投影 ----
 
 

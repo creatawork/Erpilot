@@ -7,6 +7,7 @@ import time
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import aclosing
 from dataclasses import asdict
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -91,12 +92,13 @@ class _PresentationLogger:
                     {"id": cid, "name": name, "content": content, "ok": ok, "display": display},
                 )
             case ApprovalPending(
-                call_id=cid, pending_id=pid, tool=name, risk=risk, arguments=args
+                call_id=cid, pending_id=pid, tool=name, risk=risk, arguments=args,
+                expires_at=expires_at,
             ):
                 self._boundary(
                     "approval_pending",
                     {"call_id": cid, "pending_id": pid, "tool": name, "risk": risk,
-                     "arguments": args},
+                     "arguments": args, "expires_at": expires_at},
                 )
             case ReconciliationPending(call_id=cid, client_token=token, code=code, message=message):
                 self._boundary(
@@ -133,7 +135,7 @@ class _PresentationLogger:
             self._append("delta", {"text": "".join(self._delta)})
             self._delta = []
         if self._pending:
-            self._store.append_presentation_events(self._pending)
+            self._seq = self._store.append_presentation_events(self._pending)
             self._pending = []
         self._last_flush = time.monotonic()
 
@@ -165,7 +167,7 @@ class _PresentationLogger:
             force or len(self._pending) >= self._FLUSH_EVENTS
             or time.monotonic() - self._last_flush > self._FLUSH_SECONDS
         ):
-            self._store.append_presentation_events(self._pending)
+            self._seq = self._store.append_presentation_events(self._pending)
             self._pending = []
             self._last_flush = time.monotonic()
 
@@ -195,6 +197,8 @@ class ChatService:
         run_store: RunStore | None = None,
         checkpointer=None,
         mutation_reconciler=None,
+        approval_ttl_seconds=1800,
+        clock=None,
     ):
         self._client_factory = client_factory
         self._model, self._trace_dir = model, trace_dir
@@ -204,6 +208,7 @@ class ChatService:
             raise ValueError("write tools require approval runtime")
         self._run_store, self._checkpointer = run_store, checkpointer
         self._mutation_reconciler = mutation_reconciler
+        self._approval_ttl_seconds, self._clock = approval_ttl_seconds, clock
         self._sinks = _sinks_from_env()
         self._client = None
         self._locks: dict[str, asyncio.Lock] = {}
@@ -223,6 +228,8 @@ class ChatService:
             self._checkpointer,
             approval_enabled=self._approval_gate is not None,
             mutation_reconciler=self._mutation_reconciler,
+            approval_ttl_seconds=self._approval_ttl_seconds,
+            clock=self._clock,
         )
 
     def lock(self, session_id):
@@ -258,12 +265,18 @@ class ChatService:
                 "tool_results": [],
             }
         else:
-            pending = [i.value for task in snapshot.tasks for i in task.interrupts]
-            is_reconciliation = any(
-                p.get("kind") == "reconciliation_required" for p in pending
+            interrupts = [i.value for task in snapshot.tasks for i in task.interrupts]
+            pending = [p for p in interrupts if p.get("kind") != "reconciliation_required"]
+            reconciliation = next(
+                (p for p in interrupts if p.get("kind") == "reconciliation_required"), None
+            )
+            has_unknown = any(
+                item.get("invocation_status") == "unknown"
+                for item in snapshot.values.get("tool_history", [])
             )
             status = (
-                "reconciliation_required" if is_reconciliation
+                "reconciliation_required" if reconciliation
+                else "unknown" if has_unknown and not snapshot.next
                 else "waiting_approval"
                 if pending
                 else (
@@ -277,11 +290,18 @@ class ChatService:
                 "status": status,
                 "messages": snapshot.values["messages"],
                 "pending_approvals": pending,
+                "pending_reconciliation": reconciliation,
                 "tool_results": snapshot.values.get("tool_history", []),
             }
         presentation = self._presentation(session_id)
         if presentation is not None:
             state["presentation"] = presentation
+        if self._run_store is not None:
+            latest_run = self._run_store.latest_run(session_id)
+            if latest_run is not None:
+                state["run_id"] = latest_run["run_id"]
+                state["last_seq"] = self._run_store.last_seq(latest_run["run_id"])
+                state["run_status"] = latest_run["status"]
         return state
 
     def _presentation(self, session_id):
@@ -302,7 +322,6 @@ class ChatService:
             raise SessionError(409, "stale_approval", "审批已失效或不属于此会话")
 
     async def reserve_resume(self, session_id, pending_id):
-        await self.validate_resume(session_id, pending_id)
         lock = self.lock(session_id)
         if lock.locked():
             raise SessionError(409, "session_busy", "会话已有活动执行")
@@ -315,7 +334,92 @@ class ChatService:
                 released = True
                 lock.release()
 
+        try:
+            runtime = self._runtime()
+            snapshot = await runtime.get_state(thread_id_for_session(session_id))
+            pending = [
+                i.value for task in snapshot.tasks for i in task.interrupts
+                if i.value.get("kind") != "reconciliation_required"
+            ]
+            approval = next((p for p in pending if p.get("pending_id") == pending_id), None)
+            if approval is None:
+                raise SessionError(409, "stale_approval", "审批已失效或不属于此会话")
+            expires_at = approval.get("expires_at")
+            now = self._clock() if self._clock else datetime.now(UTC)
+            if expires_at and datetime.fromisoformat(expires_at) <= now:
+                messages = copy.deepcopy(snapshot.values["messages"])
+                async with aclosing(
+                    self._record_run(
+                        runtime,
+                        messages,
+                        session_id,
+                        None,
+                        decision={
+                            "pending_id": pending_id,
+                            "approved": False,
+                            "outcome": "expired",
+                            "reason": "审批已过期",
+                        },
+                    )
+                ) as events:
+                    async for _event in events:
+                        pass
+                raise SessionError(410, "approval_expired", "审批已过期，写操作未执行")
+        except BaseException:
+            release()
+            raise
+
         return release
+
+    async def cancel_session(self, session_id):
+        lock = self.lock(session_id)
+        if lock.locked():
+            raise SessionError(409, "session_busy", "会话已有活动执行，无法取消")
+        async with lock:
+            runtime = self._runtime()
+            thread = thread_id_for_session(session_id)
+            snapshot = await runtime.get_state(thread)
+            if not snapshot.values:
+                raise SessionError(404, "session_not_found", "会话不存在")
+            interrupts = [i.value for task in snapshot.tasks for i in task.interrupts]
+            reconciliation = next(
+                (p for p in interrupts if p.get("kind") == "reconciliation_required"), None
+            )
+            if reconciliation:
+                run_options = {
+                    "reconciliation_call_id": reconciliation["call_id"],
+                    "reconciliation_retry": False,
+                }
+            else:
+                approval = next(
+                    (p for p in interrupts if p.get("kind") != "reconciliation_required"), None
+                )
+                if approval is None:
+                    run_options = None
+                else:
+                    now = self._clock() if self._clock else datetime.now(UTC)
+                    expires_at = approval.get("expires_at")
+                    outcome = (
+                        "expired"
+                        if expires_at and datetime.fromisoformat(expires_at) <= now
+                        else "cancelled"
+                    )
+                    run_options = {
+                        "decision": {
+                            "pending_id": approval["pending_id"],
+                            "approved": False,
+                            "outcome": outcome,
+                            "reason": "审批已过期" if outcome == "expired" else "用户取消",
+                        },
+                    }
+            if run_options is not None:
+                messages = copy.deepcopy(snapshot.values["messages"])
+                async with aclosing(
+                    self._record_run(runtime, messages, session_id, None, **run_options)
+                ) as events:
+                    async for _event in events:
+                        pass
+        return await self.session_state(session_id)
 
     async def stream_run(self, session_id, message) -> AsyncIterator[AgentEvent]:
         async with self.lock(session_id):
@@ -383,14 +487,16 @@ class ChatService:
 
     async def _drive(
         self, runtime, messages, thread, decision=None, continuation=False,
-        reconciliation_call_id=None,
+        reconciliation_call_id=None, reconciliation_retry=True,
     ):
         if decision:
             stream = runtime.resume(thread, decision)
         elif continuation:
             stream = runtime.continue_run(thread)
         elif reconciliation_call_id:
-            stream = runtime.retry_reconciliation(thread, reconciliation_call_id)
+            stream = runtime.retry_reconciliation(
+                thread, reconciliation_call_id, retry=reconciliation_retry
+            )
         else:
             stream = runtime.stream(messages, thread_id=thread)
         while True:
@@ -421,7 +527,7 @@ class ChatService:
 
     async def _record_run(
         self, runtime, messages, session_id, message, *, decision=None, continuation=False,
-        reconciliation_call_id=None,
+        reconciliation_call_id=None, reconciliation_retry=True,
     ):
         thread = thread_id_for_session(session_id)
         self.last_trace = new_trace_path(self._trace_dir, self._model)
@@ -440,7 +546,8 @@ class ChatService:
                 run_id = self._run_store.resume_run(session_id)
         stream = recorder.record(
             self._drive(
-                runtime, messages, thread, decision, continuation, reconciliation_call_id
+                runtime, messages, thread, decision, continuation,
+                reconciliation_call_id, reconciliation_retry,
             ),
             messages,
         )

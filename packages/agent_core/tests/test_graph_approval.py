@@ -198,6 +198,39 @@ async def test_nonapproval_outcome_never_calls_write_handler(outcome):
     assert json.loads(tool_history["content"])["approval"] == outcome
 
 
+async def test_approval_received_after_persisted_expiry_is_expired_without_write():
+    received = []
+    moments = iter(
+        [
+            datetime(2026, 10, 8, 13, 0, tzinfo=UTC),
+            datetime(2026, 10, 8, 13, 2, tzinfo=UTC),
+        ]
+    )
+
+    async def handler(args):
+        received.append(args.model_dump())
+        return {"written": True}
+
+    graph = build_graph(
+        Client(),
+        [Tool("write", "write", WriteParams, handler, risk="confirm")],
+        LoopConfig(),
+        InMemorySaver(),
+        approval_enabled=True,
+        approval_ttl_seconds=60,
+        clock=lambda: next(moments),
+    )
+    config = {"configurable": {"thread_id": "approved-after-expiry"}}
+    pending = (await graph.ainvoke(initial_state([]), config))["__interrupt__"][0].value
+    result = await graph.ainvoke(
+        Command(resume={"pending_id": pending["pending_id"], "approved": True}), config
+    )
+
+    assert received == []
+    assert result["tool_history"][-1]["approval_status"] == "expired"
+    assert result["tool_history"][-1]["invocation_status"] == "expired"
+
+
 def test_approval_outcome_must_match_boolean_decision():
     with pytest.raises(ValidationError, match="outcome must match approved"):
         ResumeDecision.model_validate(

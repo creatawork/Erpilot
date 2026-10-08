@@ -19,6 +19,7 @@ class LangGraphRuntime:
     def __init__(
         self, client, tools=(), config=None, checkpointer=None, *,
         approval_enabled=False, mutation_reconciler=None,
+        approval_ttl_seconds=1800, clock=None,
     ):
         if checkpointer is None:
             raise ValueError("explicit checkpointer is required")
@@ -32,6 +33,8 @@ class LangGraphRuntime:
             client, list(tools), self._config, checkpointer,
             approval_enabled=approval_enabled,
             mutation_reconciler=mutation_reconciler,
+            approval_ttl_seconds=approval_ttl_seconds,
+            clock=clock,
         )
 
     def _checkpoint_config(self, thread_id):
@@ -63,7 +66,7 @@ class LangGraphRuntime:
             async for event in events:
                 yield event
 
-    async def retry_reconciliation(self, thread_id, call_id):
+    async def retry_reconciliation(self, thread_id, call_id, *, retry=True):
         snapshot = await self.get_state(thread_id)
         pending = [i.value for task in snapshot.tasks for i in task.interrupts]
         if not any(
@@ -72,10 +75,14 @@ class LangGraphRuntime:
         ):
             raise ValueError("unknown or stale reconciliation call_id")
         async with aclosing(
-            self._stream(Command(resume={"call_id": call_id, "retry": True}), thread_id)
+            self._stream(Command(resume={"call_id": call_id, "retry": retry}), thread_id)
         ) as events:
             async for event in events:
                 yield event
+
+    async def cancel_reconciliation(self, thread_id, call_id):
+        async for event in self.retry_reconciliation(thread_id, call_id, retry=False):
+            yield event
 
     async def continue_run(self, thread_id):
         """Continue a checkpointed node after a transient runtime interruption."""

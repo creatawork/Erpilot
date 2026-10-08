@@ -29,7 +29,7 @@ from agent_core.events import LoopEnd
 from agent_core.llm import DEFAULT_MODEL, LLMClient, LLMConfig
 from agent_core.prices import cost_of
 from agent_core.tools import Tool
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
@@ -94,6 +94,8 @@ def create_app(
     run_store_path: Path | None = None,
     checkpointer=None,
     mutation_reconciler=None,
+    approval_ttl_seconds: int | None = None,
+    clock=None,
 ) -> FastAPI:
     """应用工厂：测试注入 mock 的 LLMClient 工厂、临时 trace 目录与工具集。"""
     resolved_tools, env_gate = _resolve_tools(tools)
@@ -115,6 +117,12 @@ def create_app(
             run_store_path or (trace_dir / "runs.db" if trace_dir else Path("data/runs.db"))
         ),
         mutation_reconciler=mutation_reconciler,
+        approval_ttl_seconds=(
+            approval_ttl_seconds
+            if approval_ttl_seconds is not None
+            else int(os.environ.get("ERPILOT_APPROVAL_TTL_SECONDS", "1800"))
+        ),
+        clock=clock,
     )
 
     @asynccontextmanager
@@ -131,6 +139,7 @@ def create_app(
 
     app = FastAPI(title="Erpilot API", version="0.1.0", lifespan=lifespan)
     app.state.service = service
+    app.state.run_store = service._run_store
 
     @app.exception_handler(SessionError)
     async def session_error(request: Request, exc: SessionError):
@@ -179,6 +188,36 @@ def create_app(
     @app.post("/api/sessions/{session_id}/resume/stream")
     async def continue_interrupted_session(session_id: str) -> EventSourceResponse:
         return event_response(session_id, service.stream_retry(session_id))
+
+    @app.post("/api/sessions/{session_id}/cancel")
+    async def cancel_session(session_id: str) -> dict[str, Any]:
+        return await service.cancel_session(session_id)
+
+    @app.get("/api/runs/{run_id}/events")
+    async def run_events(run_id: str, after_seq: int = Query(default=0, ge=0)):
+        store = service._run_store
+        run = store.get_run(run_id) if store else None
+        if run is None:
+            raise SessionError(404, "run_not_found", "运行记录不存在")
+
+        async def replay_and_follow():
+            cursor = after_seq
+            while True:
+                for event in store.read_events(run_id, after_seq=cursor):
+                    cursor = event["seq"]
+                    frame = sse_frame(
+                        event["type"], {**event["payload"], "run_id": run_id}
+                    )
+                    frame["id"] = str(cursor)
+                    yield frame
+                current = store.get_run(run_id)
+                if current is None or current["status"] in {
+                    "completed", "failed", "cancelled"
+                }:
+                    return
+                await asyncio.sleep(0.25)
+
+        return EventSourceResponse(replay_and_follow())
 
     def event_response(session_id, stream, release=None):
         heartbeat_interval = float(os.environ.get("ERPILOT_HEARTBEAT_SECONDS", "10") or 10)
