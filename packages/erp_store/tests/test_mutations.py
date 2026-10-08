@@ -164,3 +164,62 @@ def test_set_product_status_reports_no_op_as_transition_error(store) -> None:
         mutations.set_product_status(sku, ProductStatus.OFF_SALE)
     assert exc.value.code == "invalid_transition"
     assert "无需变更" in exc.value.message
+
+
+def test_lookup_result_returns_original_result_for_each_mutation(store) -> None:
+    repo, mutations = store
+    sku, _stock = _on_sale_with_stock(repo, need=2)
+
+    order_args = {
+        "customer": "恢复核对客户",
+        "items": [{"sku": sku, "quantity": 1}],
+        "note": None,
+    }
+    order = mutations.create_order(
+        "恢复核对客户", [(sku, 1)], client_token="token-create"
+    )
+    cancel_args = {"order_id": order.order_id}
+    cancelled = mutations.cancel_order(order.order_id, client_token="token-cancel")
+    stock_args = {"sku": sku, "delta": 4}
+    stock_result = mutations.adjust_stock(sku, 4, client_token="token-stock")
+    status_args = {"sku": sku, "status": ProductStatus.OFF_SALE.value}
+    status_result = mutations.set_product_status(
+        sku, ProductStatus.OFF_SALE, client_token="token-status"
+    )
+
+    lookups = [
+        ("create_order", order_args, "token-create", order.model_dump(mode="json")),
+        (
+            "cancel_order",
+            cancel_args,
+            "token-cancel",
+            cancelled.model_dump(mode="json"),
+        ),
+        ("adjust_stock", stock_args, "token-stock", list(stock_result)),
+        ("set_product_status", status_args, "token-status", status_result),
+    ]
+    before_stock = repo.get_stock(sku).quantity
+    before_status = repo.get_product(sku).status
+    before_order = repo.get_order(order.order_id)
+
+    for tool_name, arguments, token, expected in lookups:
+        status, result = mutations.lookup_result(tool_name, arguments, token)
+        assert status == "found"
+        assert result == expected
+
+    assert repo.get_stock(sku).quantity == before_stock
+    assert repo.get_product(sku).status is before_status
+    assert repo.get_order(order.order_id) == before_order
+
+
+def test_lookup_result_distinguishes_absent_token_from_argument_conflict(store) -> None:
+    repo, mutations = store
+    sku, stock_before = _on_sale_with_stock(repo)
+    mutations.adjust_stock(sku, 3, client_token="token-bound-to-plus-three")
+    after_write = repo.get_stock(sku).quantity
+
+    assert mutations.lookup_result("adjust_stock", {"sku": sku, "delta": 9},
+                                   "token-never-seen") == ("absent", None)
+    assert mutations.lookup_result("adjust_stock", {"sku": sku, "delta": 9},
+                                   "token-bound-to-plus-three") == ("conflict", None)
+    assert repo.get_stock(sku).quantity == after_write == stock_before + 3

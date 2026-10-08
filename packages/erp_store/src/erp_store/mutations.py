@@ -15,7 +15,7 @@ import json
 from contextlib import contextmanager
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
@@ -41,6 +41,23 @@ class ErpMutations:
     def __init__(self, engine: Engine) -> None:
         self._engine = engine
 
+    def lookup_result(
+        self, tool_name: str, arguments: dict[str, object], client_token: str
+    ) -> tuple[str, object | None]:
+        """Read the first committed result for a token without changing ERP data."""
+        token = self._validate_token(client_token)
+        request = self._request_from_arguments(tool_name, arguments)
+        with Session(self._engine) as session:
+            connection = session.connection()
+            if not inspect(connection).has_table(MutationRequestRow.__tablename__):
+                return "absent", None
+            row = session.get(MutationRequestRow, token)
+        if row is None:
+            return "absent", None
+        if row.request != self._request_json(request):
+            return "conflict", None
+        return "found", json.loads(row.result)
+
     def create_order(
         self,
         customer: str,
@@ -54,24 +71,7 @@ class ErpMutations:
         items 为 (sku, quantity) 列表，同 SKU 自动合并数量；新订单从
         待付款起步（收款确认后走发货，本工具面不管收款）。
         """
-        if not customer.strip():
-            raise MutationError(
-                "invalid_argument", "客户名不能为空", "请提供下单客户的全名"
-            )
-        if not items:
-            raise MutationError(
-                "invalid_argument", "订单至少要有一行商品", "请提供 (SKU, 数量) 列表"
-            )
-        merged: dict[str, int] = {}
-        for sku, quantity in items:
-            if quantity < 1:
-                raise MutationError(
-                    "invalid_argument",
-                    f"商品 {sku} 的数量至少为 1（收到 {quantity}）",
-                )
-            merged[sku] = merged.get(sku, 0) + quantity
-
-        request = ["create_order", customer.strip(), sorted(merged.items()), note]
+        customer, merged, request = self._create_order_request(customer, items, note)
         with self._write_session() as s:
             prior = self._prior(s, client_token, request)
             if prior is not None:
@@ -141,7 +141,7 @@ class ErpMutations:
 
     def cancel_order(self, order_id: str, *, client_token: str | None = None) -> Order:
         """取消订单：仅待付款/待发货可取消（状态机），取消回补库存。"""
-        request = ["cancel_order", order_id]
+        request = self._cancel_order_request(order_id)
         with self._write_session() as s:
             prior = self._prior(s, client_token, request)
             if prior is not None:
@@ -175,9 +175,7 @@ class ErpMutations:
         self, sku: str, delta: int, *, client_token: str | None = None
     ) -> tuple[str, int]:
         """库存增减（delta 正入负出），返回 (sku, 调整后数量)。库存不为负。"""
-        if delta == 0:
-            raise MutationError("invalid_argument", "调整量不能为 0")
-        request = ["adjust_stock", sku, delta]
+        request = self._adjust_stock_request(sku, delta)
         with self._write_session() as s:
             prior = self._prior(s, client_token, request)
             if prior is not None:
@@ -212,7 +210,7 @@ class ErpMutations:
         self, sku: str, status: ProductStatus, *, client_token: str | None = None
     ) -> str:
         """商品上下架；目标状态与现状一致返回 invalid_transition。"""
-        request = ["set_product_status", sku, status.value]
+        request = self._set_product_status_request(sku, status)
         with self._write_session() as s:
             prior = self._prior(s, client_token, request)
             if prior is not None:
@@ -247,8 +245,7 @@ class ErpMutations:
     def _prior(self, session: Session, token: str | None, request: list):
         if token is None:
             return None
-        if not token.strip() or len(token) > 128:
-            raise MutationError("invalid_argument", "幂等键须为 1~128 个非空字符")
+        token = self._validate_token(token)
         row = session.get(MutationRequestRow, token)
         if row is None:
             return None
@@ -258,6 +255,76 @@ class ErpMutations:
                 "重试原请求须保留原参数；新操作请使用新的 client_token",
             )
         return json.loads(row.result)
+
+    @staticmethod
+    def _validate_token(token: str) -> str:
+        if not token.strip() or len(token) > 128:
+            raise MutationError("invalid_argument", "幂等键须为 1~128 个非空字符")
+        return token
+
+    @staticmethod
+    def _create_order_request(customer, items, note):
+        if not customer.strip():
+            raise MutationError(
+                "invalid_argument", "客户名不能为空", "请提供下单客户的全名"
+            )
+        if not items:
+            raise MutationError(
+                "invalid_argument", "订单至少要有一行商品", "请提供 (SKU, 数量) 列表"
+            )
+        merged: dict[str, int] = {}
+        for item in items:
+            if isinstance(item, dict):
+                sku, quantity = item["sku"], item["quantity"]
+            else:
+                sku, quantity = item
+            if quantity < 1:
+                raise MutationError(
+                    "invalid_argument",
+                    f"商品 {sku} 的数量至少为 1（收到 {quantity}）",
+                )
+            merged[sku] = merged.get(sku, 0) + quantity
+        normalized_customer = customer.strip()
+        request = ["create_order", normalized_customer, sorted(merged.items()), note]
+        return normalized_customer, merged, request
+
+    @staticmethod
+    def _cancel_order_request(order_id: str) -> list:
+        return ["cancel_order", order_id]
+
+    @staticmethod
+    def _adjust_stock_request(sku: str, delta: int) -> list:
+        if delta == 0:
+            raise MutationError("invalid_argument", "调整量不能为 0")
+        return ["adjust_stock", sku, delta]
+
+    @staticmethod
+    def _set_product_status_request(sku: str, status: ProductStatus | str) -> list:
+        if not isinstance(status, ProductStatus):
+            try:
+                status = ProductStatus(status)
+            except ValueError as exc:
+                raise MutationError("invalid_argument", f"无效商品状态：{status}") from exc
+        return ["set_product_status", sku, status.value]
+
+    @classmethod
+    def _request_from_arguments(
+        cls, tool_name: str, arguments: dict[str, object]
+    ) -> list:
+        if tool_name == "create_order":
+            _customer, _merged, request = cls._create_order_request(
+                arguments["customer"], arguments["items"], arguments.get("note")
+            )
+            return request
+        if tool_name == "cancel_order":
+            return cls._cancel_order_request(arguments["order_id"])
+        if tool_name == "adjust_stock":
+            return cls._adjust_stock_request(arguments["sku"], arguments["delta"])
+        if tool_name == "set_product_status":
+            return cls._set_product_status_request(
+                arguments["sku"], arguments["status"]
+            )
+        raise ValueError(f"unsupported mutation tool: {tool_name}")
 
     def _remember(self, session: Session, token: str | None, request: list, result) -> None:
         if token is not None:
