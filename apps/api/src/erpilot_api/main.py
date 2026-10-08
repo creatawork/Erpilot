@@ -37,6 +37,7 @@ from starlette.background import BackgroundTask
 
 from erpilot_api.checkpoint import open_checkpointer
 from erpilot_api.events import encode_event, sse_frame
+from erpilot_api.recovery import erp_mutation_reconciler
 from erpilot_api.run_store import RunStore
 from erpilot_api.service import ChatService, SessionError
 
@@ -92,9 +93,17 @@ def create_app(
     approval_gate: StreamApprovalGate | None = None,
     run_store_path: Path | None = None,
     checkpointer=None,
+    mutation_reconciler=None,
 ) -> FastAPI:
     """应用工厂：测试注入 mock 的 LLMClient 工厂、临时 trace 目录与工具集。"""
     resolved_tools, env_gate = _resolve_tools(tools)
+    if (
+        mutation_reconciler is None
+        and tools is None
+        and os.environ.get("ERPILOT_TOOLS", "").lower() == "mcp"
+        and os.environ.get("ERPILOT_WRITES", "").lower() in _WRITES_ENV
+    ):
+        mutation_reconciler = erp_mutation_reconciler()
     service = ChatService(
         client_factory=client_factory or (lambda: LLMClient(LLMConfig.from_env())),
         model=model,
@@ -105,6 +114,7 @@ def create_app(
         run_store=RunStore(
             run_store_path or (trace_dir / "runs.db" if trace_dir else Path("data/runs.db"))
         ),
+        mutation_reconciler=mutation_reconciler,
     )
 
     @asynccontextmanager

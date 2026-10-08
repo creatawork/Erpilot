@@ -13,7 +13,7 @@ from agent_core.events import ToolCallFinished
 from agent_core.graph_runtime import LangGraphRuntime
 from agent_core.testing import chunk, make_client, sse_response, tool_call_chunks
 from erp_store.db import OrderItemRow, OrderRow, init_db, make_engine
-from erp_store.models import OrderStatus
+from erp_store.models import OrderStatus, ProductStatus
 from erp_store.repository import ErpRepository
 from erp_store.seed import seed_database
 from langgraph.checkpoint.memory import InMemorySaver
@@ -246,6 +246,93 @@ async def test_default_server_excludes_write_tools(seeded_db) -> None:
         tools = {t.name for t in await client.list_tools()}
     assert tools == EXPECTED_TOOLS
     assert not (tools & WRITE_TOOLS)
+
+
+async def test_mutation_reconciler_returns_exact_adjust_stock_tool_result(tmp_path):
+    from erp_store.mutations import ErpMutations
+    from mcp_erp import build_mutation_reconciler
+
+    db = tmp_path / "reconcile.db"
+    seed_database(db, n_products=60, n_orders=80)
+    engine = make_engine(db)
+    repo = ErpRepository(engine)
+    sku = repo.list_products(limit=1)[0].sku
+    token = "reconcile-adjust-stock"
+    stored = ErpMutations(engine).adjust_stock(sku, 3, client_token=token)
+
+    reconciler = build_mutation_reconciler(db)
+    found = await reconciler.lookup("adjust_stock", {"sku": sku, "delta": 3}, token)
+    absent = await reconciler.lookup("adjust_stock", {"sku": sku, "delta": 3}, "absent")
+
+    assert found.status == "found"
+    assert found.result == {
+        "sku": stored[0],
+        "quantity": stored[1],
+        "note": "库存已调整（+3），当前数量见 quantity",
+    }
+    assert absent.status == "absent" and absent.result is None
+
+
+async def test_mutation_reconciler_maps_all_write_tool_results(tmp_path):
+    from erp_store.mutations import ErpMutations
+    from mcp_erp import build_mutation_reconciler
+
+    db = tmp_path / "all-write-results.db"
+    seed_database(db, n_products=60, n_orders=80)
+    engine = make_engine(db)
+    mutations = ErpMutations(engine)
+    repo = ErpRepository(engine)
+    sku = repo.list_products(limit=1)[0].sku
+    product = repo.get_product(sku)
+    assert product is not None
+    created = mutations.create_order(
+        "恢复验证客户", [(sku, 1)], client_token="reconcile-create-order"
+    )
+    cancel_target = repo.list_orders(status=OrderStatus.PENDING_PAYMENT, limit=1)[0]
+    cancelled = mutations.cancel_order(
+        cancel_target.order_id, client_token="reconcile-cancel-order"
+    )
+    stock = mutations.adjust_stock(sku, 4, client_token="reconcile-adjust-stock-all")
+    target_status = (
+        ProductStatus.OFF_SALE
+        if product.status == ProductStatus.ON_SALE
+        else ProductStatus.ON_SALE
+    )
+    changed_sku = mutations.set_product_status(
+        sku, target_status, client_token="reconcile-set-status"
+    )
+    reconciler = build_mutation_reconciler(db)
+
+    results = {
+        "create_order": await reconciler.lookup(
+            "create_order",
+            {"customer": "恢复验证客户", "items": [{"sku": sku, "quantity": 1}], "note": None},
+            "reconcile-create-order",
+        ),
+        "cancel_order": await reconciler.lookup(
+            "cancel_order", {"order_id": cancel_target.order_id}, "reconcile-cancel-order"
+        ),
+        "adjust_stock": await reconciler.lookup(
+            "adjust_stock", {"sku": sku, "delta": 4}, "reconcile-adjust-stock-all"
+        ),
+        "set_product_status": await reconciler.lookup(
+            "set_product_status", {"sku": sku, "status": target_status.value},
+            "reconcile-set-status",
+        ),
+    }
+
+    assert results["create_order"].result["order_id"] == created.order_id
+    assert results["create_order"].result["result_note"]
+    assert results["cancel_order"].result["order_id"] == cancelled.order_id
+    assert results["cancel_order"].result["result_note"]
+    assert results["adjust_stock"].result == {
+        "sku": stock[0], "quantity": stock[1],
+        "note": "库存已调整（+4），当前数量见 quantity",
+    }
+    assert results["set_product_status"].result == {
+        "sku": changed_sku, "status": target_status.value, "note": "商品状态已更新",
+    }
+    assert all(result.status == "found" for result in results.values())
 
 
 async def test_write_server_exposes_full_surface(seeded_db) -> None:

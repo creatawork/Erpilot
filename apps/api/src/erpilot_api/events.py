@@ -32,6 +32,7 @@ from agent_core.events import (
     ApprovalResolved,
     LoopEnd,
     ReasoningDelta,
+    ReconciliationPending,
     StepEnd,
     StepStarted,
     ToolCallFinished,
@@ -62,13 +63,26 @@ def encode_event(event: AgentEvent) -> tuple[str, dict[str, Any]] | None:
                 "ok": ok,
                 "display": display,
             }
-        case ApprovalPending(call_id=cid, pending_id=pid, tool=name, risk=risk, arguments=args):
+        case ApprovalPending(
+            call_id=cid, pending_id=pid, tool=name, risk=risk,
+            arguments=args, expires_at=expires_at,
+        ):
             return "approval_pending", {
                 "call_id": cid,
                 "pending_id": pid,
                 "tool": name,
                 "risk": risk,
                 "arguments": args,
+                **({"expires_at": expires_at} if expires_at is not None else {}),
+            }
+        case ReconciliationPending(
+            call_id=cid, client_token=token, code=code, message=message
+        ):
+            return "reconciliation_pending", {
+                "call_id": cid,
+                "client_token": token,
+                "code": code,
+                "message": message,
             }
         case ApprovalResolved(
             call_id=cid, pending_id=pid, tool=name, approved=approved, reason=reason

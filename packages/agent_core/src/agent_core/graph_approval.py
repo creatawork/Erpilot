@@ -33,3 +33,9 @@ def make_approval_payload(call):
         "arguments": deepcopy(call["arguments"]),
         "expires_at": call.get("approval_expires_at"),
     }
+
+
+class ReconciliationDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    call_id: str
+    retry: StrictBool

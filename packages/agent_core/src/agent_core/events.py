@@ -103,6 +103,16 @@ class ApprovalResolved:
     reason: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class ReconciliationPending:
+    """A write result is uncertain; user may retry a read-only token lookup."""
+
+    call_id: str
+    client_token: str
+    code: str
+    message: str
+
+
 AgentEvent = (
     TextDelta
     | ReasoningDelta
@@ -113,5 +123,6 @@ AgentEvent = (
     | ToolCallFinished
     | ApprovalPending
     | ApprovalResolved
+    | ReconciliationPending
     | LoopEnd
 )

@@ -7,7 +7,7 @@ from uuid import uuid4
 from langgraph.types import Command
 
 from agent_core.approval import ApprovalRequest
-from agent_core.events import ApprovalPending, LoopEnd
+from agent_core.events import ApprovalPending, LoopEnd, ReconciliationPending
 from agent_core.graph import build_graph
 from agent_core.graph_approval import ResumeDecision
 from agent_core.graph_state import initial_state
@@ -16,7 +16,10 @@ from agent_core.runtime_config import LoopConfig
 
 
 class LangGraphRuntime:
-    def __init__(self, client, tools=(), config=None, checkpointer=None, *, approval_enabled=False):
+    def __init__(
+        self, client, tools=(), config=None, checkpointer=None, *,
+        approval_enabled=False, mutation_reconciler=None,
+    ):
         if checkpointer is None:
             raise ValueError("explicit checkpointer is required")
         self._config = config or LoopConfig()
@@ -26,7 +29,9 @@ class LangGraphRuntime:
         )
         tools = [replace(t, handler=t.approved_handler) if t.approved_handler else t for t in tools]
         self.graph = build_graph(
-            client, list(tools), self._config, checkpointer, approval_enabled=approval_enabled
+            client, list(tools), self._config, checkpointer,
+            approval_enabled=approval_enabled,
+            mutation_reconciler=mutation_reconciler,
         )
 
     def _checkpoint_config(self, thread_id):
@@ -58,6 +63,20 @@ class LangGraphRuntime:
             async for event in events:
                 yield event
 
+    async def retry_reconciliation(self, thread_id, call_id):
+        snapshot = await self.get_state(thread_id)
+        pending = [i.value for task in snapshot.tasks for i in task.interrupts]
+        if not any(
+            p.get("kind") == "reconciliation_required" and p.get("call_id") == call_id
+            for p in pending
+        ):
+            raise ValueError("unknown or stale reconciliation call_id")
+        async with aclosing(
+            self._stream(Command(resume={"call_id": call_id, "retry": True}), thread_id)
+        ) as events:
+            async for event in events:
+                yield event
+
     async def continue_run(self, thread_id):
         """Continue a checkpointed node after a transient runtime interruption."""
         snapshot = await self.get_state(thread_id)
@@ -84,7 +103,13 @@ class LangGraphRuntime:
         pending = [i.value for task in snapshot.tasks for i in task.interrupts]
         if pending:
             for payload in pending:
-                yield ApprovalPending(**payload)
+                if payload.get("kind") == "reconciliation_required":
+                    yield ReconciliationPending(**{
+                        key: payload[key]
+                        for key in ("call_id", "client_token", "code", "message")
+                    })
+                else:
+                    yield ApprovalPending(**payload)
         elif not snapshot.next:
             state = snapshot.values
             yield LoopEnd(

@@ -12,7 +12,15 @@
 以 MCP 客户端消费，写入先过审批门；持久化幂等与 SQLite 写锁见 ADR-0007。
 """
 
-from mcp_erp.bridge import build_agent_tools, build_agent_tools_async
+from mcp_erp.bridge import (
+    ErpMutationReconciler,
+    build_agent_tools,
+    build_agent_tools_async,
+    build_mutation_reconciler,
+)
 from mcp_erp.server import create_server
 
-__all__ = ["build_agent_tools", "build_agent_tools_async", "create_server"]
+__all__ = [
+    "ErpMutationReconciler", "build_agent_tools", "build_agent_tools_async",
+    "build_mutation_reconciler", "create_server",
+]

@@ -29,7 +29,8 @@ from agent_core.approval import (
     guarded,
 )
 from agent_core.tools import Tool
-from erp_store.db import DEFAULT_DB
+from erp_store.db import DEFAULT_DB, make_engine
+from erp_store.mutations import ErpMutations
 from fastmcp import Client
 from fastmcp.client.client import CallToolResult
 from pydantic import BaseModel, Field, create_model
@@ -61,6 +62,51 @@ def build_agent_tools(
 ) -> list[Tool]:
     """同步入口（应用启动 / CLI main，不能在事件循环内调用）。"""
     return asyncio.run(build_agent_tools_async(db_path, writes=writes, approval_gate=approval_gate))
+
+
+class ErpMutationReconciler:
+    """Read mutation outcomes from the same ERP database used by MCP handlers."""
+
+    def __init__(self, db_path: Path | str = DEFAULT_DB):
+        self.db_path = Path(db_path)
+
+    async def lookup(self, tool_name: str, arguments: dict, client_token: str):
+        from agent_core.recovery import MutationLookup
+
+        def read():
+            engine = make_engine(self.db_path)
+            try:
+                return ErpMutations(engine).lookup_result(tool_name, arguments, client_token)
+            finally:
+                engine.dispose()
+
+        status, result = await asyncio.to_thread(read)
+        if status == "found":
+            result = _format_mutation_result(tool_name, arguments, result)
+        return MutationLookup(status, result)
+
+
+def build_mutation_reconciler(db_path: Path | str = DEFAULT_DB) -> ErpMutationReconciler:
+    return ErpMutationReconciler(db_path)
+
+
+def _format_mutation_result(tool_name: str, arguments: dict, result: Any) -> Any:
+    """Adapt stored domain results to the exact response shape returned by MCP tools."""
+    if tool_name == "create_order":
+        return {**result, "result_note": "订单已创建，当前状态「待付款」；金额按下单快照价"}
+    if tool_name == "cancel_order":
+        return {**result, "result_note": "订单已取消，库存已回补"}
+    if tool_name == "adjust_stock":
+        sku, quantity = result
+        delta = arguments["delta"]
+        return {
+            "sku": sku,
+            "quantity": quantity,
+            "note": f"库存已调整（{'+' if delta > 0 else ''}{delta}），当前数量见 quantity",
+        }
+    if tool_name == "set_product_status":
+        return {"sku": result, "status": arguments["status"], "note": "商品状态已更新"}
+    return result
 
 
 async def build_agent_tools_async(

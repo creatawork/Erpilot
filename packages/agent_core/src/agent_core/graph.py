@@ -24,10 +24,19 @@ from agent_core.events import (
 from agent_core.events import (
     ReasoningDelta as ReasoningDeltaEvent,
 )
-from agent_core.graph_approval import ResumeDecision, make_approval_payload
+from agent_core.graph_approval import (
+    ReconciliationDecision,
+    ResumeDecision,
+    make_approval_payload,
+)
 from agent_core.graph_helpers import assistant_toolcall_message, merge_usage
 from agent_core.graph_state import AgentState
-from agent_core.graph_tools import execute_tool_call, prepare_tool_calls
+from agent_core.graph_tools import (
+    call_arguments_fingerprint,
+    execute_tool_call,
+    prepare_tool_calls,
+    tool_schema_version,
+)
 from agent_core.llm import ReasoningDelta, StreamEnd, TextDelta, ToolCall, Usage
 
 
@@ -40,6 +49,7 @@ def build_graph(
     approval_enabled=False,
     approval_ttl_seconds=1800,
     clock=None,
+    mutation_reconciler=None,
 ):
     registry = {tool.name: tool for tool in tools}
     if len(registry) != len(tools):
@@ -154,12 +164,81 @@ def build_graph(
             )
         )
         if outcome == "approved":
-            writer(ToolExecuting(call["call_id"], call["name"]))
-            result = await execute_tool_call(call, registry, config)
-            result.update(
-                approval_status="approved",
-                invocation_status="succeeded" if result["ok"] else "failed",
-            )
+            result = None
+            recovery_required = False
+            if mutation_reconciler is not None:
+                tool = registry.get(call["name"])
+                current_schema = tool_schema_version(tool) if tool else None
+                current_fingerprint = (
+                    call_arguments_fingerprint(
+                        call["name"], current_schema, call["arguments"]
+                    )
+                    if current_schema
+                    else None
+                )
+                if (
+                    current_schema != call.get("tool_schema_version")
+                    or current_fingerprint != call.get("arguments_fingerprint")
+                ):
+                    result = _unknown_result(
+                        call, "checkpoint_incompatible", "工具参数或版本已变化"
+                    )
+                else:
+                    business_arguments = {
+                        key: value for key, value in call["arguments"].items()
+                        if key != "client_token"
+                    }
+                    try:
+                        lookup = await mutation_reconciler.lookup(
+                            call["name"], business_arguments, call["client_token"]
+                        )
+                    except Exception:
+                        lookup = None
+                    if lookup is None:
+                        result = _unknown_result(
+                            call, "reconciliation_unavailable", "业务结果暂时无法核对"
+                        )
+                    elif lookup.status == "conflict":
+                        result = _unknown_result(
+                            call, "idempotency_conflict", "幂等键已绑定其他请求"
+                        )
+                    elif lookup.status == "found":
+                        content = json.dumps(lookup.result, ensure_ascii=False, default=str)
+                        result = {
+                            **call,
+                            "ok": True,
+                            "content": content,
+                            "display": build_display(
+                                call["name"], call["arguments"], content, True
+                            ),
+                            "approval_status": "approved",
+                            "invocation_status": "succeeded",
+                        }
+                    elif lookup.status == "absent":
+                        writer(ToolExecuting(call["call_id"], call["name"]))
+                        result = await execute_tool_call(
+                            call, registry, config, allow_retries=False
+                        )
+                        if result["ok"]:
+                            result.update(
+                                approval_status="approved", invocation_status="succeeded"
+                            )
+                        else:
+                            result = _unknown_result(
+                                call, "mutation_result_unknown", "写入响应不确定，需再次核对"
+                            )
+                    else:
+                        result = _unknown_result(
+                            call, "reconciliation_unavailable", "对账器返回了无效状态"
+                        )
+            else:
+                writer(ToolExecuting(call["call_id"], call["name"]))
+                result = await execute_tool_call(call, registry, config)
+                result.update(
+                    approval_status="approved",
+                    invocation_status="succeeded" if result["ok"] else "failed",
+                )
+            recovery_required = result["invocation_status"] == "unknown"
         else:
             content = (
                 _denial_payload(ApprovalDecision(False, decision.reason))
@@ -183,7 +262,110 @@ def build_graph(
                 result.get("display"),
             )
         )
-        return {"tool_results": [*state["tool_results"], result]}
+        return {
+            "tool_results": [*state["tool_results"], result],
+            "recovery_required": recovery_required if outcome == "approved" else False,
+        }
+
+    def _unknown_result(call, code, message):
+        content = json.dumps(
+            {"error": {"code": code, "message": message}}, ensure_ascii=False
+        )
+        return {
+            **call,
+            "ok": False,
+            "content": content,
+            "display": build_display(call["name"], call["arguments"], content, False),
+            "approval_status": "approved",
+            "invocation_status": "unknown",
+        }
+
+    async def reconcile_unknown(state):
+        call = next(
+            result for result in state["tool_results"]
+            if result.get("invocation_status") == "unknown"
+        )
+        decision = ReconciliationDecision.model_validate(
+            interrupt({
+                "kind": "reconciliation_required",
+                "call_id": call["call_id"],
+                "client_token": call["client_token"],
+                "code": json.loads(call["content"])["error"]["code"],
+                "message": json.loads(call["content"])["error"]["message"],
+            })
+        )
+        if decision.call_id != call["call_id"] or not decision.retry:
+            return {"recovery_required": True}
+
+        tool = registry.get(call["name"])
+        schema_version = tool_schema_version(tool) if tool else None
+        if (
+            schema_version != call.get("tool_schema_version")
+            or call_arguments_fingerprint(call["name"], schema_version, call["arguments"])
+            != call.get("arguments_fingerprint")
+        ):
+            updated = _unknown_result(call, "checkpoint_incompatible", "工具参数或版本已变化")
+        else:
+            args = {
+                key: value for key, value in call["arguments"].items()
+                if key != "client_token"
+            }
+            try:
+                lookup = await mutation_reconciler.lookup(
+                    call["name"], args, call["client_token"]
+                )
+            except Exception:
+                lookup = None
+            if lookup is not None and lookup.status == "found":
+                content = json.dumps(lookup.result, ensure_ascii=False, default=str)
+                updated = {
+                    **call,
+                    "ok": True,
+                    "content": content,
+                    "display": build_display(call["name"], call["arguments"], content, True),
+                    "approval_status": "approved",
+                    "invocation_status": "succeeded",
+                }
+            elif lookup is not None and lookup.status == "absent":
+                writer = get_stream_writer()
+                writer(ToolExecuting(call["call_id"], call["name"]))
+                updated = await execute_tool_call(
+                    call, registry, config, allow_retries=False
+                )
+                updated.update(
+                    approval_status="approved",
+                    invocation_status="succeeded" if updated["ok"] else "unknown",
+                )
+                if not updated["ok"]:
+                    updated = _unknown_result(
+                        call, "mutation_result_unknown", "写入响应不确定，需再次核对"
+                    )
+            else:
+                code = (
+                    "idempotency_conflict"
+                    if lookup is not None and lookup.status == "conflict"
+                    else "reconciliation_unavailable"
+                )
+                message = (
+                    "幂等键已绑定其他请求"
+                    if code == "idempotency_conflict"
+                    else "业务结果暂时无法核对"
+                )
+                updated = _unknown_result(call, code, message)
+        results = [
+            updated if result["call_id"] == call["call_id"] else result
+            for result in state["tool_results"]
+        ]
+        get_stream_writer()(
+            ToolCallFinished(
+                updated["call_id"], updated["name"], updated["content"],
+                updated["ok"], updated.get("display"),
+            )
+        )
+        return {
+            "tool_results": results,
+            "recovery_required": updated["invocation_status"] == "unknown",
+        }
 
     def collect(state):
         results = {r["call_id"]: r for r in state["tool_results"]}
@@ -224,13 +406,26 @@ def build_graph(
     graph.add_node("prepare", prepare)
     graph.add_node("reads", reads)
     graph.add_node("write", write)
+    graph.add_node("reconcile_unknown", reconcile_unknown)
     graph.add_node("collect", collect)
     graph.add_edge(START, "model")
     graph.add_conditional_edges("model", lambda s: END if s["completed"] else "prepare")
     graph.add_edge("prepare", "reads")
     graph.add_conditional_edges("reads", lambda s: "write" if next_write(s) else "collect")
-    graph.add_conditional_edges("write", lambda s: "write" if next_write(s) else "collect")
     graph.add_conditional_edges(
-        "collect", lambda s: END if s["step"] >= config.max_steps else "model"
+        "write",
+        lambda s: "reconcile_unknown"
+        if s.get("recovery_required")
+        else ("write" if next_write(s) else "collect"),
+    )
+    graph.add_conditional_edges(
+        "reconcile_unknown",
+        lambda s: "reconcile_unknown" if s.get("recovery_required") else "collect",
+    )
+    graph.add_conditional_edges(
+        "collect",
+        lambda s: END
+        if s.get("recovery_required") or s["step"] >= config.max_steps
+        else "model",
     )
     return graph.compile(checkpointer=checkpointer)

@@ -17,6 +17,7 @@ from agent_core.events import (
     ApprovalPending,
     ApprovalResolved,
     LoopEnd,
+    ReconciliationPending,
     StepStarted,
     TextDelta,
     ToolCallFinished,
@@ -96,6 +97,11 @@ class _PresentationLogger:
                     "approval_pending",
                     {"call_id": cid, "pending_id": pid, "tool": name, "risk": risk,
                      "arguments": args},
+                )
+            case ReconciliationPending(call_id=cid, client_token=token, code=code, message=message):
+                self._boundary(
+                    "reconciliation_pending",
+                    {"call_id": cid, "client_token": token, "code": code, "message": message},
                 )
             case ApprovalResolved(
                 call_id=cid, pending_id=pid, tool=name, approved=approved, reason=reason
@@ -188,6 +194,7 @@ class ChatService:
         approval_gate: StreamApprovalGate | None = None,
         run_store: RunStore | None = None,
         checkpointer=None,
+        mutation_reconciler=None,
     ):
         self._client_factory = client_factory
         self._model, self._trace_dir = model, trace_dir
@@ -196,6 +203,7 @@ class ChatService:
         if any(t.risk is not None for t in tools) and approval_gate is None:
             raise ValueError("write tools require approval runtime")
         self._run_store, self._checkpointer = run_store, checkpointer
+        self._mutation_reconciler = mutation_reconciler
         self._sinks = _sinks_from_env()
         self._client = None
         self._locks: dict[str, asyncio.Lock] = {}
@@ -214,6 +222,7 @@ class ChatService:
             self._loop_config,
             self._checkpointer,
             approval_enabled=self._approval_gate is not None,
+            mutation_reconciler=self._mutation_reconciler,
         )
 
     def lock(self, session_id):
@@ -250,8 +259,12 @@ class ChatService:
             }
         else:
             pending = [i.value for task in snapshot.tasks for i in task.interrupts]
+            is_reconciliation = any(
+                p.get("kind") == "reconciliation_required" for p in pending
+            )
             status = (
-                "waiting_approval"
+                "reconciliation_required" if is_reconciliation
+                else "waiting_approval"
                 if pending
                 else (
                     "running"
@@ -339,6 +352,26 @@ class ChatService:
             snapshot = await runtime.get_state(thread)
             if not snapshot.next:
                 raise SessionError(409, "not_interrupted", "会话没有可继续的中断任务")
+            reconciliation = next(
+                (
+                    interrupt.value
+                    for task in snapshot.tasks
+                    for interrupt in task.interrupts
+                    if interrupt.value.get("kind") == "reconciliation_required"
+                ),
+                None,
+            )
+            if reconciliation:
+                messages = copy.deepcopy(snapshot.values["messages"])
+                async with aclosing(
+                    self._record_run(
+                        runtime, messages, session_id, None,
+                        reconciliation_call_id=reconciliation["call_id"],
+                    )
+                ) as events:
+                    async for event in events:
+                        yield event
+                return
             if any(task.interrupts for task in snapshot.tasks):
                 raise SessionError(409, "approval_required", "会话正在等待审批，请先提交审批决策")
             messages = copy.deepcopy(snapshot.values["messages"])
@@ -348,11 +381,16 @@ class ChatService:
                 async for event in events:
                     yield event
 
-    async def _drive(self, runtime, messages, thread, decision=None, continuation=False):
+    async def _drive(
+        self, runtime, messages, thread, decision=None, continuation=False,
+        reconciliation_call_id=None,
+    ):
         if decision:
             stream = runtime.resume(thread, decision)
         elif continuation:
             stream = runtime.continue_run(thread)
+        elif reconciliation_call_id:
+            stream = runtime.retry_reconciliation(thread, reconciliation_call_id)
         else:
             stream = runtime.stream(messages, thread_id=thread)
         while True:
@@ -382,7 +420,8 @@ class ChatService:
                     self._approval_gate.discard(pending.pending_id)
 
     async def _record_run(
-        self, runtime, messages, session_id, message, *, decision=None, continuation=False
+        self, runtime, messages, session_id, message, *, decision=None, continuation=False,
+        reconciliation_call_id=None,
     ):
         thread = thread_id_for_session(session_id)
         self.last_trace = new_trace_path(self._trace_dir, self._model)
@@ -395,10 +434,15 @@ class ChatService:
                 run_id = self._run_store.create_run(
                     session_id, message, messages[:-1], str(self.last_trace)
                 )
-            elif run_id is None and (decision is not None or continuation):
+            elif run_id is None and (
+                decision is not None or continuation or reconciliation_call_id
+            ):
                 run_id = self._run_store.resume_run(session_id)
         stream = recorder.record(
-            self._drive(runtime, messages, thread, decision, continuation), messages
+            self._drive(
+                runtime, messages, thread, decision, continuation, reconciliation_call_id
+            ),
+            messages,
         )
         finished = False
         plogger = (
@@ -415,10 +459,13 @@ class ChatService:
                 async for event in events:
                     if plogger is not None:
                         plogger.log(event)
-                    if isinstance(event, ApprovalPending) and run_id:
+                    if isinstance(event, (ApprovalPending, ReconciliationPending)) and run_id:
                         snapshot = await runtime.get_state(thread)
                         self._run_store.project_run(
-                            run_id, snapshot.values["messages"], "waiting_approval"
+                            run_id, snapshot.values["messages"],
+                            "reconciliation_required"
+                            if isinstance(event, ReconciliationPending)
+                            else "waiting_approval",
                         )
                     if isinstance(event, LoopEnd):
                         if run_id:
@@ -443,8 +490,13 @@ class ChatService:
             if run_id and not finished:
                 snapshot = await runtime.get_state(thread)
                 if any(task.interrupts for task in snapshot.tasks):
+                    reconciliation = any(
+                        i.value.get("kind") == "reconciliation_required"
+                        for task in snapshot.tasks for i in task.interrupts
+                    )
                     self._run_store.project_run(
-                        run_id, snapshot.values["messages"], "waiting_approval"
+                        run_id, snapshot.values["messages"],
+                        "reconciliation_required" if reconciliation else "waiting_approval",
                     )
                 else:
                     self._run_store.fail_run(run_id, "execution interrupted")

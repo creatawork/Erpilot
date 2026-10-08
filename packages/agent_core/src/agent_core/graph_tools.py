@@ -11,6 +11,29 @@ from agent_core.display import build_display
 from agent_core.graph_helpers import error_payload
 
 
+def tool_schema_version(tool):
+    schema_json = json.dumps(
+        tool.params_model.model_json_schema(),
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(schema_json.encode("utf-8")).hexdigest()
+
+
+def call_arguments_fingerprint(tool_name, schema_version, arguments):
+    business_arguments = {
+        key: value for key, value in arguments.items() if key != "client_token"
+    }
+    fingerprint_json = json.dumps(
+        [tool_name, schema_version, business_arguments],
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(fingerprint_json.encode("utf-8")).hexdigest()
+
+
 def prepare_tool_calls(calls, tools, *, now=None, approval_ttl_seconds=1800):
     now = now or datetime.now(UTC)
     if now.tzinfo is None or now.utcoffset() is None:
@@ -43,31 +66,12 @@ def prepare_tool_calls(calls, tools, *, now=None, approval_ttl_seconds=1800):
                     record["pending_id"] = uuid4().hex
                     if "client_token" in tool.params_model.model_fields:
                         record["arguments"]["client_token"] = token
-                    schema_json = json.dumps(
-                        tool.params_model.model_json_schema(),
-                        sort_keys=True,
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                    )
-                    schema_version = hashlib.sha256(
-                        schema_json.encode("utf-8")
-                    ).hexdigest()
-                    business_arguments = {
-                        key: value
-                        for key, value in record["arguments"].items()
-                        if key != "client_token"
-                    }
-                    fingerprint_json = json.dumps(
-                        [tool.name, schema_version, business_arguments],
-                        sort_keys=True,
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                    )
+                    schema_version = tool_schema_version(tool)
                     record.update(
                         tool_schema_version=schema_version,
-                        arguments_fingerprint=hashlib.sha256(
-                            fingerprint_json.encode("utf-8")
-                        ).hexdigest(),
+                        arguments_fingerprint=call_arguments_fingerprint(
+                            tool.name, schema_version, record["arguments"]
+                        ),
                         approval_created_at=now.isoformat(),
                         approval_expires_at=(
                             now + timedelta(seconds=approval_ttl_seconds)
@@ -83,12 +87,12 @@ def prepare_tool_calls(calls, tools, *, now=None, approval_ttl_seconds=1800):
     return prepared
 
 
-async def execute_tool_call(call, tools, config):
+async def execute_tool_call(call, tools, config, *, allow_retries=True):
     if "content" in call:
         return deepcopy(call)
     tool = tools[call["name"]]
     policy = config.retry
-    retries = policy.retries if tool.risk is None or tool.retry_safe else 0
+    retries = policy.retries if allow_retries and (tool.risk is None or tool.retry_safe) else 0
     content, ok = "", False
     for attempt in range(retries + 1):
         if attempt:
