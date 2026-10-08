@@ -49,6 +49,7 @@ async def test_runtime_resume_uses_fixed_pending_state():
     events = [e async for e in runtime.stream([], thread_id="pending")]
     pending = events[-1]
     assert isinstance(pending, ApprovalPending)
+    assert pending.expires_at
     assert not any(isinstance(e, LoopEnd) for e in events)
     resumed = [
         e

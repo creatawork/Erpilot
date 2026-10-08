@@ -1,15 +1,22 @@
 """Validate and execute calls without putting handlers in checkpoint state."""
 
 import asyncio
+import hashlib
 import json
 from copy import deepcopy
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from agent_core.display import build_display
 from agent_core.graph_helpers import error_payload
 
 
-def prepare_tool_calls(calls, tools):
+def prepare_tool_calls(calls, tools, *, now=None, approval_ttl_seconds=1800):
+    now = now or datetime.now(UTC)
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("approval clock must include a timezone")
+    if approval_ttl_seconds <= 0:
+        raise ValueError("approval TTL must be positive")
     prepared = []
     for call in calls:
         tool = tools.get(call.name)
@@ -36,6 +43,38 @@ def prepare_tool_calls(calls, tools):
                     record["pending_id"] = uuid4().hex
                     if "client_token" in tool.params_model.model_fields:
                         record["arguments"]["client_token"] = token
+                    schema_json = json.dumps(
+                        tool.params_model.model_json_schema(),
+                        sort_keys=True,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                    schema_version = hashlib.sha256(
+                        schema_json.encode("utf-8")
+                    ).hexdigest()
+                    business_arguments = {
+                        key: value
+                        for key, value in record["arguments"].items()
+                        if key != "client_token"
+                    }
+                    fingerprint_json = json.dumps(
+                        [tool.name, schema_version, business_arguments],
+                        sort_keys=True,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                    record.update(
+                        tool_schema_version=schema_version,
+                        arguments_fingerprint=hashlib.sha256(
+                            fingerprint_json.encode("utf-8")
+                        ).hexdigest(),
+                        approval_created_at=now.isoformat(),
+                        approval_expires_at=(
+                            now + timedelta(seconds=approval_ttl_seconds)
+                        ).isoformat(),
+                        approval_status="pending",
+                        invocation_status="waiting_approval",
+                    )
             except Exception as exc:
                 record.update(
                     content=error_payload("validation", f"参数校验失败：{exc}"), ok=False

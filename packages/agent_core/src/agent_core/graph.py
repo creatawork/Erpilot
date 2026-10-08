@@ -1,8 +1,10 @@
 """LangGraph orchestration using the existing OpenAI-compatible client."""
 
 import asyncio
+import json
 import time
 from dataclasses import asdict
+from datetime import UTC, datetime
 
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
@@ -29,7 +31,16 @@ from agent_core.graph_tools import execute_tool_call, prepare_tool_calls
 from agent_core.llm import ReasoningDelta, StreamEnd, TextDelta, ToolCall, Usage
 
 
-def build_graph(client, tools, config, checkpointer, *, approval_enabled=False):
+def build_graph(
+    client,
+    tools,
+    config,
+    checkpointer,
+    *,
+    approval_enabled=False,
+    approval_ttl_seconds=1800,
+    clock=None,
+):
     registry = {tool.name: tool for tool in tools}
     if len(registry) != len(tools):
         raise ValueError("工具重名")
@@ -84,7 +95,15 @@ def build_graph(client, tools, config, checkpointer, *, approval_enabled=False):
         writer = get_stream_writer()
         for call in calls:
             writer(ToolCallStarted(call))
-        return {"pending_calls": prepare_tool_calls(calls, registry)}
+        now = (clock or (lambda: datetime.now(UTC)))()
+        return {
+            "pending_calls": prepare_tool_calls(
+                calls,
+                registry,
+                now=now,
+                approval_ttl_seconds=approval_ttl_seconds,
+            )
+        }
 
     async def reads(state):
         writer = get_stream_writer()
@@ -123,26 +142,40 @@ def build_graph(client, tools, config, checkpointer, *, approval_enabled=False):
         decision = ResumeDecision.model_validate(interrupt(make_approval_payload(call)))
         if decision.pending_id != call["pending_id"]:
             raise ValueError("stale approval pending_id")
+        outcome = decision.resolved_outcome
         writer = get_stream_writer()
         writer(
             ApprovalResolved(
                 call["call_id"],
                 call["pending_id"],
                 call["name"],
-                decision.approved,
+                outcome == "approved",
                 decision.reason,
             )
         )
-        if decision.approved:
+        if outcome == "approved":
             writer(ToolExecuting(call["call_id"], call["name"]))
             result = await execute_tool_call(call, registry, config)
+            result.update(
+                approval_status="approved",
+                invocation_status="succeeded" if result["ok"] else "failed",
+            )
         else:
-            content = _denial_payload(ApprovalDecision(False, decision.reason))
+            content = (
+                _denial_payload(ApprovalDecision(False, decision.reason))
+                if outcome == "denied"
+                else json.dumps(
+                    {"approval": outcome, "reason": decision.reason},
+                    ensure_ascii=False,
+                )
+            )
             result = {
                 **call,
                 "ok": True,
                 "content": content,
                 "display": build_display(call["name"], call["arguments"], content, True),
+                "approval_status": outcome,
+                "invocation_status": outcome,
             }
         writer(
             ToolCallFinished(
@@ -177,6 +210,8 @@ def build_graph(client, tools, config, checkpointer, *, approval_enabled=False):
                         "content": result["content"],
                         "ok": result["ok"],
                         "display": result.get("display"),
+                        "approval_status": result.get("approval_status"),
+                        "invocation_status": result.get("invocation_status"),
                     }
                     for result in state["tool_results"]
                 ],

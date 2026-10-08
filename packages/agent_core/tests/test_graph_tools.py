@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import UTC, datetime, timedelta
 
 from agent_core.graph_tools import execute_tool_call, prepare_tool_calls
 from agent_core.llm import ToolCall
@@ -87,3 +88,61 @@ async def test_read_tools_fan_out_and_preserve_call_pairing():
         ("a", "1"),
         ("b", "2"),
     ]
+class WriteParams(BaseModel):
+    value: int
+    client_token: str | None = None
+
+
+def test_prepare_write_call_records_immutable_schema_and_approval_deadline():
+    now = datetime(2026, 10, 8, 12, 30, tzinfo=UTC)
+    calls = [ToolCall("call-1", "write", '{"value":7}')]
+    tools = {
+        "write": Tool(
+            "write", "write", WriteParams, lambda args: None, risk="confirm"
+        )
+    }
+
+    [prepared] = prepare_tool_calls(
+        calls, tools, now=now, approval_ttl_seconds=60
+    )
+
+    assert prepared["client_token"] == prepared["arguments"]["client_token"]
+    assert prepared["tool_schema_version"]
+    assert prepared["arguments_fingerprint"]
+    assert prepared["approval_created_at"] == now.isoformat()
+    assert prepared["approval_expires_at"] == (now + timedelta(seconds=60)).isoformat()
+    assert prepared["approval_status"] == "pending"
+    assert prepared["invocation_status"] == "waiting_approval"
+
+
+def test_prepare_write_rejects_naive_clock_and_nonpositive_ttl():
+    tools = {
+        "write": Tool(
+            "write", "write", WriteParams, lambda args: None, risk="confirm"
+        )
+    }
+    calls = [ToolCall("call-1", "write", '{"value":7}')]
+
+    try:
+        prepare_tool_calls(
+            calls,
+            tools,
+            now=datetime(2026, 10, 8),
+            approval_ttl_seconds=60,
+        )
+    except ValueError as exc:
+        assert "timezone" in str(exc)
+    else:
+        raise AssertionError("naive datetime must be rejected")
+
+    try:
+        prepare_tool_calls(
+            calls,
+            tools,
+            now=datetime(2026, 10, 8, tzinfo=UTC),
+            approval_ttl_seconds=0,
+        )
+    except ValueError as exc:
+        assert "positive" in str(exc)
+    else:
+        raise AssertionError("non-positive TTL must be rejected")
