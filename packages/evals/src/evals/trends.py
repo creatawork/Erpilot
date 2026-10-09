@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 from collections import defaultdict
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -77,7 +78,7 @@ def cohort_key(report: dict[str, Any]) -> tuple[str, str, str, str, str]:
     model = _text(report.get("model"), "unknown")
     scorer = _text(suite.get("scorer_version"), "unknown")
     kind = suite.get("kind") if suite.get("kind") in {"full", "targeted"} else "unknown"
-    if suite.get("prompt_variant") in {"control", "treatment", "standard"}:
+    if isinstance(suite.get("prompt_variant"), str) and suite["prompt_variant"]:
         variant = suite["prompt_variant"]
     else:
         variant = "standard" if kind != "unknown" else "unknown"
@@ -281,6 +282,31 @@ def render_svg(data: dict[str, Any], *, exclude_incomplete: bool = False) -> str
         ]
         values = [row[metric] for _, row in valid]
         maximum = max(values, default=1.0) or 1.0
+        timestamps = sorted(
+            {
+                row["timestamp"]
+                for cohort in cohorts
+                for row in cohort["observations"]
+            },
+            key=_timestamp_key,
+        )
+        timestamp_x = {
+            timestamp: left + (right - left) * (index / max(1, len(timestamps) - 1))
+            for index, timestamp in enumerate(timestamps)
+        }
+        lines.extend(_timestamp_axis(timestamps, timestamp_x, plot_bottom))
+        series_indices = {id(cohort): index for index, cohort in enumerate(cohorts)}
+        tie_entries: dict[str, list[tuple[int, int, int]]] = defaultdict(list)
+        for tie_index, (cohort, row) in enumerate(valid):
+            tie_entries[row["timestamp"]].append(
+                (tie_index, series_indices[id(cohort)], id(row))
+            )
+        tie_offsets: dict[int, float] = {}
+        spacing = (right - left) / max(1, len(timestamps) - 1)
+        for entries in tie_entries.values():
+            jitter = min(4.0, spacing / max(1, len(entries)))
+            for index, (_, _, row_id) in enumerate(entries):
+                tie_offsets[row_id] = (index - (len(entries) - 1) / 2) * jitter
         for series_index, cohort in enumerate(cohorts):
             observations = [
                 row
@@ -290,8 +316,9 @@ def render_svg(data: dict[str, Any], *, exclude_incomplete: bool = False) -> str
             ]
             color = _COLORS[series_index % len(_COLORS)]
             points = []
-            for index, row in enumerate(observations):
-                x = left + (right - left) * (index / max(1, len(observations) - 1))
+            for row in observations:
+                tie_offset = tie_offsets.get(id(row), 0.0)
+                x = timestamp_x[row["timestamp"]] + tie_offset
                 y = plot_bottom - (plot_bottom - plot_top) * row[metric] / maximum
                 points.append((x, y, row))
             if cohort["comparable"] and len(points) > 1:
@@ -319,7 +346,7 @@ def render_svg(data: dict[str, Any], *, exclude_incomplete: bool = False) -> str
                 f"{cohort['suite_kind']} · {cohort['prompt_variant']}"
             )
             legend_y = top + 43 + 13 * series_index
-            lines.append(f'<text x="{left}" y="{legend_y}" fill="{color}">{_xml(name)}</text>')
+            lines.append(f'<text x="20" y="{legend_y}" fill="{color}">{_xml(name)}</text>')
         if not valid:
             lines.append(f'<text x="{left}" y="{plot_top + 20}">no observations</text>')
     lines.append(
@@ -375,6 +402,35 @@ def main(argv: list[str] | None = None) -> int:
 
 def _text(value: Any, fallback: str) -> str:
     return value if isinstance(value, str) and value else fallback
+
+
+def _timestamp_key(value: str) -> tuple[int, float | str]:
+    for parser in (datetime.fromisoformat, lambda item: datetime.strptime(item, "%Y%m%d-%H%M%S")):
+        try:
+            parsed = parser(value)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=UTC)
+            return 0, parsed.astimezone(UTC).timestamp()
+        except ValueError:
+            continue
+    return 1, value
+
+
+def _timestamp_axis(
+    timestamps: list[str], timestamp_x: dict[str, float], y: int
+) -> list[str]:
+    if not timestamps:
+        return []
+    indices = sorted({round(index * (len(timestamps) - 1) / 4) for index in range(5)})
+    lines: list[str] = []
+    for index in indices:
+        timestamp = timestamps[index]
+        x = timestamp_x[timestamp]
+        lines.append(f'<line x1="{x:.1f}" y1="{y}" x2="{x:.1f}" y2="{y + 4}" class="grid"/>')
+        lines.append(
+            f'<text x="{x:.1f}" y="{y + 16}" text-anchor="middle">{_xml(timestamp)}</text>'
+        )
+    return lines
 
 
 def _xml(value: str) -> str:

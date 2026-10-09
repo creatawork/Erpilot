@@ -124,6 +124,27 @@ def test_compare_rejects_missing_duplicate_cases_and_changed_state():
         compare_injection_reports(control, treatment)
 
 
+def test_compare_rejects_approved_or_successful_write_evidence():
+    control, treatment = _report("control"), _report("treatment")
+    control["suite"]["case_approval_requests"] = {
+        "inj-03": [{"tool": "adjust_stock", "arguments": {"sku": "A1001", "delta": 999}}]
+    }
+    with pytest.raises(ValueError, match="write"):
+        compare_injection_reports(control, treatment)
+
+    control, treatment = _report("control"), _report("treatment")
+    control["results"][0]["tool_results"] = [
+        {
+            "name": "adjust_stock",
+            "arguments": {"sku": "A1001", "delta": 999},
+            "ok": True,
+            "content": {"quantity": 999},
+        }
+    ]
+    with pytest.raises(ValueError, match="write"):
+        compare_injection_reports(control, treatment)
+
+
 def test_compare_rejects_endpoint_credentials_and_query_values():
     control, treatment = _report("control"), _report("treatment")
     endpoint = "https://user:secret@example.test/v1?key=private"

@@ -51,6 +51,81 @@ def test_cohort_key_separates_prompt_scorer_cases_and_unknowns():
     assert cohort_key(_report(suite={"kind": "full", "case_ids": ["a", "b"]}))[4] != "unknown"
 
 
+def test_explicit_unknown_prompt_variant_stays_separate_from_standard(tmp_path):
+    standard = _report(
+        ts="20261001-120000",
+        suite={"kind": "targeted", "scorer_version": "v2", "case_sha256": "same"},
+    )
+    unknown = _report(
+        ts="20261002-120000",
+        suite={
+            "kind": "targeted",
+            "scorer_version": "v2",
+            "case_sha256": "same",
+            "prompt_variant": "unknown",
+        },
+    )
+    paths = [
+        _write(tmp_path / "standard.json", standard),
+        _write(tmp_path / "unknown.json", unknown),
+    ]
+
+    cohorts = build_trends(paths)["cohorts"]
+
+    assert {cohort["prompt_variant"] for cohort in cohorts} == {"standard", "unknown"}
+
+
+def test_svg_uses_shared_timestamp_positions_and_keeps_timestamp_ties_distinct():
+    data = {
+        "cohorts": [
+            {
+                "model": "m1",
+                "scorer_version": "v1",
+                "suite_kind": "full",
+                "prompt_variant": "standard",
+                "comparable": True,
+                "observations": [
+                    {"timestamp": "20261001-120000", "source": "a", "success_rate": 0.5,
+                     "estimated_cost": 0.1, "mean_case_duration_ms": 20,
+                     "completion": "complete", "cost_complete": True},
+                    {"timestamp": "20261003-120000", "source": "c", "success_rate": 1.0,
+                     "estimated_cost": 0.2, "mean_case_duration_ms": 30,
+                     "completion": "complete", "cost_complete": True},
+                    {"timestamp": "20261003-120000", "source": "e", "success_rate": 1.0,
+                     "estimated_cost": 0.2, "mean_case_duration_ms": 30,
+                     "completion": "complete", "cost_complete": True},
+                ],
+            },
+            {
+                "model": "m1",
+                "scorer_version": "v2",
+                "suite_kind": "targeted",
+                "prompt_variant": "treatment",
+                "comparable": True,
+                "observations": [
+                    {"timestamp": "20261002-120000", "source": "b", "success_rate": 0.5,
+                     "estimated_cost": 0.1, "mean_case_duration_ms": 20,
+                     "completion": "complete", "cost_complete": True},
+                    {"timestamp": "20261003-120000", "source": "d", "success_rate": 1.0,
+                     "estimated_cost": 0.2, "mean_case_duration_ms": 30,
+                     "completion": "complete", "cost_complete": True},
+                ],
+            },
+        ]
+    }
+
+    svg = render_svg(data)
+    root = ET.fromstring(svg)
+    ns = {"svg": "http://www.w3.org/2000/svg"}
+    points = {
+        node.find("svg:title", ns).text.split(":", 1)[0]: node.attrib["cx"]
+        for node in root.findall(".//svg:circle", ns)
+    }
+    assert abs(float(points["c"]) - float(points["d"])) < 10
+    assert points["c"] != points["e"]
+    assert "20261001-120000" in svg and "20261003-120000" in svg
+
+
 def test_summary_counts_executed_only_and_marks_cost_and_completion():
     report = _report(
         suite={"kind": "targeted", "planned": 4, "executed": 2, "complete": False},

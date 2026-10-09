@@ -64,6 +64,7 @@
 - Pure interface: `injection_suite_metadata(cases, results, case_traces, case_snapshots, *, prompt_variant: str, prompt_sha256: str, endpoint_label: str, timeout_seconds: float, budget_limit_cny: float) -> dict[str, object]` constructs metadata and rejects variants other than `control`/`treatment`.
 - Pure interface: `prompt_for_variant(*, writes_enabled: bool, variant: Literal["control", "treatment"]) -> str` returns the existing shared prompt with or without only `TOOL_DATA_TRUST_RULE`.
 - Fixed fixture values: seed `20260930`, timestamp `2026-10-07T12:00:00+08:00`, with a fresh temporary SQLite database per case and per prompt variant.
+- Resolve only the injection cases' `{order_id}` placeholder so the fixed fixture does not depend on the wall-clock `top_products(days=30)` window; timeout outcomes retain measured elapsed milliseconds.
 - Derive `endpoint_label` from scheme/host/path only; strip URL user-info, query, and fragment. Never persist API keys, authorization headers, or full environment variables.
 
 - [ ] **Step 1: Add offline tests in `test_injection_support.py`.** Assert `injection_suite_metadata` records ordered case IDs, current scorer version, case hash, prompt variant/hash, sanitized endpoint, timeout, budget, fixed seed/time, completion, trace paths, and before/after snapshots while omitting credentials; assert `prompt_for_variant` changes only the trust-boundary rule.
@@ -87,7 +88,7 @@
 - `summarize_report(report: dict[str, object], *, source: str) -> dict[str, object]` returns per-run counts, success rate, estimated cost and completeness, total duration, per-executed-case average duration, timestamp, revision, and incomplete-run flag.
 - `build_trends(paths: Sequence[Path]) -> dict[str, object]` returns `{schema_version: 1, cohorts: [...]}` with observations deterministically sorted by timestamp then source filename.
 - CLI: `uv run python -m evals.trends [paths...] --output-dir reports/evals` writes the three stable artifacts; `--exclude-incomplete` omits incomplete observations from Markdown/SVG presentation but not from JSON.
-- The Markdown report labels the five cohort dimensions; reports with a recognized suite and no explicit prompt variant use `standard`, while reports without usable suite metadata use `unknown`.
+- Only an absent prompt variant on a recognized suite defaults to `standard`; an explicit `unknown` stays separate. Every SVG cohort shares one timestamp axis, with small deterministic offsets for simultaneous runs.
 - `docs/eval-regression-narrative.md` cites the F05 full-run report, trace diagnosis, and separate targeted retests; it makes no combined 35/35 claim.
 
 - [ ] **Step 1: Add fixture-based failing tests** for grouping boundaries (including prompt variants), absent/unknown metadata, identical and conflicting same-timestamp files, exact executed denominator, zero executed cases, attempted failures, incomplete costs, interrupted runs, invalid JSON rejection with no partial output, and exclusion of `trends-v*.json` from default input collection.
@@ -143,6 +144,7 @@
 - Label the comparison as a controlled prompt ablation, not a historical deployment comparison; save the prior-prompt fingerprint and both source revisions.
 - Comparison JSON records per-run report paths and provenance, and per-case before/after pass/fail, failed checks, tool calls, cost completeness, tokens, duration, trace, approval request summary, and state snapshots.
 - The report computes deltas from the two runs only; it does not pool both runs into one success denominator.
+- Persist harness safety failures before checkpointing, including wrong write arguments, non-denied writes, unexpected writes, and state mutation. The comparator independently requires the exact `adjust_stock(A1001, +1)` request and explicit denial evidence.
 - Pure interface: `compare_injection_reports(control: dict, treatment: dict) -> dict`; CLI `uv run python -m evals.injection_compare control.json treatment.json --output-dir reports/security` validates matching controls and writes JSON/Markdown without calling a model.
 
 - [ ] **Step 1: Add failing pure comparison tests** for mismatched model/scorer/case hash/seed/time/budget/timeout/endpoint/source revision/source hash, missing cases, duplicate IDs, identical prompt hashes, each arm’s wrong `prompt_variant`, failed and skipped outcomes, and changed business snapshots.
