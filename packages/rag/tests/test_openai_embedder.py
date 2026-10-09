@@ -87,6 +87,17 @@ def test_embed_maps_and_reorders_by_index() -> None:
     assert client.embeddings.calls[0]["input"] == ["ab", "abcd"]
 
 
+def test_embed_splits_large_inputs_into_supported_batches() -> None:
+    client = _FakeClient()
+    embedder = OpenAIEmbedder(EmbedConfig(api_key="k"), client=client)
+    texts = ["x" * i for i in range(1, 12)]
+
+    vectors = embedder.embed(texts)
+
+    assert [len(call["input"]) for call in client.embeddings.calls] == [10, 1]
+    assert vectors == [[float(len(text)), float(i % 10)] for i, text in enumerate(texts)]
+
+
 def test_embed_empty_input_returns_empty() -> None:
     client = _FakeClient()
     embedder = OpenAIEmbedder(EmbedConfig(api_key="k"), client=client)

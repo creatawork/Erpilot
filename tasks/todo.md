@@ -13,10 +13,10 @@
 - [x] R01 / P0：新建业务无关检索引擎包 `packages/rag`——`chunk`（标题分块）+ `embed`（`Embedder` 协议 + 余弦）+ `index`（`PolicyIndex` 余弦 top-k + 阈值拒答 + JSON 持久化）。14 条离线单测（fake embedder，不烧 token）。
 - [x] R02 / P0：政策语料 3 份（价格/报价、订单/取消、退换货）固定入库 `packages/rag/.../policies/*.md`，折扣档位/状态机与 `erp_store` 口径一致；`corpus.load_corpus` 加载分块；真实嵌入器 `OpenAIEmbedder`（默认智谱 embedding-3，`EMBED_*` 可覆盖）+ 构建入口 `python -m rag build`。10 条离线单测（含语料规则校验、嵌入器 mock）。
 - [x] R03 / P0：`search_policy` 只读 MCP 工具接入 `mcp_erp`（返回片段 + source/title + score；空命中返回拒答提示；索引未built 返回 `policy_unavailable`）；`policy_resolver` 可注入贯穿 `create_server`/`bridge`；系统提示词补「先检索政策、依据片段作答注明来源、无命中如实拒答不臆造」。5 条测试（server 级 + 桥接端到端，fake embedder）。只读工具 16→17、写面 20→21，工具卡同步。
-- [ ] R04 / P0：评测新增 RAG 子集——命中 grounded 回答、语料外拒答、引用正确来源、注入片段不改写意图；单独统计。**依赖 R05 阈值校准**（否则可能因阈值而非模型失败）。
-- [ ] R05 / P1：`python -m rag build` 构建真实索引（消耗嵌入 token），用真实嵌入校准 `POLICY_SCORE_THRESHOLD`（现为占位 0.35）正/负例；存储/嵌入选型取舍写入报告或 README；留一次真实检索链路证据。
+- [x] R04 / P0：评测新增 RAG 子集——命中 grounded 回答、语料外拒答、引用正确来源、注入片段不改写意图；单独统计。**依赖 R05 阈值校准**（否则可能因阈值而非模型失败）。真实完整验收 5/5 通过，见 `reports/rag/20261009-150829-full-acceptance.md`。
+- [x] R05 / P1：`python -m rag build` 构建真实索引（消耗嵌入 token），用真实嵌入校准 `POLICY_SCORE_THRESHOLD`（现为 0.66）正/负例；存储/嵌入选型取舍写入报告或 README；留一次真实检索链路证据。校准 12 条（6 正、6 负），真实链路证据见 `reports/rag/20261009-150829-full-acceptance.md`。
 
-说明：R01–R03 纯离线完成并测试覆盖；R04/R05 需构建索引（嵌入 key + token）与真实链路，待 key。`search_policy` 在索引未构建时对模型返回 `policy_unavailable`（优雅降级），不影响现有链路启动。
+说明：R01–R05 已完成。2026-10-09 已配置百炼 DashScope `text-embedding-v4`，构建 18 个政策片段索引；为适配模型每批最多 10 条的限制，`OpenAIEmbedder` 已加分批提交，RAG 离线测试 25 条通过，真实校准及 RAG 完整链路验收 5/5 通过。详见[真实验收记录](../reports/rag/20261009-real-acceptance.md)。`search_policy` 在索引未构建时对模型返回 `policy_unavailable`（优雅降级），不影响现有链路启动。
 
 ## 批次 1 剩余（待各供应商真实 key，消耗 token）
 

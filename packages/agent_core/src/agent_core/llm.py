@@ -114,7 +114,7 @@ class StructuredResult[ModelT: BaseModel]:
 
 @dataclass(frozen=True, slots=True)
 class LLMConfig:
-    api_key: str
+    api_key: str = field(repr=False)
     model: str = DEFAULT_MODEL
     base_url: str = DEFAULT_BASE_URL
     # 思考展示是配置能力，默认关闭：确认端点/模型确实回 reasoning_content 后再开启

@@ -40,8 +40,8 @@ _ORDER_STATUS_HELP = " / ".join(s.value for s in OrderStatus)
 _PRODUCT_STATUS_HELP = " / ".join(s.value for s in ProductStatus)
 
 # 政策检索命中阈值（余弦相似度）：低于则视为语料未覆盖 → 拒答。
-# 占位默认值，待 R05 用真实嵌入校准正/负例后调整。
-POLICY_SCORE_THRESHOLD = 0.35
+# 由 2026-10-09 DashScope text-embedding-v4 正/负例实测校准；详细分数见 RAG 验收报告。
+POLICY_SCORE_THRESHOLD = 0.66
 
 PolicyResolver = Callable[[], tuple[PolicyIndex, Embedder]]
 

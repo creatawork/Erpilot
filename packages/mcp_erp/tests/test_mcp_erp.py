@@ -621,6 +621,30 @@ async def test_search_policy_refuses_out_of_corpus(seeded_db) -> None:
     assert "臆造" in result.data["note"]
 
 
+def _borderline_policy_resolver():
+    from rag.chunk import Chunk
+    from rag.index import PolicyIndex
+
+    class Embedder:
+        def embed(self, texts: list[str]) -> list[list[float]]:
+            return [[0.5, 0.8660254] for _ in texts]
+
+    index = PolicyIndex(
+        [Chunk(source="policy.md", title="Policy", text="stored policy")],
+        [[1.0, 0.0]],
+    )
+    return index, Embedder()
+
+
+async def test_search_policy_refuses_below_calibrated_threshold(seeded_db) -> None:
+    from fastmcp import Client
+
+    server = create_server(seeded_db, policy_resolver=_borderline_policy_resolver)
+    async with Client(server) as client:
+        result = await client.call_tool("search_policy", {"query": "borderline query"})
+    assert result.data["matches"] == []
+
+
 async def test_search_policy_empty_query_is_invalid(seeded_db) -> None:
     from fastmcp import Client
 

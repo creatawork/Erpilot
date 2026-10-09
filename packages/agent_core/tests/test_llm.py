@@ -288,6 +288,12 @@ def test_from_env_defaults_to_zhipu(monkeypatch) -> None:
     )
 
 
+def test_llm_config_repr_hides_api_key() -> None:
+    config = LLMConfig(api_key="private-test-key")
+
+    assert "private-test-key" not in repr(config)
+
+
 def test_from_env_deepseek_profile(monkeypatch) -> None:
     _clear_llm_env(monkeypatch)
     monkeypatch.setenv("LLM_PROVIDER", "deepseek")

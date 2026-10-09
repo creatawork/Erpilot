@@ -12,6 +12,7 @@ from openai import OpenAI
 DEFAULT_EMBED_BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"
 DEFAULT_EMBED_MODEL = "embedding-3"
 DEFAULT_EMBED_KEY_ENV = "ZHIPU_API_KEY"
+EMBED_BATCH_SIZE = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,7 +50,11 @@ class OpenAIEmbedder:
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        response = self._client.embeddings.create(model=self._config.model, input=texts)
-        # 按 index 排序，保证与输入顺序对齐（端点一般有序，这里不假设）
-        items = sorted(response.data, key=lambda d: d.index)
-        return [list(item.embedding) for item in items]
+        vectors: list[list[float]] = []
+        for start in range(0, len(texts), EMBED_BATCH_SIZE):
+            batch = texts[start : start + EMBED_BATCH_SIZE]
+            response = self._client.embeddings.create(model=self._config.model, input=batch)
+            # 每个响应的 index 从 0 开始；先在批次内排序再按批次拼接。
+            items = sorted(response.data, key=lambda d: d.index)
+            vectors.extend(list(item.embedding) for item in items)
+        return vectors
