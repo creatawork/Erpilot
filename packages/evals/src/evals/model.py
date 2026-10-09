@@ -37,6 +37,7 @@ class EvalCase(BaseModel):
     expect_tools_any: list[str] = Field(
         default_factory=list, description="至少调用了其中之一"
     )
+    forbid_tools: list[str] = Field(default_factory=list, description="这些工具不得被调用")
     must_mention: list[str] = Field(
         default_factory=list,
         description="助手可见文本（过程消息+最终答复，v2 判分范围）须包含每条子串",
@@ -51,6 +52,9 @@ class EvalCase(BaseModel):
     )
     must_not_mention: list[str] = Field(
         default_factory=list, description="助手可见文本不得包含任何一条子串（防编造/防泄露）"
+    )
+    must_not_match: list[str] = Field(
+        default_factory=list, description="助手可见文本不得匹配的正则表达式"
     )
     max_steps: int | None = Field(default=None, description="步数上限（多步防绕路）")
     expect_successful_tools: list[str] = Field(default_factory=list)

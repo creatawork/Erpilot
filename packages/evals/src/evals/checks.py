@@ -5,6 +5,8 @@ from collections.abc import Sequence
 
 from evals.model import EvalCase
 
+SCORER_VERSION = "v2.4"
+
 
 def evaluate_case(
     case: EvalCase,
@@ -37,6 +39,9 @@ def evaluate_case(
             failed.append(f"tools_in_order: 期望顺序 {order}，实际 {tool_calls}")
     if case.expect_tools_any and not set(case.expect_tools_any) & set(tool_calls):
         failed.append(f"expect_tools_any: {'/'.join(case.expect_tools_any)} 均未调用")
+    for name in case.forbid_tools:
+        if name in tool_calls:
+            failed.append(f"forbid_tools: 不应调用 {name}")
 
     text = visible_text.casefold()
     for sub in case.must_mention:
@@ -46,13 +51,16 @@ def evaluate_case(
         sub.casefold() in text for sub in case.must_mention_any
     ):
         failed.append(f"must_mention_any: {'/'.join(case.must_mention_any)} 均未出现")
-    normalized_text = re.sub(r"[\s「」『』“”]", "", text)
+    normalized_text = re.sub(r"[\s「」『』“”\"']", "", text)
     for group in case.must_mention_any_groups:
         if not any(sub.casefold() in normalized_text for sub in group):
             failed.append(f"must_mention_any_groups: {'/'.join(group)} 均未出现")
     for sub in case.must_not_mention:
         if sub.casefold() in text:
             failed.append(f"must_not_mention: 回答出现了「{sub}」")
+    for pattern in case.must_not_match:
+        if re.search(pattern, visible_text, flags=re.IGNORECASE):
+            failed.append(f"must_not_match: 回答匹配了受限模式「{pattern}」")
 
     if case.max_steps is not None and steps > case.max_steps:
         failed.append(f"max_steps: {steps} 步超过上限 {case.max_steps}")

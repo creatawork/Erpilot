@@ -10,7 +10,12 @@ import re
 import pytest
 from evals.cases import ALL_CASES
 from evals.model import CaseCategory
-from evals.write_cases import WRITE_CASES, WRITE_ERROR_CASES
+from evals.write_cases import (
+    WRITE_CASES,
+    WRITE_ERROR_CASES,
+    WRITE_INJECTED_ERROR_CASES,
+    WRITE_PREFLIGHT_CASES,
+)
 
 _ID_RE = re.compile(r"^(single|multi|edge|adv)-\d{2}$")
 _PLACEHOLDER_RE = re.compile(r"\{([a-z_]+)\}")
@@ -46,8 +51,11 @@ def test_every_case_has_at_least_one_check() -> None:
             or c.must_mention_any
             or c.must_mention_any_groups
             or c.must_not_mention
+            or c.must_not_match
         )
         assert has_check, f"{c.id}: 没有任何检查项，写不出可复核检查项的场景不收（标注标准 §1）"
+        for pattern in c.must_not_match:
+            re.compile(pattern)
 
 
 def test_referenced_tools_exist(resolved, tools) -> None:
@@ -159,6 +167,39 @@ def test_write_error_cases_expect_zero_business_change() -> None:
             f"{c.id}: 业务失败场景必须期望业务四表零变更（标注标准 §7.2）"
         )
         assert c.expect_error_codes, f"{c.id}: 必须实际观测业务错误码"
+
+
+def test_zero_stock_preflight_and_injected_error_are_separate_observations() -> None:
+    preflight = WRITE_PREFLIGHT_CASES[0]
+    injected = WRITE_INJECTED_ERROR_CASES[0]
+    assert preflight.id != injected.id
+    assert not preflight.expect_error_codes
+    assert set(preflight.forbid_tools) == {
+        "adjust_stock", "create_order", "cancel_order", "set_product_status"
+    }
+    assert injected.expect_error_codes == ["insufficient_stock"]
+    assert injected.expect_tools_all == ["adjust_stock", "get_stock"]
+    for case in (preflight, injected):
+        assert case.state is not None and case.state.kind == "unchanged"
+
+
+def test_write_recovery_cases_follow_annotation_rules(resolved, write_tools) -> None:
+    cases = [*WRITE_PREFLIGHT_CASES, *WRITE_INJECTED_ERROR_CASES]
+    existing_ids = {c.id for c in ALL_CASES} | {c.id for c in WRITE_CASES} | {
+        c.id for c in WRITE_ERROR_CASES
+    }
+    tool_names = {tool.name for tool in write_tools}
+    for c in cases:
+        assert _ID_RE.match(c.id)
+        assert c.id not in existing_ids
+        assert c.id.startswith("adv-")
+        assert c.points.strip()
+        assert c.state is not None and c.state.kind == "unchanged"
+        assert set(c.forbid_tools) <= tool_names
+        assert set(c.expect_tools_all) | set(c.expect_tools_any) <= tool_names
+        texts = [c.question, *c.must_mention, *c.must_mention_any, *c.must_not_mention]
+        texts.extend(item for group in c.must_mention_any_groups for item in group)
+        assert set(_PLACEHOLDER_RE.findall(" ".join(texts))) <= set(resolved)
 
 
 def test_write_error_scenarios_trigger_on_seed(seeded_db, resolved) -> None:

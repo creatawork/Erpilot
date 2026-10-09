@@ -14,6 +14,7 @@
 
 import os
 import time
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -26,9 +27,10 @@ from agent_core.observability import langfuse_sink_from_env
 from erp_store.db import make_engine
 from erp_store.repository import ErpRepository
 from erp_store.seed import seed_database
+from evals.approval_policy import ScriptedPolicyGate
 from evals.report import write_report
-from evals.write_cases import WRITE_CASES
-from mcp_erp import build_agent_tools
+from evals.write_cases import WRITE_CASES, WRITE_INJECTED_ERROR_CASES, WRITE_PREFLIGHT_CASES
+from mcp_erp import build_agent_tools, build_agent_tools_async
 
 if (dotenv := find_dotenv(Path(__file__).resolve())) is not None:
     load_dotenv(dotenv)
@@ -125,4 +127,97 @@ async def test_write_case(
     assert result.passed, (
         f"{result.case_id} 未通过：{result.failed_checks}\n"
         f"trace: {trace_path}（erpilot replay 可回放）"
+    )
+
+
+@pytest.mark.parametrize("case", WRITE_PREFLIGHT_CASES, ids=[c.id for c in WRITE_PREFLIGHT_CASES])
+async def test_zero_stock_preflight_case(
+    case, live_client, live_tools, live_resolved, live_sink, live_db, acc
+) -> None:
+    """自然库存前置判断：自动拒绝门兜底，case 判分要求模型根本不尝试写工具。"""
+    from evals.runner import run_case
+
+    if acc.budget.exhausted:
+        pytest.skip(f"预算熔断：已花 ¥{acc.budget.spent_cny:.4f} ≥ 上限 ¥{BUDGET_CNY:.2f}")
+    result, trace_path = await run_case(
+        case,
+        client=live_client,
+        tools=live_tools,
+        resolved=live_resolved,
+        trace_dir=_REPO_ROOT / "traces" / "evals" / "write-preflight",
+        sinks=[live_sink] if live_sink else (),
+        system_prompt=WRITES_PROMPT,
+        state_engine=make_engine(live_db),
+    )
+    acc.budget.record(result.cost)
+    acc.results.append(result)
+    assert result.passed, (
+        f"{result.case_id} 未通过：{result.failed_checks}\n"
+        f"trace: {trace_path}（erpilot replay 可回放）"
+    )
+
+
+@pytest.mark.parametrize(
+    "case", WRITE_INJECTED_ERROR_CASES, ids=[c.id for c in WRITE_INJECTED_ERROR_CASES]
+)
+async def test_injected_stock_error_recovery_case(
+    case, live_client, live_resolved, live_sink, live_db, acc
+) -> None:
+    """受控入口：审批后注入错误结果，绝不调用真实 adjust_stock handler。"""
+    from evals.runner import run_case
+
+    if acc.budget.exhausted:
+        pytest.skip(f"预算熔断：已花 ¥{acc.budget.spent_cny:.4f} ≥ 上限 ¥{BUDGET_CNY:.2f}")
+
+    gate = ScriptedPolicyGate()
+    tools = await build_agent_tools_async(live_db, writes=True, approval_gate=gate)
+    injected_arguments = []
+    stock_reads = 0
+    get_stock_tool = next(tool for tool in tools if tool.name == "get_stock")
+    get_stock_handler = get_stock_tool.handler
+
+    async def controlled_stock_snapshot(args):
+        nonlocal stock_reads
+        stock_reads += 1
+        if stock_reads == 1:
+            return {"sku": args.sku, "quantity": 5, "warehouse": "主仓"}
+        return await get_stock_handler(args)
+
+    async def fail_with_inventory_error(args):
+        injected_arguments.append(args.model_dump(mode="json"))
+        return {
+            "error": {
+                "code": "insufficient_stock",
+                "message": "库存不足",
+                "hint": "请先调用 get_stock 查询当前库存，再如实向用户说明。",
+            }
+        }
+
+    tools = [
+        replace(tool, handler=controlled_stock_snapshot)
+        if tool.name == "get_stock" else
+        replace(tool, approved_handler=fail_with_inventory_error)
+        if tool.name == "adjust_stock" else tool
+        for tool in tools
+    ]
+    result, trace_path = await run_case(
+        case,
+        client=live_client,
+        tools=tools,
+        resolved=live_resolved,
+        trace_dir=_REPO_ROOT / "traces" / "evals" / "controlled-write-errors",
+        sinks=[live_sink] if live_sink else (),
+        system_prompt=WRITES_PROMPT,
+        state_engine=make_engine(live_db),
+    )
+    acc.budget.record(result.cost)
+    acc.results.append(result)
+    assert injected_arguments, f"{case.id} 没有到达受控 insufficient_stock 注入点"
+    assert stock_reads >= 2, f"{case.id} 未在业务错误后再次读取实际库存"
+    assert any(decision.approved for _, decision in gate.decisions), (
+        f"{case.id} 没有先经过并获准的脚本审批"
+    )
+    assert result.passed, (
+        f"{result.case_id} 未通过：{result.failed_checks}\n"
+        f"trace: {trace_path}（受控错误入口，erpilot replay 可回放）"
     )
