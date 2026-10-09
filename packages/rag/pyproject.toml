@@ -1,0 +1,16 @@
+[project]
+name = "rag"
+version = "0.1.0"
+description = "业务无关的轻量检索引擎：语料分块 + 嵌入协议 + 余弦向量索引（RAG 政策问答用）"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.7",
+    "openai>=1.40",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rag"]
