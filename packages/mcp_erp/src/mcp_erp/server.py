@@ -21,6 +21,7 @@ M4（ADR-0005）：写操作 ×4，`include_writes=True` 才注册（默认关�
     独立进程：python -m mcp_erp serve（stdio，给外部 MCP 客户端用）
 """
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -30,9 +31,27 @@ from erp_store.mutations import ErpMutations, MutationError
 from erp_store.repository import ErpRepository
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field
+from rag.corpus import DEFAULT_INDEX_PATH
+from rag.embed import Embedder
+from rag.index import PolicyIndex
+from rag.openai_embedder import EmbedConfig, OpenAIEmbedder
 
 _ORDER_STATUS_HELP = " / ".join(s.value for s in OrderStatus)
 _PRODUCT_STATUS_HELP = " / ".join(s.value for s in ProductStatus)
+
+# 政策检索命中阈值（余弦相似度）：低于则视为语料未覆盖 → 拒答。
+# 占位默认值，待 R05 用真实嵌入校准正/负例后调整。
+POLICY_SCORE_THRESHOLD = 0.35
+
+PolicyResolver = Callable[[], tuple[PolicyIndex, Embedder]]
+
+
+def _default_policy_resolver() -> tuple[PolicyIndex, Embedder]:
+    """默认惰性装配：从磁盘加载已构建索引 + OpenAI 兼容嵌入器（按需读 key）。
+
+    索引缺失或 key 未配置时抛错，由 search_policy 捕获转成 policy_unavailable。
+    """
+    return PolicyIndex.load(DEFAULT_INDEX_PATH), OpenAIEmbedder(EmbedConfig.from_env())
 
 
 def _err(code: str, message: str, hint: str = "") -> dict[str, Any]:
@@ -73,11 +92,18 @@ class OrderItemInput(BaseModel):
     quantity: int = Field(description="数量，至少为 1", ge=1)
 
 
-def create_server(db_path: Path = DEFAULT_DB, *, include_writes: bool = False) -> FastMCP:
+def create_server(
+    db_path: Path = DEFAULT_DB,
+    *,
+    include_writes: bool = False,
+    policy_resolver: PolicyResolver | None = None,
+) -> FastMCP:
     """构建 MCP server 实例（库内集成与独立进程共用）。
 
     include_writes=True 才注册写工具（ADR-0005：写工具默认不存在；
     agent 侧的审批门由 bridge 装配，本层不做审批）。
+    policy_resolver 注入政策检索的 (索引, 嵌入器)；缺省惰性走默认装配，
+    测试可注入 fake 嵌入器避免触网。
     """
     engine = make_engine(Path(db_path))
     repo = ErpRepository(engine)
@@ -372,6 +398,50 @@ def create_server(db_path: Path = DEFAULT_DB, *, include_writes: bool = False) -
         """列出全部品类与在售商品数——探索库存时的第一步。"""
         cats = repo.list_categories()
         return {"total": len(cats), "items": [c.model_dump(mode="json") for c in cats]}
+
+    # ---- 政策检索（RAG，只读）----
+
+    @mcp.tool
+    def search_policy(
+        query: Annotated[
+            str, Field(description="政策相关问题或关键词，如 退货时效、满多少件打折、能不能取消")
+        ],
+        k: Annotated[int, Field(description="返回片段数（1~5）")] = 3,
+    ) -> dict[str, Any]:
+        """检索店铺政策文档（价格/折扣/订单取消/退换货），返回最相关片段作为作答依据。
+
+        依据返回片段回答并注明来源（source/title）；matches 为空表示政策文档未覆盖，
+        须如实说明、不要臆造政策。"""
+        if not query.strip():
+            return _err("invalid_argument", "查询不能为空", "例如：满多少件有折扣、几天内可退货")
+        if not 1 <= k <= 5:
+            return _err("invalid_argument", "k 须在 1~5")
+        resolver = policy_resolver or _default_policy_resolver
+        try:
+            index, embedder = resolver()
+        except Exception as exc:  # 索引缺失/key 未配置等：转成可自愈的结构化错误
+            return _err(
+                "policy_unavailable",
+                f"政策检索未就绪：{exc}",
+                "先运行 uv run --package rag python -m rag build 生成索引并配置嵌入 key",
+            )
+        hits = index.search(query, embedder, k=k, threshold=POLICY_SCORE_THRESHOLD)
+        if not hits:
+            return {
+                "matches": [],
+                "note": "政策文档未找到相关内容；请如实告知用户未覆盖，不要臆造政策",
+            }
+        return {
+            "matches": [
+                {
+                    "source": h.chunk.source,
+                    "title": h.chunk.title,
+                    "text": h.chunk.text,
+                    "score": round(h.score, 4),
+                }
+                for h in hits
+            ]
+        }
 
     # ---- 写操作（include_writes=True 才注册；执行受 agent 侧审批门拦截） ----
 

@@ -52,6 +52,7 @@ EXPECTED_TOOLS = {
     "daily_sales",
     "stock_valuation",
     "list_categories",
+    "search_policy",
 }
 
 
@@ -61,7 +62,7 @@ async def test_server_exposes_all_readonly_tools(seeded_db) -> None:
     async with Client(create_server(seeded_db)) as client:
         tools = {t.name for t in await client.list_tools()}
     assert tools == EXPECTED_TOOLS
-    assert len(EXPECTED_TOOLS) == 16  # §4 冻结线 15~20 区间内
+    assert len(EXPECTED_TOOLS) == 17  # §4 冻结线 15~20 区间内（含政策检索）
 
 
 async def test_get_order_error_contract_v1(seeded_db) -> None:
@@ -341,7 +342,7 @@ async def test_write_server_exposes_full_surface(seeded_db) -> None:
     async with Client(create_server(seeded_db, include_writes=True)) as client:
         tools = {t.name for t in await client.list_tools()}
     assert tools == EXPECTED_TOOLS | WRITE_TOOLS
-    assert len(tools) == 20  # §4 冻结线 15~20 区间内
+    assert len(tools) == 21  # 17 只读（含政策检索）+ 4 写 区间内
 
 
 async def test_write_error_contract_via_mcp(seeded_db, repo) -> None:
@@ -569,3 +570,83 @@ async def test_write_retry_after_lost_response_changes_stock_once(tmp_path, monk
     assert len(attempts) == 2
     assert repo.get_stock(sku).quantity == before + 5
     assert len(tokens) == 2 and tokens[0] and tokens[0] == tokens[1]
+
+
+# ---- 政策检索（RAG，只读）：注入 fake 嵌入器，离线可测 ----
+
+_POLICY_VOCAB = ["退货", "折扣", "取消", "价格"]
+
+
+class _FakePolicyEmbedder:
+    """确定性词频向量：供政策检索离线测试，不触网、不烧 token。"""
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        return [[float(t.count(w)) for w in _POLICY_VOCAB] for t in texts]
+
+
+def _fake_policy_resolver():
+    from rag.chunk import Chunk
+    from rag.index import PolicyIndex
+
+    chunks = [
+        Chunk(source="return-policy.md", title="七天无理由退货", text="签收后 7 天内可退货"),
+        Chunk(source="pricing-policy.md", title="数量梯度折扣", text="满 10 件有折扣"),
+        Chunk(source="order-policy.md", title="可取消的订单", text="待付款待发货可取消"),
+    ]
+    embedder = _FakePolicyEmbedder()
+    return PolicyIndex.build(chunks, embedder), embedder
+
+
+async def test_search_policy_returns_grounded_matches(seeded_db) -> None:
+    from fastmcp import Client
+
+    server = create_server(seeded_db, policy_resolver=_fake_policy_resolver)
+    async with Client(server) as client:
+        result = await client.call_tool("search_policy", {"query": "怎么退货", "k": 2})
+    top = result.data["matches"][0]
+    assert top["title"] == "七天无理由退货"
+    assert top["source"] == "return-policy.md"
+    assert top["score"] > 0.35  # 命中阈值以上
+    assert "7 天" in top["text"]
+
+
+async def test_search_policy_refuses_out_of_corpus(seeded_db) -> None:
+    """语料外查询得分低于阈值 → matches 为空 + 拒答提示（支撑不臆造）。"""
+    from fastmcp import Client
+
+    server = create_server(seeded_db, policy_resolver=_fake_policy_resolver)
+    async with Client(server) as client:
+        result = await client.call_tool("search_policy", {"query": "今天天气如何"})
+    assert result.data["matches"] == []
+    assert "臆造" in result.data["note"]
+
+
+async def test_search_policy_empty_query_is_invalid(seeded_db) -> None:
+    from fastmcp import Client
+
+    server = create_server(seeded_db, policy_resolver=_fake_policy_resolver)
+    async with Client(server) as client:
+        result = await client.call_tool("search_policy", {"query": "   "})
+    assert result.data["error"]["code"] == "invalid_argument"
+
+
+async def test_search_policy_unavailable_when_not_built(seeded_db, monkeypatch) -> None:
+    """默认装配：索引文件缺失 → 结构化 policy_unavailable，带构建指引。"""
+    from fastmcp import Client
+    from mcp_erp import server as server_mod
+
+    monkeypatch.setattr(server_mod, "DEFAULT_INDEX_PATH", seeded_db.parent / "nonexistent.json")
+    async with Client(create_server(seeded_db)) as client:  # 不注入 resolver → 走默认
+        result = await client.call_tool("search_policy", {"query": "怎么退货"})
+    err = result.data["error"]
+    assert err["code"] == "policy_unavailable"
+    assert "rag" in err["hint"]
+
+
+async def test_bridge_search_policy_end_to_end(seeded_db) -> None:
+    """桥接端到端：build_agent_tools_async 装配 → 调 search_policy handler → 命中。"""
+    tools = await build_agent_tools_async(seeded_db, policy_resolver=_fake_policy_resolver)
+    search = next(t for t in tools if t.name == "search_policy")
+    args = search.params_model(query="满多少件有折扣", k=1)
+    result = await search.handler(args)
+    assert result["matches"][0]["title"] == "数量梯度折扣"

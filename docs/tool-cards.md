@@ -131,6 +131,17 @@
 - 返回：`{"total", "items": [{"category", "product_count"}]}`
 - 错误：无
 
+## 政策检索（RAG，只读）
+
+> 政策文档（价格/折扣/订单取消/退换货）经 `rag` 包嵌入成向量索引，查询时检索
+> 最相关片段作为作答依据。命中低于相似度阈值视为语料未覆盖，返回空以支撑拒答。
+
+### search_policy
+- 用途：检索店铺政策片段，依据返回内容作答并注明来源（不臆造政策）
+- 参数：`query`（政策问题/关键词）、`k`（返回片段数 1~5，默认 3）
+- 返回：`{"matches": [{"source", "title", "text", "score"}]}`；无命中时 `matches` 为空并附拒答提示
+- 错误：`invalid_argument`（空 query / k 越界）、`policy_unavailable`（索引未构建或嵌入 key 未配置，hint 指向 `python -m rag build`）
+
 ## 写操作（include_writes=True 才注册；ADR-0005）
 
 > 领域校验在 `erp_store.mutations`，错误契约 v1 在写路径新增两个 code：

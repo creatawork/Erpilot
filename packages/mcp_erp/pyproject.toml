@@ -7,11 +7,13 @@ dependencies = [
     "fastmcp>=2",
     "agent-core",
     "erp-store",
+    "rag",
 ]
 
 [tool.uv.sources]
 agent-core = { workspace = true }
 erp-store = { workspace = true }
+rag = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

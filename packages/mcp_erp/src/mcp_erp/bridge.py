@@ -35,7 +35,7 @@ from fastmcp import Client
 from fastmcp.client.client import CallToolResult
 from pydantic import BaseModel, Field, create_model
 
-from mcp_erp.server import create_server
+from mcp_erp.server import PolicyResolver, create_server
 
 _TYPE_MAP: dict[str, type] = {
     "string": str,
@@ -59,9 +59,12 @@ def build_agent_tools(
     *,
     writes: bool = False,
     approval_gate: ApprovalGate | None = None,
+    policy_resolver: PolicyResolver | None = None,
 ) -> list[Tool]:
     """同步入口（应用启动 / CLI main，不能在事件循环内调用）。"""
-    return asyncio.run(build_agent_tools_async(db_path, writes=writes, approval_gate=approval_gate))
+    return asyncio.run(build_agent_tools_async(
+        db_path, writes=writes, approval_gate=approval_gate, policy_resolver=policy_resolver,
+    ))
 
 
 class ErpMutationReconciler:
@@ -114,11 +117,13 @@ async def build_agent_tools_async(
     *,
     writes: bool = False,
     approval_gate: ApprovalGate | None = None,
+    policy_resolver: PolicyResolver | None = None,
 ) -> list[Tool]:
     """发现 MCP 工具并转换为 agent_core Tool 列表（可在运行中的 loop 内调用）。
 
     db 文件不存在时报带指引的错误。writes=True 必须给 approval_gate
-    （无 gate 不给写工具，ADR-0005 决策 4）。
+    （无 gate 不给写工具，ADR-0005 决策 4）。policy_resolver 注入政策检索装配，
+    缺省走 server 默认（惰性加载索引 + OpenAI 兼容嵌入器）。
     """
     if writes and approval_gate is None:
         raise ValueError("writes=True 必须提供 approval_gate：写工具不过审批门就不该存在")
@@ -128,11 +133,11 @@ async def build_agent_tools_async(
             f"ERP 数据库不存在：{db_path}（先运行 uv run --package erp-store "
             "python -m erp_store seed 生成）"
         )
-    server = create_server(db_path, include_writes=writes)
+    server = create_server(db_path, include_writes=writes, policy_resolver=policy_resolver)
     async with Client(server) as client:
         mcp_tools = await client.list_tools()
     tools = [
-        _convert(t.name, t.description or "", t.input_schema, db_path, writes)
+        _convert(t.name, t.description or "", t.input_schema, db_path, writes, policy_resolver)
         for t in mcp_tools
     ]
     if writes:
@@ -158,7 +163,8 @@ def _with_risk_and_gate(tool: Tool, gate: ApprovalGate | None) -> Tool:
 
 
 def _convert(
-    name: str, description: str, schema: dict[str, Any], db_path: Path, writes: bool
+    name: str, description: str, schema: dict[str, Any], db_path: Path, writes: bool,
+    policy_resolver: PolicyResolver | None = None,
 ) -> Tool:
     """把一个 MCP 工具转成 agent Tool；调用侧必须以同一 writes 口径建 server。
 
@@ -172,7 +178,7 @@ def _convert(
         if _name in WRITE_TOOL_RISK and args.client_token is None:
             # 同次工具执行的超时/异常重试复用同一个参数对象与 token。
             args.client_token = uuid4().hex
-        server = create_server(db_path, include_writes=writes)
+        server = create_server(db_path, include_writes=writes, policy_resolver=policy_resolver)
         async with Client(server) as client:
             result = await client.call_tool(_name, args.model_dump(mode="json", exclude_none=True))
         return _extract(result)
