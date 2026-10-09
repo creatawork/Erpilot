@@ -91,6 +91,27 @@ test("hydration marks denied results and never shows running cursors on finished
   assert.equal(assistant.phase, "completed");
 });
 
+test("a later tool result with a reused call id does not replace an earlier turn", () => {
+  const turns = hydrateTurns({session_id: "s", status: "completed", messages: [
+    {role: "user", content: "批准第一轮"},
+    {role: "assistant", tool_calls: [
+      {id: "reused", function: {name: "adjust_stock", arguments: '{"delta":5}' }},
+    ]},
+    {role: "tool", tool_call_id: "reused", content: '{"quantity":135}'},
+    {role: "assistant", content: "第一轮已完成"},
+    {role: "user", content: "拒绝第二轮"},
+    {role: "assistant", tool_calls: [
+      {id: "reused", function: {name: "adjust_stock", arguments: '{"delta":5}' }},
+    ]},
+  ], tool_results: [{call_id: "reused", name: "adjust_stock", ok: true,
+    content: '{"approval":"denied","message":"操作未执行"}'}], pending_approvals: []})
+    .filter(turn => turn.role === "assistant");
+
+  assert.equal(turns[0].tools.reused.status, "succeeded");
+  assert.equal(turns[0].tools.reused.finished.content, '{"quantity":135}');
+  assert.equal(turns[1].tools.reused.status, "denied");
+});
+
 test("a send creates a connecting placeholder before any server event arrives", () => {
   const turn = newAssistantTurn(1000);
   assert.equal(turn.phase, "connecting");

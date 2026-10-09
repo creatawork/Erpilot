@@ -84,7 +84,9 @@ def test_transport_failure_is_failed() -> None:
 
 
 def test_unrecognized_success_shape_is_unknown() -> None:
-    display = build_display("adjust_stock", {"sku": "A1001", "delta": 1}, json.dumps({"weird": 1}), ok=True)
+    display = build_display(
+        "adjust_stock", {"sku": "A1001", "delta": 1}, json.dumps({"weird": 1}), ok=True
+    )
     assert display is not None
     assert display["outcome"] == "unknown"
 

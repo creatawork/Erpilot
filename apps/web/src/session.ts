@@ -560,7 +560,10 @@ function hydrateFromMessages(state: SessionState): Turn[] {
     }
   }
   for (const result of state.tool_results) {
-    for (const turn of turns) {
+    // tool_results 是会话级累积历史；call_id 可能被后续轮次复用。
+    // 历史轮次已从各自的 tool 消息恢复，回填只作用于最新的匹配调用。
+    for (let i = turns.length - 1; i >= 0; i -= 1) {
+      const turn = turns[i];
       if (!isAssistantTurn(turn)) continue;
       const entity = turn.tools[result.call_id];
       if (entity) {
@@ -571,6 +574,7 @@ function hydrateFromMessages(state: SessionState): Turn[] {
         };
         entity.display = entity.finished.display ?? null;
         entity.status = resultStatus(entity.finished);
+        break;
       }
     }
   }

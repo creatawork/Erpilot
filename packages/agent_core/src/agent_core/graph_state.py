@@ -38,6 +38,7 @@ class AgentState(TypedDict):
     tool_history: list[dict[str, Any]]
     completed: bool
     final_answer: str
+    recovery_required: bool
 
 
 def initial_state(messages: list[dict[str, Any]]) -> AgentState:
@@ -50,4 +51,5 @@ def initial_state(messages: list[dict[str, Any]]) -> AgentState:
         tool_history=[],
         completed=False,
         final_answer="",
+        recovery_required=False,
     )
