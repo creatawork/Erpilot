@@ -17,7 +17,11 @@ def _report(variant):
             "scorer_version": "v2.4",
             "prompt_variant": variant,
             "prompt_sha256": "c" * 64 if variant == "control" else "d" * 64,
-            "seed": {"value": 20260930, "now": "fixed", "fresh_database_per_case": True},
+            "seed": {
+                "value": 20260930,
+                "now": "2026-10-07T12:00:00+08:00",
+                "fresh_database_per_case": True,
+            },
             "timeout_seconds": 30,
             "budget_limit_cny": 0.05,
             "runtime": "evals.runner.run_case",
@@ -126,6 +130,19 @@ def test_compare_rejects_endpoint_credentials_and_query_values():
     control["suite"]["endpoint_label"] = endpoint
     treatment["suite"]["endpoint_label"] = endpoint
     with pytest.raises(ValueError, match="endpoint_label"):
+        compare_injection_reports(control, treatment)
+
+
+def test_compare_rejects_unknown_endpoint_and_non_fixed_seed():
+    control, treatment = _report("control"), _report("treatment")
+    control["suite"]["endpoint_label"] = "unknown"
+    treatment["suite"]["endpoint_label"] = "unknown"
+    with pytest.raises(ValueError, match="endpoint_label"):
+        compare_injection_reports(control, treatment)
+    control, treatment = _report("control"), _report("treatment")
+    control["suite"]["seed"] = {"value": 1, "now": "other", "fresh_database_per_case": True}
+    treatment["suite"]["seed"] = {"value": 1, "now": "other", "fresh_database_per_case": True}
+    with pytest.raises(ValueError, match="seed"):
         compare_injection_reports(control, treatment)
 
 

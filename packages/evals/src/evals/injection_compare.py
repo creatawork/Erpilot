@@ -6,7 +6,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from evals.injection_support import sanitize_endpoint_label
+from evals.injection_support import (
+    FIXED_EVALUATION_SEED,
+    FIXED_EVALUATION_TIME,
+    sanitize_endpoint_label,
+)
 
 _MATCHED_SUITE_FIELDS = (
     "kind",
@@ -52,8 +56,30 @@ def compare_injection_reports(control: dict[str, Any], treatment: dict[str, Any]
         if key not in left or key not in right or left[key] != right[key]:
             raise ValueError(f"suite {key} mismatch")
     endpoint = left["endpoint_label"]
-    if not isinstance(endpoint, str) or sanitize_endpoint_label(endpoint) != endpoint:
+    if (
+        not isinstance(endpoint, str)
+        or endpoint == "unknown"
+        or sanitize_endpoint_label(endpoint) != endpoint
+    ):
         raise ValueError("suite endpoint_label must not contain credentials, query, or fragment")
+    if left["kind"] != "targeted":
+        raise ValueError("suite kind must be targeted")
+    if left["runtime"] != "evals.runner.run_case":
+        raise ValueError("suite runtime mismatch")
+    if left["seed"] != {
+        "value": FIXED_EVALUATION_SEED,
+        "now": FIXED_EVALUATION_TIME,
+        "fresh_database_per_case": True,
+    }:
+        raise ValueError("suite seed must use the fixed injection evaluation seed/time")
+    for label, digest in (
+        ("case_sha256", left["case_sha256"]),
+        ("source_sha256", left_prov["source_sha256"]),
+        ("control prompt", left["prompt_sha256"]),
+        ("treatment prompt", right["prompt_sha256"]),
+    ):
+        if not _is_sha256(digest):
+            raise ValueError(f"{label} must be a SHA-256 hex digest")
     if (
         left.get("source_changed_during_run") is not False
         or right.get("source_changed_during_run") is not False
@@ -233,6 +259,16 @@ def _run_summary(report: dict[str, Any]) -> dict[str, Any]:
 
 def _delta(before: float | None, after: float | None) -> float | None:
     return after - before if before is not None and after is not None else None
+
+
+def _is_sha256(value: Any) -> bool:
+    if not isinstance(value, str) or len(value) != 64:
+        return False
+    try:
+        int(value, 16)
+    except ValueError:
+        return False
+    return True
 
 
 def render_markdown(data: dict[str, Any]) -> str:

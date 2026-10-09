@@ -156,6 +156,13 @@ def test_completion_metadata_absence_stays_unknown_even_if_counts_match():
     assert summary["completion"] == "unknown"
 
 
+def test_planned_executed_mismatch_is_incomplete_even_when_flag_says_complete():
+    report = _report(suite={"planned": 2, "executed": 1, "complete": True})
+    summary = summarize_report(report, source="contradictory-completion.json")
+    assert summary["completion"] == "incomplete"
+    assert "planned/executed mismatch" in summary["incomplete_reasons"]
+
+
 def test_cli_accepts_explicit_file_and_rejects_empty_directory(tmp_path):
     source = _write(tmp_path / "one.json", _report())
     output = tmp_path / "created" / "outputs"

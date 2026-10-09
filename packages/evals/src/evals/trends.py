@@ -111,23 +111,19 @@ def summarize_report(report: dict[str, Any], *, source: str) -> dict[str, Any]:
     durations = [float(row.get("duration_ms") or 0) for row in executed]
     incomplete_reasons: list[str] = []
     completion: str
-    if suite.get("complete") is True:
-        completion = "complete"
-    elif suite.get("complete") is False:
+    counts_mismatch = (
+        isinstance(suite.get("planned"), int)
+        and isinstance(suite.get("executed"), int)
+        and suite["planned"] != suite["executed"]
+    )
+    if suite.get("complete") is False:
         completion = "incomplete"
         incomplete_reasons.append("suite.complete=false")
-    elif isinstance(suite.get("planned"), int) and isinstance(suite.get("executed"), int):
-        if suite["planned"] != suite["executed"]:
-            completion = "incomplete"
-            incomplete_reasons.append("planned/executed mismatch")
-        elif suite.get("complete") is True:
-            completion = "complete"
-        else:
-            completion = "unknown"
-    elif suite.get("complete") is True:
-        completion = "complete"
     else:
-        completion = "unknown"
+        completion = "complete" if suite.get("complete") is True else "unknown"
+    if counts_mismatch:
+        completion = "incomplete"
+        incomplete_reasons.append("planned/executed mismatch")
     if suite.get("source_changed_during_run") is True:
         completion = "incomplete"
         incomplete_reasons.append("source changed during run")
