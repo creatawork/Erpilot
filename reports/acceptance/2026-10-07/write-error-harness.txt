@@ -1,0 +1,71 @@
+import asyncio
+import hashlib
+import json
+import tempfile
+import time
+from pathlib import Path
+
+from agent_core.dotenv import load_dotenv
+from agent_core.demo_tools import system_prompt
+from agent_core.llm import LLMClient, LLMConfig
+from erp_store.db import make_engine
+from erp_store.repository import ErpRepository
+from erp_store.seed import seed_database
+from evals.approval_policy import ScriptedPolicyGate
+from evals.context import resolve
+from evals.report import source_provenance, write_report
+from evals.runner import Budget, run_case
+from evals.state import snapshot
+from evals.write_cases import WRITE_ERROR_CASES
+from mcp_erp import build_agent_tools_async
+from openai import AsyncOpenAI
+
+async def main():
+    load_dotenv(Path('.env'))
+    config = LLMConfig.from_env()
+    sdk = AsyncOpenAI(api_key=config.api_key, base_url=config.base_url, timeout=30, max_retries=0)
+    client = LLMClient(config, client=sdk)
+    budget = Budget(0.02)
+    provenance = source_provenance()
+    started = time.monotonic()
+    results = []
+    evidence = []
+    try:
+        with tempfile.TemporaryDirectory(prefix='erpilot-write-errors-') as directory:
+            for case in WRITE_ERROR_CASES:
+                assert not budget.exhausted, 'write-error budget exhausted'
+                db = Path(directory) / f'{case.id}.db'
+                seed_database(db)
+                engine = make_engine(db)
+                gate = ScriptedPolicyGate()
+                before = snapshot(engine)
+                try:
+                    tools = await build_agent_tools_async(db, writes=True, approval_gate=gate)
+                    result, trace = await run_case(case, client=client, tools=tools,
+                        resolved=resolve(ErpRepository(engine)), trace_dir=Path('traces/acceptance-write-errors'),
+                        system_prompt=system_prompt(True), state_engine=engine)
+                    results.append(result)
+                    budget.record(result.cost)
+                    evidence.append({'case_id':case.id,'trace':str(trace),'before':before,
+                        'after':snapshot(engine),'decisions':[
+                            {'request':{'tool':r.tool,'risk':r.risk,'arguments':r.arguments},
+                             'approved':d.approved,'reason':d.reason} for r,d in gate.decisions]})
+                    print(f'{case.id}: {"PASS" if result.passed else "FAIL"} {result.failed_checks}', flush=True)
+                finally:
+                    engine.dispose()
+        metadata = {'kind':'write-error-observation','planned':len(WRITE_ERROR_CASES),'executed':len(results),
+            'case_ids':[c.id for c in WRITE_ERROR_CASES], 'case_sha256':hashlib.sha256(
+                '\n'.join(c.model_dump_json() for c in WRITE_ERROR_CASES).encode()).hexdigest(),
+            'seed':'seed_database defaults; fresh database per case', 'complete':len(results)==len(WRITE_ERROR_CASES),
+            'approval':'ScriptedPolicyGate; not human approval',
+            'source_changed_during_run':source_provenance()['source_sha256']!=provenance['source_sha256']}
+        report = write_report(Path('reports/evals'),results,model=config.model,budget_limit_cny=budget.limit_cny,
+            elapsed_s=time.monotonic()-started,metadata=metadata,provenance=provenance)
+        Path('reports/acceptance/2026-10-07/write-error-evidence.json').write_text(
+            json.dumps(evidence,ensure_ascii=False,indent=2,default=str),encoding='utf-8')
+        print(f'Report: {report}',flush=True)
+        return 0 if all(r.passed for r in results) else 1
+    finally:
+        await sdk.close()
+
+raise SystemExit(asyncio.run(main()))

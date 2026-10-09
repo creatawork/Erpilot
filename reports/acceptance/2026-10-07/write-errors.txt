@@ -1,0 +1,4 @@
+adv-24: FAIL ['must_mention_any: 库存不足/不够/无货/缺货/没有库存/无法出库/出库失败/出不了 均未出现', 'expect_error_codes: 未观测到 insufficient_stock']
+adv-25: PASS []
+Report: reports\evals\20261007-173111-a50f45.md
+

@@ -1,0 +1,286 @@
+[
+  {
+    "name": "pytest",
+    "exe": "E:/workspace/erpilot/.venv-langgraph/Scripts/python.exe",
+    "args": [
+      "-X",
+      "utf8",
+      "-m",
+      "pytest",
+      "-ra"
+    ],
+    "cwd": "E:/workspace/erpilot",
+    "started": "2026-10-07T09:24:53.441Z",
+    "finished": "2026-10-07T09:25:26.568Z",
+    "exit": 0,
+    "output": "pytest.txt"
+  },
+  {
+    "name": "ruff",
+    "exe": "E:/workspace/erpilot/.venv-langgraph/Scripts/ruff.exe",
+    "args": [
+      "check",
+      "."
+    ],
+    "cwd": "E:/workspace/erpilot",
+    "started": "2026-10-07T09:24:53.461Z",
+    "finished": "2026-10-07T09:24:53.642Z",
+    "exit": 1,
+    "output": "ruff.txt"
+  },
+  {
+    "name": "web-test-typecheck",
+    "exe": "C:/Users/V/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node.exe",
+    "args": [
+      "node_modules/typescript/bin/tsc",
+      "src/protocol.ts",
+      "src/session.ts",
+      "--outDir",
+      ".test-build",
+      "--target",
+      "ES2022",
+      "--module",
+      "ESNext",
+      "--skipLibCheck"
+    ],
+    "cwd": "E:/workspace/erpilot/apps/web",
+    "started": "2026-10-07T09:25:07.047Z",
+    "finished": "2026-10-07T09:25:08.473Z",
+    "exit": 0,
+    "output": "web-test-typecheck.txt"
+  },
+  {
+    "name": "web-build-typecheck",
+    "exe": "C:/Users/V/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node.exe",
+    "args": [
+      "node_modules/typescript/bin/tsc",
+      "--noEmit"
+    ],
+    "cwd": "E:/workspace/erpilot/apps/web",
+    "started": "2026-10-07T09:25:07.058Z",
+    "finished": "2026-10-07T09:25:09.577Z",
+    "exit": 0,
+    "output": "web-build-typecheck.txt"
+  },
+  {
+    "name": "checkpoint",
+    "exe": "E:/workspace/erpilot/.venv-langgraph/Scripts/python.exe",
+    "args": [
+      "-X",
+      "utf8",
+      "-c",
+      "import os;from pathlib import Path;from agent_core.dotenv import load_dotenv;load_dotenv(Path('.env'));url=os.environ.get('ERPILOT_CHECKPOINT_DATABASE_URL');assert url,'checkpoint URL missing';os.environ['ERPILOT_TEST_CHECKPOINT_DATABASE_URL']=url;import pytest;raise SystemExit(pytest.main(['apps/api/tests/test_checkpoint.py','-ra']))"
+    ],
+    "cwd": "E:/workspace/erpilot",
+    "started": "2026-10-07T09:25:07.073Z",
+    "finished": "2026-10-07T09:25:20.553Z",
+    "exit": 1,
+    "output": "checkpoint.txt"
+  },
+  {
+    "name": "baseline",
+    "exe": "E:/workspace/erpilot/.venv-langgraph/Scripts/python.exe",
+    "args": [
+      "-X",
+      "utf8",
+      "-u",
+      "-m",
+      "evals",
+      "--budget",
+      "0.1",
+      "--timeout",
+      "30"
+    ],
+    "cwd": "E:/workspace/erpilot",
+    "started": "2026-10-07T09:25:07.083Z",
+    "finished": "2026-10-07T09:46:00.942Z",
+    "exit": 1,
+    "output": "baseline.txt"
+  },
+  {
+    "name": "web-tests",
+    "exe": "C:/Users/V/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node.exe",
+    "args": [
+      "--test",
+      "tests/cards.test.mjs",
+      "tests/protocol.test.mjs",
+      "tests/session.test.mjs"
+    ],
+    "cwd": "E:/workspace/erpilot/apps/web",
+    "started": "2026-10-07T09:25:35.314Z",
+    "finished": "2026-10-07T09:25:36.485Z",
+    "exit": 0,
+    "output": "web-tests.txt"
+  },
+  {
+    "name": "web-build",
+    "exe": "C:/Users/V/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node.exe",
+    "args": [
+      "node_modules/vite/bin/vite.js",
+      "build"
+    ],
+    "cwd": "E:/workspace/erpilot/apps/web",
+    "started": "2026-10-07T09:25:35.323Z",
+    "finished": "2026-10-07T09:25:39.107Z",
+    "exit": 0,
+    "output": "web-build.txt"
+  },
+  {
+    "name": "checkpoint-isolated",
+    "exe": "E:/workspace/erpilot/.venv-langgraph/Scripts/python.exe",
+    "args": [
+      "-X",
+      "utf8",
+      "-c",
+      "import os;from pathlib import Path;from agent_core.dotenv import load_dotenv;load_dotenv(Path('.env'));url=os.environ.get('ERPILOT_CHECKPOINT_DATABASE_URL');assert url,'checkpoint URL missing';os.environ['ERPILOT_TEST_CHECKPOINT_DATABASE_URL']=url;os.environ['ERPILOT_TOOLS']='demo';os.environ['ERPILOT_WRITES']='0';import pytest;raise SystemExit(pytest.main(['apps/api/tests/test_checkpoint.py','-ra']))"
+    ],
+    "cwd": "E:/workspace/erpilot",
+    "started": "2026-10-07T09:25:47.203Z",
+    "finished": "2026-10-07T09:25:53.488Z",
+    "exit": 0,
+    "output": "checkpoint-isolated.txt"
+  },
+  {
+    "name": "scripted-demo",
+    "exe": "E:/workspace/erpilot/.venv-langgraph/Scripts/python.exe",
+    "args": [
+      "-X",
+      "utf8",
+      "scripts/demo.py"
+    ],
+    "cwd": "E:/workspace/erpilot",
+    "started": "2026-10-07T09:25:47.215Z",
+    "finished": "2026-10-07T09:25:55.572Z",
+    "exit": 0,
+    "output": "scripted-demo.txt"
+  },
+  {
+    "name": "browser-server",
+    "exe": "E:/workspace/erpilot/.venv-langgraph/Scripts/python.exe",
+    "args": [
+      "-X",
+      "utf8",
+      "-u",
+      "-c",
+      "import runpy;runpy.run_path('reports/acceptance/2026-10-07/browser-harness.txt',run_name='__main__')"
+    ],
+    "cwd": "E:/workspace/erpilot",
+    "started": "2026-10-07T09:26:48.541Z",
+    "finished": "2026-10-07T09:27:22.499Z",
+    "exit": 1,
+    "output": "browser-server.txt",
+    "termination": "explicitly stopped owned test process; exit is not a test assertion"
+  },
+  {
+    "name": "browser-server-2",
+    "exe": "E:/workspace/erpilot/.venv-langgraph/Scripts/python.exe",
+    "args": [
+      "-X",
+      "utf8",
+      "-u",
+      "-c",
+      "import runpy;runpy.run_path('reports/acceptance/2026-10-07/browser-harness.txt',run_name='__main__')"
+    ],
+    "cwd": "E:/workspace/erpilot",
+    "started": "2026-10-07T09:27:22.512Z",
+    "finished": "2026-10-07T09:28:57.460Z",
+    "exit": 1,
+    "output": "browser-server-2.txt",
+    "termination": "explicitly stopped owned test process; exit is not a test assertion"
+  },
+  {
+    "name": "browser-server-restarted",
+    "exe": "E:/workspace/erpilot/.venv-langgraph/Scripts/python.exe",
+    "args": [
+      "-X",
+      "utf8",
+      "-u",
+      "-c",
+      "import runpy;runpy.run_path('reports/acceptance/2026-10-07/browser-harness.txt',run_name='__main__')"
+    ],
+    "cwd": "E:/workspace/erpilot",
+    "started": "2026-10-07T09:28:57.472Z",
+    "finished": "2026-10-07T09:30:43.398Z",
+    "exit": 1,
+    "output": "browser-server-restarted.txt",
+    "termination": "explicitly stopped owned test process; exit is not a test assertion"
+  },
+  {
+    "name": "write-errors",
+    "exe": "E:/workspace/erpilot/.venv-langgraph/Scripts/python.exe",
+    "args": [
+      "-X",
+      "utf8",
+      "-u",
+      "-c",
+      "import runpy;runpy.run_path('reports/acceptance/2026-10-07/write-error-harness.txt',run_name='__main__')"
+    ],
+    "cwd": "E:/workspace/erpilot",
+    "started": "2026-10-07T09:29:56.297Z",
+    "finished": "2026-10-07T09:31:12.003Z",
+    "exit": 1,
+    "output": "write-errors.txt"
+  },
+  {
+    "name": "browser-server-completed-restart",
+    "exe": "E:/workspace/erpilot/.venv-langgraph/Scripts/python.exe",
+    "args": [
+      "-X",
+      "utf8",
+      "-u",
+      "-c",
+      "import runpy;runpy.run_path('reports/acceptance/2026-10-07/browser-harness.txt',run_name='__main__')"
+    ],
+    "cwd": "E:/workspace/erpilot",
+    "started": "2026-10-07T09:30:43.412Z",
+    "finished": "2026-10-07T09:39:16.812Z",
+    "exit": 1,
+    "output": "browser-server-completed-restart.txt",
+    "termination": "explicitly stopped owned test process; exit is not a test assertion"
+  },
+  {
+    "name": "call-id-repro",
+    "exe": "C:/Users/V/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node.exe",
+    "args": [
+      "reports/acceptance/2026-10-07/call-id-repro.mjs"
+    ],
+    "cwd": "E:/workspace/erpilot",
+    "started": "2026-10-07T09:32:26.835Z",
+    "finished": "2026-10-07T09:32:26.958Z",
+    "exit": 1,
+    "output": "call-id-repro.txt"
+  },
+  {
+    "name": "browser-schema-cleanup",
+    "exe": "E:/workspace/erpilot/.venv-langgraph/Scripts/python.exe",
+    "args": [
+      "-X",
+      "utf8",
+      "-u",
+      "-c",
+      "import asyncio,os,re,sys;from pathlib import Path;from agent_core.dotenv import load_dotenv;load_dotenv(Path('.env'));asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy()) if sys.platform=='win32' else None;from psycopg import AsyncConnection,sql\nschema=Path('reports/acceptance/2026-10-07/browser-schema.txt').read_text().strip();assert re.fullmatch(r'acceptance_[0-9a-f]{32}',schema)\nasync def clean():\n    async with await AsyncConnection.connect(os.environ['ERPILOT_CHECKPOINT_DATABASE_URL'],autocommit=True) as conn:\n        await conn.execute(sql.SQL('DROP SCHEMA {} CASCADE').format(sql.Identifier(schema)))\n    print('Removed owned acceptance schema '+schema)\nasyncio.run(clean())"
+    ],
+    "cwd": "E:/workspace/erpilot",
+    "started": "2026-10-07T09:39:16.827Z",
+    "finished": "2026-10-07T09:39:17.787Z",
+    "exit": 0,
+    "output": "browser-schema-cleanup.txt"
+  },
+  {
+    "name": "documented-api-startup",
+    "exe": "E:/workspace/erpilot/.venv-langgraph/Scripts/python.exe",
+    "args": [
+      "-X",
+      "utf8",
+      "-u",
+      "-m",
+      "erpilot_api"
+    ],
+    "cwd": "E:/workspace/erpilot",
+    "started": "2026-10-07T09:41:49.180Z",
+    "finished": "2026-10-07T09:42:14.624Z",
+    "exit": 1,
+    "output": "documented-api-startup.txt",
+    "termination": "explicitly stopped owned test process; exit is not a test assertion"
+  }
+]

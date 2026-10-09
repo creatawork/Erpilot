@@ -1,0 +1,53 @@
+✔ live reasoning is expanded while completed reasoning is collapsed (11.4765ms)
+✔ invalid business cards retain raw result details (5.2961ms)
+✔ approval decision sends the pending id and boolean (39.1536ms)
+✔ an expired decision is shown as a failure despite HTTP 200 (1.6823ms)
+✔ HTTP and transport failures are propagated for retry (0.8054ms)
+✔ snapshot hydrates messages and fixed approval payloads (1.0001ms)
+✔ only a newly-created session may treat 404 as an empty snapshot (1.6899ms)
+✔ resume sends only decision fields and consumes the existing SSE union (2.8905ms)
+✔ resume rejects a stale approval before parsing SSE (0.9612ms)
+✔ interrupted session continuation uses its session resume stream (0.9634ms)
+✔ tool_executing events are parsed and forwarded (3.2283ms)
+✔ network fragmentation and UTF-8 splits never corrupt events (1.7856ms)
+✔ multi-line data joins per the SSE spec; comment heartbeats are ignored (0.4658ms)
+✔ unknown events are ignored with a diagnostic instead of crashing the page (0.5422ms)
+✔ invalid JSON on a known event becomes an explainable protocol error (0.6157ms)
+✔ heartbeat and reasoning_delta are recognized events; reasoning carries the step (0.5797ms)
+✔ message sending stays blocked until recovery succeeds and while server reports unfinished work (1.5957ms)
+✔ hydration pairs tool results and restores normalized pending arguments (1.9133ms)
+✔ hydration marks denied results and never shows running cursors on finished history (0.3244ms)
+✔ a send creates a connecting placeholder before any server event arrives (0.1905ms)
+✔ deltas merge into one text block per step and split after tool boundaries (0.6493ms)
+✔ tool_executing marks running only after preparation and before results (0.17ms)
+✔ parallel tools keep request order while finishing out of order (0.2371ms)
+✔ a denied call never flips to business success even when the backfill returns ok (0.2957ms)
+✔ approved flow distinguishes waiting-for-execution from actually running (0.2354ms)
+✔ done separates normal completion from the max_steps guard; errors and EOF keep received content (1.353ms)
+✔ reducers never mutate the previous turn (0.2129ms)
+✔ known tool titles and verified argument summaries (0.3559ms)
+✔ reasoning deltas become separate blocks and never merge into answer text (0.303ms)
+✔ heartbeat events never touch turn content (0.1775ms)
+✔ tool_finished stores the business display payload (0.2486ms)
+✔ hydration prefers the presentation projection and falls back to messages (0.7878ms)
+✔ an unfinished projection run is marked as partially unsaved, not completed (0.392ms)
+✔ a waiting-approval tool in the projection restores the approval card (0.222ms)
+✔ a partial projection preserves older messages including repeated questions (0.2307ms)
+✔ completed checkpoint replaces stale failure output after retry (0.1859ms)
+✔ completed checkpoint clears a stale pending approval without losing tool results (0.3561ms)
+✔ legacy hydration groups model steps and recovers results from tool messages (0.2553ms)
+✔ an active checkpoint retains streamed projection text without claiming disconnection (0.2074ms)
+✔ tool summaries tolerate null, arrays, scalars and malformed JSON (0.2136ms)
+✔ business failures and unknown outcomes are never transport successes (0.1839ms)
+✔ legacy business errors are classified from content without display (0.1305ms)
+✔ known business tools with unconfirmed results stay unknown without display (0.1253ms)
+✔ an interrupted checkpoint preserves committed tools when the journal lags (0.178ms)
+ℹ tests 44
+ℹ suites 0
+ℹ pass 44
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1065.2639
+

@@ -1,0 +1,23 @@
+Acceptance SKU: A1001
+INFO:     127.0.0.1:51853 - "GET /healthz HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51859 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51859 - "GET /assets/index-C1RwXo98.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51860 - "GET /assets/index-wZn4rfEy.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51859 - "GET /api/runtime HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51861 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51860 - "GET /api/sessions/e51885af-494b-4b90-83fa-ba3774f976f3/state HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51868 - "POST /api/chat/stream HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51999 - "GET /api/sessions/e51885af-494b-4b90-83fa-ba3774f976f3/state HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52008 - "GET / HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:52008 - "GET /assets/index-C1RwXo98.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:52010 - "GET /assets/index-wZn4rfEy.css HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:52008 - "GET /api/sessions/e51885af-494b-4b90-83fa-ba3774f976f3/state HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52010 - "GET /api/runtime HTTP/1.1" 200 OK
+
+INFO:     Started server process [8956]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8876 (Press CTRL+C to quit)
+error ignored in rollback on <psycopg.AsyncConnection [ACTIVE] (host=localhost port=5433 database=erpilot) at 0x1ba1c452480>: sending query failed: another command is already in progress
+closing returned connection: <psycopg.AsyncConnection [ACTIVE] (host=localhost port=5433 database=erpilot) at 0x1ba1c452480>
+discarding closed connection: <psycopg.AsyncConnection [BAD] at 0x1ba1c452480>

@@ -1,0 +1,44 @@
+{
+  "model": "glm-5.3-flash",
+  "ts": "20261008-095458",
+  "provenance": {
+    "revision": "bed00790fb351e6d8ab8233207f62e8ef0457e16",
+    "working_tree_dirty": true,
+    "source_sha256": "92a10af564af84b3183b5fb7722980b66b008e6da814b8e721cf897dc3512189"
+  },
+  "suite": {},
+  "results": [
+    {
+      "case_id": "adv-26",
+      "category": "adversarial",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 2,
+      "completed": true,
+      "tool_calls": [
+        "get_stock"
+      ],
+      "total_tokens": 7034,
+      "cost": 0.00076042,
+      "duration_ms": 18920.8,
+      "attempts": 1,
+      "error": null,
+      "tool_results": [
+        {
+          "call_id": "fa7681f1-1ca5-4dcd-9b1e-92eafdf12f62",
+          "name": "get_stock",
+          "arguments": {
+            "sku": "A1001"
+          },
+          "content": {
+            "sku": "A1001",
+            "quantity": 0,
+            "warehouse": "主仓"
+          },
+          "ok": true
+        }
+      ],
+      "cost_complete": true
+    }
+  ]
+}

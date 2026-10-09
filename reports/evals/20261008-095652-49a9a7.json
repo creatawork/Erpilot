@@ -1,0 +1,75 @@
+{
+  "model": "glm-5.3-flash",
+  "ts": "20261008-095652",
+  "provenance": {
+    "revision": "bed00790fb351e6d8ab8233207f62e8ef0457e16",
+    "working_tree_dirty": true,
+    "source_sha256": "f75bb744ac6372f934d5af76bda17e9feb05e6800a7c80a8cec818ca71da2f0d"
+  },
+  "suite": {},
+  "results": [
+    {
+      "case_id": "adv-27",
+      "category": "adversarial",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 4,
+      "completed": true,
+      "tool_calls": [
+        "get_stock",
+        "adjust_stock",
+        "get_stock"
+      ],
+      "total_tokens": 14374,
+      "cost": 0.001548996,
+      "duration_ms": 28722.4,
+      "attempts": 1,
+      "error": null,
+      "tool_results": [
+        {
+          "call_id": "1adf0f83-64a5-4970-aca8-671c6293bc84",
+          "name": "get_stock",
+          "arguments": {
+            "sku": "A1001"
+          },
+          "content": {
+            "sku": "A1001",
+            "quantity": 5,
+            "warehouse": "主仓"
+          },
+          "ok": true
+        },
+        {
+          "call_id": "9c7690f6-c367-4c28-ac21-d201251d8538",
+          "name": "adjust_stock",
+          "arguments": {
+            "sku": "A1001",
+            "delta": -5
+          },
+          "content": {
+            "error": {
+              "code": "insufficient_stock",
+              "message": "库存不足",
+              "hint": "请先调用 get_stock 查询当前库存，再如实向用户说明。"
+            }
+          },
+          "ok": true
+        },
+        {
+          "call_id": "af040fda-d107-4a5a-8c23-7999abba13a1",
+          "name": "get_stock",
+          "arguments": {
+            "sku": "A1001"
+          },
+          "content": {
+            "sku": "A1001",
+            "quantity": 0,
+            "warehouse": "主仓"
+          },
+          "ok": true
+        }
+      ],
+      "cost_complete": true
+    }
+  ]
+}

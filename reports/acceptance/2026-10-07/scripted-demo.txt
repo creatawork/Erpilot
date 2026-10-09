@@ -1,0 +1,39 @@
+[
+  {
+    "scenario": "quote",
+    "sku": "A1001",
+    "before": 130,
+    "after": 130,
+    "verified": true,
+    "trace": "E:\\workspace\\erpilot\\traces\\demo\\20261007-172553-1fbcdd\\quote.jsonl",
+    "source": "scripted-demo"
+  },
+  {
+    "scenario": "approve",
+    "sku": "A1001",
+    "before": 130,
+    "after": 135,
+    "verified": true,
+    "trace": "E:\\workspace\\erpilot\\traces\\demo\\20261007-172553-1fbcdd\\approve.jsonl",
+    "source": "scripted-demo"
+  },
+  {
+    "scenario": "deny",
+    "sku": "A1001",
+    "before": 130,
+    "after": 130,
+    "verified": true,
+    "trace": "E:\\workspace\\erpilot\\traces\\demo\\20261007-172553-1fbcdd\\deny.jsonl",
+    "source": "scripted-demo"
+  },
+  {
+    "scenario": "recover",
+    "sku": "A1001",
+    "before": 130,
+    "after": 130,
+    "verified": true,
+    "trace": "E:\\workspace\\erpilot\\traces\\demo\\20261007-172553-1fbcdd\\recover.jsonl",
+    "source": "scripted-demo"
+  }
+]
+

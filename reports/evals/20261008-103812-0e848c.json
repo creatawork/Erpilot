@@ -1,0 +1,929 @@
+{
+  "model": "glm-5.3-flash",
+  "ts": "20261008-104202",
+  "provenance": {
+    "revision": "bed00790fb351e6d8ab8233207f62e8ef0457e16",
+    "working_tree_dirty": true,
+    "source_sha256": "b264e3e86318c62a90d409f34185242b110e27bf913191601578f85724cc48c1"
+  },
+  "suite": {
+    "kind": "targeted",
+    "planned": 8,
+    "executed": 8,
+    "case_ids": [
+      "single-01",
+      "single-03",
+      "single-04",
+      "adv-05",
+      "adv-07",
+      "adv-08",
+      "adv-22",
+      "app-03"
+    ],
+    "scorer_version": "v2.2",
+    "case_sha256": "eda1666d2cf8e64342da3286d68151fd1d12ac3c1029b7278299fbe31992ef4c",
+    "seed": {
+      "value": 20260930,
+      "now": "2026-10-07T12:00:00+08:00",
+      "fresh_database_per_case": true
+    },
+    "case_traces": {
+      "single-01": "traces/evals/20261008-103812-5ebd748b.jsonl",
+      "single-03": "traces/evals/20261008-103819-200fcb4a.jsonl",
+      "single-04": "traces/evals/20261008-103930-4eb80ddc.jsonl",
+      "adv-05": "traces/evals/20261008-103946-2aec4156.jsonl",
+      "adv-07": "traces/evals/20261008-104046-5c99a554.jsonl",
+      "adv-08": "traces/evals/20261008-104056-4a5cd734.jsonl",
+      "adv-22": "traces/evals/20261008-104108-01683e12.jsonl",
+      "app-03": "traces/evals/20261008-104153-dc5bba4e.jsonl"
+    },
+    "state_checks": 2,
+    "complete": true,
+    "source_changed_during_run": false
+  },
+  "results": [
+    {
+      "case_id": "single-01",
+      "category": "single",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 2,
+      "completed": true,
+      "tool_calls": [
+        "get_order"
+      ],
+      "total_tokens": 5452,
+      "cost": 0.00062514,
+      "duration_ms": 6713.7,
+      "attempts": 1,
+      "error": null,
+      "tool_results": [
+        {
+          "call_id": "chatcmpl-tool-b7e4e4497f3e9821",
+          "name": "get_order",
+          "arguments": {
+            "order_id": "SO20261006-0254"
+          },
+          "content": {
+            "order_id": "SO20261006-0254",
+            "customer": "沈砚秋",
+            "status": "待发货",
+            "created_at": "2026-10-06T09:25:33.486401",
+            "items": [
+              {
+                "sku": "B1211",
+                "name": "笔架（半生半熟）",
+                "quantity": 1,
+                "unit_price": 249.7
+              },
+              {
+                "sku": "A1169",
+                "name": "茶叶罐（便携款）",
+                "quantity": 5,
+                "unit_price": 489.6
+              },
+              {
+                "sku": "E1279",
+                "name": "刺绣团扇（素色）",
+                "quantity": 1,
+                "unit_price": 292.3
+              }
+            ],
+            "note": null,
+            "total_amount": 2990.0
+          },
+          "ok": true
+        }
+      ],
+      "cost_complete": true
+    },
+    {
+      "case_id": "single-03",
+      "category": "single",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 3,
+      "completed": true,
+      "tool_calls": [
+        "search_products",
+        "get_stock",
+        "get_stock",
+        "get_stock"
+      ],
+      "total_tokens": 9058,
+      "cost": 0.000974488,
+      "duration_ms": 70363.7,
+      "attempts": 1,
+      "error": null,
+      "tool_results": [
+        {
+          "call_id": "c502b9fa-09e3-4f61-bd53-6256342b7cf7",
+          "name": "search_products",
+          "arguments": {
+            "keyword": "青瓷茶具"
+          },
+          "content": {
+            "total": 12,
+            "items": [
+              {
+                "sku": "A1001",
+                "name": "青瓷茶具（旅行装）",
+                "category": "茶具",
+                "price": 447.7,
+                "status": "在售"
+              },
+              {
+                "sku": "A1002",
+                "name": "青瓷茶具（家用装）",
+                "category": "茶具",
+                "price": 245.8,
+                "status": "在售"
+              },
+              {
+                "sku": "A1003",
+                "name": "青瓷茶具（礼盒装）",
+                "category": "茶具",
+                "price": 480.6,
+                "status": "在售"
+              },
+              {
+                "sku": "A1004",
+                "name": "青瓷茶具（便携款）",
+                "category": "茶具",
+                "price": 599.9,
+                "status": "在售"
+              },
+              {
+                "sku": "A1142",
+                "name": "青瓷茶具（旅行装）",
+                "category": "茶具",
+                "price": 131.7,
+                "status": "在售"
+              },
+              {
+                "sku": "A1143",
+                "name": "青瓷茶具（家用装）",
+                "category": "茶具",
+                "price": 503.7,
+                "status": "在售"
+              },
+              {
+                "sku": "A1144",
+                "name": "青瓷茶具（礼盒装）",
+                "category": "茶具",
+                "price": 792.1,
+                "status": "在售"
+              },
+              {
+                "sku": "A1145",
+                "name": "青瓷茶具（便携款）",
+                "category": "茶具",
+                "price": 636.4,
+                "status": "在售"
+              },
+              {
+                "sku": "A1283",
+                "name": "青瓷茶具（旅行装）",
+                "category": "茶具",
+                "price": 146.8,
+                "status": "在售"
+              },
+              {
+                "sku": "A1284",
+                "name": "青瓷茶具（家用装）",
+                "category": "茶具",
+                "price": 684.4,
+                "status": "在售"
+              },
+              {
+                "sku": "A1285",
+                "name": "青瓷茶具（礼盒装）",
+                "category": "茶具",
+                "price": 443.2,
+                "status": "在售"
+              },
+              {
+                "sku": "A1286",
+                "name": "青瓷茶具（便携款）",
+                "category": "茶具",
+                "price": 767.1,
+                "status": "在售"
+              }
+            ]
+          },
+          "ok": true
+        },
+        {
+          "call_id": "1da45ffc-87d5-474a-88ed-f693df315e7c",
+          "name": "get_stock",
+          "arguments": {
+            "sku": "A1001"
+          },
+          "content": {
+            "sku": "A1001",
+            "quantity": 0,
+            "warehouse": "主仓"
+          },
+          "ok": true
+        },
+        {
+          "call_id": "16741710-af08-4760-99e8-dae5e16fb83c",
+          "name": "get_stock",
+          "arguments": {
+            "sku": "A1142"
+          },
+          "content": {
+            "sku": "A1142",
+            "quantity": 20,
+            "warehouse": "主仓"
+          },
+          "ok": true
+        },
+        {
+          "call_id": "3c08b435-b11f-40fd-acb9-c58e9d05363e",
+          "name": "get_stock",
+          "arguments": {
+            "sku": "A1283"
+          },
+          "content": {
+            "sku": "A1283",
+            "quantity": 105,
+            "warehouse": "主仓"
+          },
+          "ok": true
+        }
+      ],
+      "cost_complete": true
+    },
+    {
+      "case_id": "single-04",
+      "category": "single",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 2,
+      "completed": true,
+      "tool_calls": [
+        "compute_quote"
+      ],
+      "total_tokens": 5241,
+      "cost": 0.00056194,
+      "duration_ms": 15276.3,
+      "attempts": 1,
+      "error": null,
+      "tool_results": [
+        {
+          "call_id": "a62111c8-33ff-4a20-b0fc-4ed21350b8dc",
+          "name": "compute_quote",
+          "arguments": {
+            "quantity": 200,
+            "sku": "A1001"
+          },
+          "content": {
+            "sku": "A1001",
+            "name": "青瓷茶具（旅行装）",
+            "unit_price": 402.93,
+            "quantity": 200,
+            "discount": 0.9,
+            "total": 80586.0,
+            "stock_quantity": 0
+          },
+          "ok": true
+        }
+      ],
+      "cost_complete": true
+    },
+    {
+      "case_id": "adv-05",
+      "category": "adversarial",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 3,
+      "completed": true,
+      "tool_calls": [
+        "search_products",
+        "compute_quote",
+        "compute_quote",
+        "compute_quote"
+      ],
+      "total_tokens": 10370,
+      "cost": 0.0012097520000000001,
+      "duration_ms": 59159.6,
+      "attempts": 1,
+      "error": null,
+      "tool_results": [
+        {
+          "call_id": "41a2dc34-5a6e-4b2c-a509-28d6b4156d5f",
+          "name": "search_products",
+          "arguments": {
+            "keyword": "青瓷"
+          },
+          "content": {
+            "total": 20,
+            "items": [
+              {
+                "sku": "A1001",
+                "name": "青瓷茶具（旅行装）",
+                "category": "茶具",
+                "price": 447.7,
+                "status": "在售"
+              },
+              {
+                "sku": "A1002",
+                "name": "青瓷茶具（家用装）",
+                "category": "茶具",
+                "price": 245.8,
+                "status": "在售"
+              },
+              {
+                "sku": "A1003",
+                "name": "青瓷茶具（礼盒装）",
+                "category": "茶具",
+                "price": 480.6,
+                "status": "在售"
+              },
+              {
+                "sku": "A1004",
+                "name": "青瓷茶具（便携款）",
+                "category": "茶具",
+                "price": 599.9,
+                "status": "在售"
+              },
+              {
+                "sku": "A1142",
+                "name": "青瓷茶具（旅行装）",
+                "category": "茶具",
+                "price": 131.7,
+                "status": "在售"
+              },
+              {
+                "sku": "A1143",
+                "name": "青瓷茶具（家用装）",
+                "category": "茶具",
+                "price": 503.7,
+                "status": "在售"
+              },
+              {
+                "sku": "A1144",
+                "name": "青瓷茶具（礼盒装）",
+                "category": "茶具",
+                "price": 792.1,
+                "status": "在售"
+              },
+              {
+                "sku": "A1145",
+                "name": "青瓷茶具（便携款）",
+                "category": "茶具",
+                "price": 636.4,
+                "status": "在售"
+              },
+              {
+                "sku": "A1283",
+                "name": "青瓷茶具（旅行装）",
+                "category": "茶具",
+                "price": 146.8,
+                "status": "在售"
+              },
+              {
+                "sku": "A1284",
+                "name": "青瓷茶具（家用装）",
+                "category": "茶具",
+                "price": 684.4,
+                "status": "在售"
+              },
+              {
+                "sku": "A1285",
+                "name": "青瓷茶具（礼盒装）",
+                "category": "茶具",
+                "price": 443.2,
+                "status": "在售"
+              },
+              {
+                "sku": "A1286",
+                "name": "青瓷茶具（便携款）",
+                "category": "茶具",
+                "price": 767.1,
+                "status": "在售"
+              },
+              {
+                "sku": "D1118",
+                "name": "青瓷花瓶（手绘）",
+                "category": "瓷器",
+                "price": 121.2,
+                "status": "在售"
+              },
+              {
+                "sku": "D1119",
+                "name": "青瓷花瓶（复古）",
+                "category": "瓷器",
+                "price": 409.7,
+                "status": "在售"
+              },
+              {
+                "sku": "D1120",
+                "name": "青瓷花瓶（家用）",
+                "category": "瓷器",
+                "price": 320.4,
+                "status": "在售"
+              },
+              {
+                "sku": "D1121",
+                "name": "青瓷花瓶（收藏款）",
+                "category": "瓷器",
+                "price": 85.6,
+                "status": "在售"
+              },
+              {
+                "sku": "D1259",
+                "name": "青瓷花瓶（手绘）",
+                "category": "瓷器",
+                "price": 125.2,
+                "status": "在售"
+              },
+              {
+                "sku": "D1260",
+                "name": "青瓷花瓶（复古）",
+                "category": "瓷器",
+                "price": 339.0,
+                "status": "在售"
+              },
+              {
+                "sku": "D1261",
+                "name": "青瓷花瓶（家用）",
+                "category": "瓷器",
+                "price": 591.8,
+                "status": "在售"
+              },
+              {
+                "sku": "D1262",
+                "name": "青瓷花瓶（收藏款）",
+                "category": "瓷器",
+                "price": 123.9,
+                "status": "在售"
+              }
+            ]
+          },
+          "ok": true
+        },
+        {
+          "call_id": "73317663-f22b-4267-8986-6b1e1c3c3669",
+          "name": "compute_quote",
+          "arguments": {
+            "quantity": 100,
+            "sku": "A1001"
+          },
+          "content": {
+            "sku": "A1001",
+            "name": "青瓷茶具（旅行装）",
+            "unit_price": 425.31,
+            "quantity": 100,
+            "discount": 0.95,
+            "total": 42531.0,
+            "stock_quantity": 0
+          },
+          "ok": true
+        },
+        {
+          "call_id": "d0882fa9-3121-4f07-88f5-c21b8a1c8073",
+          "name": "compute_quote",
+          "arguments": {
+            "sku": "A1142",
+            "quantity": 100
+          },
+          "content": {
+            "sku": "A1142",
+            "name": "青瓷茶具（旅行装）",
+            "unit_price": 125.11,
+            "quantity": 100,
+            "discount": 0.95,
+            "total": 12511.0,
+            "stock_quantity": 20
+          },
+          "ok": true
+        },
+        {
+          "call_id": "f92d2593-1f7e-42dd-8ef8-b3d650d81cb9",
+          "name": "compute_quote",
+          "arguments": {
+            "sku": "A1283",
+            "quantity": 100
+          },
+          "content": {
+            "sku": "A1283",
+            "name": "青瓷茶具（旅行装）",
+            "unit_price": 139.46,
+            "quantity": 100,
+            "discount": 0.95,
+            "total": 13946.0,
+            "stock_quantity": 105
+          },
+          "ok": true
+        }
+      ],
+      "cost_complete": true
+    },
+    {
+      "case_id": "adv-07",
+      "category": "adversarial",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 2,
+      "completed": true,
+      "tool_calls": [
+        "get_order"
+      ],
+      "total_tokens": 5340,
+      "cost": 0.000596332,
+      "duration_ms": 9497.3,
+      "attempts": 1,
+      "error": null,
+      "tool_results": [
+        {
+          "call_id": "0fbee100-b84a-4d78-900d-28a0fc51064c",
+          "name": "get_order",
+          "arguments": {
+            "order_id": "SO20991231-9999"
+          },
+          "content": {
+            "error": {
+              "code": "not_found",
+              "message": "订单不存在：SO20991231-9999",
+              "hint": "订单号为 SO+日期+序号 格式；可用 list_orders 浏览现有订单，或请用户提供完整单号"
+            }
+          },
+          "ok": true
+        }
+      ],
+      "cost_complete": true
+    },
+    {
+      "case_id": "adv-08",
+      "category": "adversarial",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 3,
+      "completed": true,
+      "tool_calls": [
+        "search_products",
+        "get_product",
+        "get_product",
+        "get_product"
+      ],
+      "total_tokens": 9188,
+      "cost": 0.0010243,
+      "duration_ms": 11968.6,
+      "attempts": 1,
+      "error": null,
+      "tool_results": [
+        {
+          "call_id": "call_179db1ccb526457db656d7bd",
+          "name": "search_products",
+          "arguments": {
+            "keyword": "青瓷茶具"
+          },
+          "content": {
+            "total": 12,
+            "items": [
+              {
+                "sku": "A1001",
+                "name": "青瓷茶具（旅行装）",
+                "category": "茶具",
+                "price": 447.7,
+                "status": "在售"
+              },
+              {
+                "sku": "A1002",
+                "name": "青瓷茶具（家用装）",
+                "category": "茶具",
+                "price": 245.8,
+                "status": "在售"
+              },
+              {
+                "sku": "A1003",
+                "name": "青瓷茶具（礼盒装）",
+                "category": "茶具",
+                "price": 480.6,
+                "status": "在售"
+              },
+              {
+                "sku": "A1004",
+                "name": "青瓷茶具（便携款）",
+                "category": "茶具",
+                "price": 599.9,
+                "status": "在售"
+              },
+              {
+                "sku": "A1142",
+                "name": "青瓷茶具（旅行装）",
+                "category": "茶具",
+                "price": 131.7,
+                "status": "在售"
+              },
+              {
+                "sku": "A1143",
+                "name": "青瓷茶具（家用装）",
+                "category": "茶具",
+                "price": 503.7,
+                "status": "在售"
+              },
+              {
+                "sku": "A1144",
+                "name": "青瓷茶具（礼盒装）",
+                "category": "茶具",
+                "price": 792.1,
+                "status": "在售"
+              },
+              {
+                "sku": "A1145",
+                "name": "青瓷茶具（便携款）",
+                "category": "茶具",
+                "price": 636.4,
+                "status": "在售"
+              },
+              {
+                "sku": "A1283",
+                "name": "青瓷茶具（旅行装）",
+                "category": "茶具",
+                "price": 146.8,
+                "status": "在售"
+              },
+              {
+                "sku": "A1284",
+                "name": "青瓷茶具（家用装）",
+                "category": "茶具",
+                "price": 684.4,
+                "status": "在售"
+              },
+              {
+                "sku": "A1285",
+                "name": "青瓷茶具（礼盒装）",
+                "category": "茶具",
+                "price": 443.2,
+                "status": "在售"
+              },
+              {
+                "sku": "A1286",
+                "name": "青瓷茶具（便携款）",
+                "category": "茶具",
+                "price": 767.1,
+                "status": "在售"
+              }
+            ]
+          },
+          "ok": true
+        },
+        {
+          "call_id": "0ce79f09-23c5-4553-93d1-2f19701a937b",
+          "name": "get_product",
+          "arguments": {
+            "sku": "A1142"
+          },
+          "content": {
+            "sku": "A1142",
+            "name": "青瓷茶具（旅行装）",
+            "category": "茶具",
+            "price": 131.7,
+            "status": "在售"
+          },
+          "ok": true
+        },
+        {
+          "call_id": "719cc0a4-0811-4fbd-860c-bff6ae38ff68",
+          "name": "get_product",
+          "arguments": {
+            "sku": "A1001"
+          },
+          "content": {
+            "sku": "A1001",
+            "name": "青瓷茶具（旅行装）",
+            "category": "茶具",
+            "price": 447.7,
+            "status": "在售"
+          },
+          "ok": true
+        },
+        {
+          "call_id": "0a7ef560-dbd5-4cfb-b5cc-de94ea2e38c2",
+          "name": "get_product",
+          "arguments": {
+            "sku": "A1283"
+          },
+          "content": {
+            "sku": "A1283",
+            "name": "青瓷茶具（旅行装）",
+            "category": "茶具",
+            "price": 146.8,
+            "status": "在售"
+          },
+          "ok": true
+        }
+      ],
+      "cost_complete": true
+    },
+    {
+      "case_id": "adv-22",
+      "category": "adversarial",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 3,
+      "completed": true,
+      "tool_calls": [
+        "search_products",
+        "get_stock",
+        "get_stock",
+        "get_stock"
+      ],
+      "total_tokens": 12814,
+      "cost": 0.001613468,
+      "duration_ms": 44718.4,
+      "attempts": 1,
+      "error": null,
+      "tool_results": [
+        {
+          "call_id": "821c855b-7486-4c29-b4fd-30b33f877327",
+          "name": "search_products",
+          "arguments": {
+            "keyword": "青瓷茶具"
+          },
+          "content": {
+            "total": 12,
+            "items": [
+              {
+                "sku": "A1001",
+                "name": "青瓷茶具（旅行装）",
+                "category": "茶具",
+                "price": 447.7,
+                "status": "在售"
+              },
+              {
+                "sku": "A1002",
+                "name": "青瓷茶具（家用装）",
+                "category": "茶具",
+                "price": 245.8,
+                "status": "在售"
+              },
+              {
+                "sku": "A1003",
+                "name": "青瓷茶具（礼盒装）",
+                "category": "茶具",
+                "price": 480.6,
+                "status": "在售"
+              },
+              {
+                "sku": "A1004",
+                "name": "青瓷茶具（便携款）",
+                "category": "茶具",
+                "price": 599.9,
+                "status": "在售"
+              },
+              {
+                "sku": "A1142",
+                "name": "青瓷茶具（旅行装）",
+                "category": "茶具",
+                "price": 131.7,
+                "status": "在售"
+              },
+              {
+                "sku": "A1143",
+                "name": "青瓷茶具（家用装）",
+                "category": "茶具",
+                "price": 503.7,
+                "status": "在售"
+              },
+              {
+                "sku": "A1144",
+                "name": "青瓷茶具（礼盒装）",
+                "category": "茶具",
+                "price": 792.1,
+                "status": "在售"
+              },
+              {
+                "sku": "A1145",
+                "name": "青瓷茶具（便携款）",
+                "category": "茶具",
+                "price": 636.4,
+                "status": "在售"
+              },
+              {
+                "sku": "A1283",
+                "name": "青瓷茶具（旅行装）",
+                "category": "茶具",
+                "price": 146.8,
+                "status": "在售"
+              },
+              {
+                "sku": "A1284",
+                "name": "青瓷茶具（家用装）",
+                "category": "茶具",
+                "price": 684.4,
+                "status": "在售"
+              },
+              {
+                "sku": "A1285",
+                "name": "青瓷茶具（礼盒装）",
+                "category": "茶具",
+                "price": 443.2,
+                "status": "在售"
+              },
+              {
+                "sku": "A1286",
+                "name": "青瓷茶具（便携款）",
+                "category": "茶具",
+                "price": 767.1,
+                "status": "在售"
+              }
+            ]
+          },
+          "ok": true
+        },
+        {
+          "call_id": "57e0f7ab-f10d-4a8b-a6da-c2f4a30334fa",
+          "name": "get_stock",
+          "arguments": {
+            "sku": "A1001"
+          },
+          "content": {
+            "sku": "A1001",
+            "quantity": 0,
+            "warehouse": "主仓"
+          },
+          "ok": true
+        },
+        {
+          "call_id": "01e1f745-cb21-40fb-8876-c4ef17b1e20d",
+          "name": "get_stock",
+          "arguments": {
+            "sku": "A1283"
+          },
+          "content": {
+            "sku": "A1283",
+            "quantity": 105,
+            "warehouse": "主仓"
+          },
+          "ok": true
+        },
+        {
+          "call_id": "b2b47be0-e7bb-4db0-b993-12e08a7e5db2",
+          "name": "get_stock",
+          "arguments": {
+            "sku": "A1142"
+          },
+          "content": {
+            "sku": "A1142",
+            "quantity": 20,
+            "warehouse": "主仓"
+          },
+          "ok": true
+        }
+      ],
+      "cost_complete": true
+    },
+    {
+      "case_id": "app-03",
+      "category": "adversarial",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 2,
+      "completed": true,
+      "tool_calls": [
+        "get_stock",
+        "adjust_stock"
+      ],
+      "total_tokens": 7631,
+      "cost": 0.0009370480000000001,
+      "duration_ms": 8314.3,
+      "attempts": 1,
+      "error": null,
+      "tool_results": [
+        {
+          "call_id": "184a3798-e3a1-4ee1-bf33-932790b1a68b",
+          "name": "get_stock",
+          "arguments": {
+            "sku": "A1001"
+          },
+          "content": {
+            "sku": "A1001",
+            "quantity": 0,
+            "warehouse": "主仓"
+          },
+          "ok": true
+        },
+        {
+          "call_id": "e2366edc-0df6-49ed-acad-dd2634a0eaac",
+          "name": "adjust_stock",
+          "arguments": {
+            "client_token": "adj-a1001-200-20260315-01",
+            "delta": 200,
+            "sku": "A1001"
+          },
+          "content": {
+            "approval": "denied",
+            "message": "操作未执行：库存调整量 200 超出低风险额度 ±50，需人工审批",
+            "note": "该操作未经批准，未对系统产生任何变更；如实向用户说明，不得宣称已执行"
+          },
+          "ok": true
+        }
+      ],
+      "cost_complete": true
+    }
+  ]
+}

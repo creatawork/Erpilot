@@ -1,0 +1,143 @@
+...FF...                                                                 [100%]
+================================== FAILURES ===================================
+_________________ test_api_checkpoint_failure_is_fail_closed __________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001D4A58E94F0>
+tmp_path = WindowsPath('C:/Users/V/AppData/Local/Temp/pytest-of-unknown/pytest-2/test_api_checkpoint_failure_is0')
+
+    async def test_api_checkpoint_failure_is_fail_closed(monkeypatch, tmp_path):
+>       from erpilot_api.main import create_app
+
+apps\api\tests\test_checkpoint.py:53: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+apps\api\src\erpilot_api\main.py:252: in <module>
+    app = create_app()
+          ^^^^^^^^^^^^
+apps\api\src\erpilot_api\main.py:97: in create_app
+    resolved_tools, env_gate = _resolve_tools(tools)
+                               ^^^^^^^^^^^^^^^^^^^^^
+apps\api\src\erpilot_api\main.py:81: in _resolve_tools
+    return build_agent_tools(writes=True, approval_gate=gate), gate
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+packages\mcp_erp\src\mcp_erp\bridge.py:63: in build_agent_tools
+    return asyncio.run(build_agent_tools_async(db_path, writes=writes, approval_gate=approval_gate))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+main = <coroutine object build_agent_tools_async at 0x000001D4AB0FF5B0>
+debug = None, loop_factory = None
+
+    def run(main, *, debug=None, loop_factory=None):
+        """Execute the coroutine and return the result.
+    
+        This function runs the passed coroutine, taking care of
+        managing the asyncio event loop, finalizing asynchronous
+        generators and closing the default executor.
+    
+        This function cannot be called when another asyncio event loop is
+        running in the same thread.
+    
+        If debug is True, the event loop will be run in debug mode.
+        If loop_factory is passed, it is used for new event loop creation.
+    
+        This function always creates a new event loop and closes it at the end.
+        It should be used as a main entry point for asyncio programs, and should
+        ideally only be called once.
+    
+        The executor is given a timeout duration of 5 minutes to shutdown.
+        If the executor hasn't finished within that duration, a warning is
+        emitted and the executor is closed.
+    
+        Example:
+    
+            async def main():
+                await asyncio.sleep(1)
+                print('hello')
+    
+            asyncio.run(main())
+        """
+        if events._get_running_loop() is not None:
+            # fail fast with short traceback
+>           raise RuntimeError(
+                "asyncio.run() cannot be called from a running event loop")
+E           RuntimeError: asyncio.run() cannot be called from a running event loop
+
+C:\Users\V\AppData\Roaming\uv\python\cpython-3.12-windows-x86_64-none\Lib\asyncio\runners.py:191: RuntimeError
+____________________ test_api_accepts_explicit_test_saver _____________________
+
+tmp_path = WindowsPath('C:/Users/V/AppData/Local/Temp/pytest-of-unknown/pytest-2/test_api_accepts_explicit_test0')
+
+    async def test_api_accepts_explicit_test_saver(tmp_path):
+>       from erpilot_api.main import create_app
+
+apps\api\tests\test_checkpoint.py:63: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+apps\api\src\erpilot_api\main.py:252: in <module>
+    app = create_app()
+          ^^^^^^^^^^^^
+apps\api\src\erpilot_api\main.py:97: in create_app
+    resolved_tools, env_gate = _resolve_tools(tools)
+                               ^^^^^^^^^^^^^^^^^^^^^
+apps\api\src\erpilot_api\main.py:81: in _resolve_tools
+    return build_agent_tools(writes=True, approval_gate=gate), gate
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+packages\mcp_erp\src\mcp_erp\bridge.py:63: in build_agent_tools
+    return asyncio.run(build_agent_tools_async(db_path, writes=writes, approval_gate=approval_gate))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+main = <coroutine object build_agent_tools_async at 0x000001D4AB0FFA70>
+debug = None, loop_factory = None
+
+    def run(main, *, debug=None, loop_factory=None):
+        """Execute the coroutine and return the result.
+    
+        This function runs the passed coroutine, taking care of
+        managing the asyncio event loop, finalizing asynchronous
+        generators and closing the default executor.
+    
+        This function cannot be called when another asyncio event loop is
+        running in the same thread.
+    
+        If debug is True, the event loop will be run in debug mode.
+        If loop_factory is passed, it is used for new event loop creation.
+    
+        This function always creates a new event loop and closes it at the end.
+        It should be used as a main entry point for asyncio programs, and should
+        ideally only be called once.
+    
+        The executor is given a timeout duration of 5 minutes to shutdown.
+        If the executor hasn't finished within that duration, a warning is
+        emitted and the executor is closed.
+    
+        Example:
+    
+            async def main():
+                await asyncio.sleep(1)
+                print('hello')
+    
+            asyncio.run(main())
+        """
+        if events._get_running_loop() is not None:
+            # fail fast with short traceback
+>           raise RuntimeError(
+                "asyncio.run() cannot be called from a running event loop")
+E           RuntimeError: asyncio.run() cannot be called from a running event loop
+
+C:\Users\V\AppData\Roaming\uv\python\cpython-3.12-windows-x86_64-none\Lib\asyncio\runners.py:191: RuntimeError
+============================== warnings summary ===============================
+apps/api/tests/test_checkpoint.py::test_postgres_interrupt_survives_runtime_and_saver_reconstruction[True]
+  E:\workspace\erpilot\.venv-langgraph\Lib\site-packages\langgraph\pregel\_runner.py:164: RuntimeWarning: coroutine 'build_agent_tools_async' was never awaited
+    self.error_handler_nodes = set(self.node_error_handler_map.values())
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED apps/api/tests/test_checkpoint.py::test_api_checkpoint_failure_is_fail_closed
+FAILED apps/api/tests/test_checkpoint.py::test_api_accepts_explicit_test_saver
+2 failed, 6 passed, 1 warning in 9.36s
+
+E:\workspace\erpilot\.venv-langgraph\Lib\site-packages\_pytest\unraisableexception.py:33: RuntimeWarning: coroutine 'build_agent_tools_async' was never awaited
+  gc.collect()
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback

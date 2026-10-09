@@ -1,0 +1,5 @@
+{
+  "data_source": "mcp",
+  "writes_enabled": true,
+  "reasoning_enabled": true
+}

@@ -1,0 +1,12 @@
+{
+  "python": "3.12.14 (main, Sep 24 2026, 17:57:31) [MSC v.1944 64 bit (AMD64)]",
+  "packages": {
+    "langgraph": "1.2.13",
+    "langgraph-checkpoint-postgres": "3.1.2",
+    "fastapi": "0.141.1",
+    "psycopg": "3.3.6",
+    "uvicorn": "0.54.0",
+    "pytest": "9.1.1",
+    "ruff": "0.16.9"
+  }
+}

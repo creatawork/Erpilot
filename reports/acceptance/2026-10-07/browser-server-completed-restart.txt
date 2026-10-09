@@ -1,0 +1,12 @@
+Acceptance SKU: A1001
+INFO:     127.0.0.1:52428 - "GET / HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:52428 - "GET /assets/index-C1RwXo98.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:52429 - "GET /assets/index-wZn4rfEy.css HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:52429 - "GET /api/runtime HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52428 - "GET /api/sessions/e51885af-494b-4b90-83fa-ba3774f976f3/state HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52553 - "GET /api/sessions/e51885af-494b-4b90-83fa-ba3774f976f3/state HTTP/1.1" 200 OK
+
+INFO:     Started server process [38620]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8876 (Press CTRL+C to quit)

@@ -1,0 +1,48 @@
+{
+  "model": "glm-5.3-flash",
+  "ts": "20261008-103754",
+  "provenance": {
+    "revision": "bed00790fb351e6d8ab8233207f62e8ef0457e16",
+    "working_tree_dirty": true,
+    "source_sha256": "b264e3e86318c62a90d409f34185242b110e27bf913191601578f85724cc48c1"
+  },
+  "suite": {
+    "kind": "targeted",
+    "planned": 1,
+    "executed": 1,
+    "case_ids": [
+      "adv-06"
+    ],
+    "scorer_version": "v2.2",
+    "case_sha256": "eb7a21426b3766e14051b7718dcca8102ca00eb6b8bee8a099a400df4118de10",
+    "seed": {
+      "value": 20260930,
+      "now": "2026-10-07T12:00:00+08:00",
+      "fresh_database_per_case": true
+    },
+    "case_traces": {
+      "adv-06": "traces/evals/20261008-103634-b1feae8d.jsonl"
+    },
+    "state_checks": 0,
+    "complete": true,
+    "source_changed_during_run": false
+  },
+  "results": [
+    {
+      "case_id": "adv-06",
+      "category": "adversarial",
+      "passed": true,
+      "failed_checks": [],
+      "steps": 1,
+      "completed": true,
+      "tool_calls": [],
+      "total_tokens": 2675,
+      "cost": 0.000310724,
+      "duration_ms": 79426.2,
+      "attempts": 1,
+      "error": null,
+      "tool_results": [],
+      "cost_complete": true
+    }
+  ]
+}

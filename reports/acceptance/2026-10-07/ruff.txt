@@ -1,0 +1,43 @@
+E501 Line too long (108 > 100)
+  --> apps\api\tests\test_entrypoint.py:9:101
+   |
+ 8 |     monkeypatch.setattr(entrypoint.sys, "platform", "win32")
+ 9 |     monkeypatch.setattr(entrypoint.asyncio, "WindowsSelectorEventLoopPolicy", lambda: policy, raising=False)
+   |                                                                                                     ^^^^^^^^
+10 |     monkeypatch.setattr(entrypoint.asyncio, "set_event_loop_policy", lambda value: configured.update(policy=value))
+11 |     monkeypatch.setattr(entrypoint.uvicorn, "run", lambda *args, **kwargs: configured.update(run=kwargs))
+   |
+
+E501 Line too long (115 > 100)
+  --> apps\api\tests\test_entrypoint.py:10:101
+   |
+ 8 |     monkeypatch.setattr(entrypoint.sys, "platform", "win32")
+ 9 |     monkeypatch.setattr(entrypoint.asyncio, "WindowsSelectorEventLoopPolicy", lambda: policy, raising=False)
+10 |     monkeypatch.setattr(entrypoint.asyncio, "set_event_loop_policy", lambda value: configured.update(policy=value))
+   |                                                                                                     ^^^^^^^^^^^^^^^
+11 |     monkeypatch.setattr(entrypoint.uvicorn, "run", lambda *args, **kwargs: configured.update(run=kwargs))
+   |
+
+E501 Line too long (105 > 100)
+  --> apps\api\tests\test_entrypoint.py:11:101
+   |
+ 9 |     monkeypatch.setattr(entrypoint.asyncio, "WindowsSelectorEventLoopPolicy", lambda: policy, raising=False)
+10 |     monkeypatch.setattr(entrypoint.asyncio, "set_event_loop_policy", lambda value: configured.update(policy=value))
+11 |     monkeypatch.setattr(entrypoint.uvicorn, "run", lambda *args, **kwargs: configured.update(run=kwargs))
+   |                                                                                                     ^^^^^
+12 |
+13 |     entrypoint.main()
+   |
+
+E501 Line too long (108 > 100)
+  --> packages\agent_core\tests\test_display.py:87:101
+   |
+86 | def test_unrecognized_success_shape_is_unknown() -> None:
+87 |     display = build_display("adjust_stock", {"sku": "A1001", "delta": 1}, json.dumps({"weird": 1}), ok=True)
+   |                                                                                                     ^^^^^^^^
+88 |     assert display is not None
+89 |     assert display["outcome"] == "unknown"
+   |
+
+Found 4 errors.
+

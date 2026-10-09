@@ -1,0 +1,9 @@
+........................................................................ [ 28%]
+........................................................................ [ 56%]
+........................................................................ [ 85%]
+...........sss.......................                                    [100%]
+=========================== short test summary info ===========================
+SKIPPED [1] apps\api\tests\test_checkpoint.py:72: requires explicit isolated PostgreSQL test configuration
+SKIPPED [2] apps\api\tests\test_checkpoint.py:110: requires explicit isolated PostgreSQL test configuration
+250 passed, 3 skipped, 35 deselected in 29.26s
+

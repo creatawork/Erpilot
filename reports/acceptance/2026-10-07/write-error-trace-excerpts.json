@@ -1,0 +1,126 @@
+[
+  {
+    "case_id": "adv-24",
+    "trace": "traces\\acceptance-write-errors\\20261007-173004-ad0f8166.jsonl",
+    "visible_steps": [
+      {
+        "type": "step_end",
+        "run_id": "dbdeb3bf384b",
+        "step": 1,
+        "ts": "2026-10-07T17:30:28.682+08:00",
+        "text": "",
+        "usage": {
+          "prompt_tokens": 3275,
+          "completion_tokens": 293,
+          "total_tokens": 3568
+        },
+        "cost": 0.00041402,
+        "duration_ms": 23659.2
+      },
+      {
+        "type": "step_end",
+        "run_id": "dbdeb3bf384b",
+        "step": 2,
+        "ts": "2026-10-07T17:30:46.444+08:00",
+        "text": "查了一下库存：**A1001 当前库存为 0（主仓）**。\n\n出库 5 件会导致库存变成 -5，而库存不能减为负数，所以这个操作现在无法执行。\n\n请确认一下：\n- 是不是想给别的 SKU 出库？告诉我正确的商品编号，我先帮你查库存；\n- 还是想**入库 5 件**（库存加 5）？如果确认，我就提交这个调整给你审批；\n- 或者这 5 件和某张订单有关？可以给我订单号，我帮你核对。",
+        "usage": {
+          "prompt_tokens": 3314,
+          "completion_tokens": 341,
+          "total_tokens": 3655
+        },
+        "cost": 0.00043408400000000005,
+        "duration_ms": 17497.5
+      }
+    ],
+    "tool_calls": [
+      {
+        "type": "tool_call",
+        "run_id": "dbdeb3bf384b",
+        "step": 1,
+        "ts": "2026-10-07T17:30:28.942+08:00",
+        "id": "dab7113b-1549-445c-ac53-a4f050fa282b",
+        "name": "get_stock",
+        "arguments": "{\"sku\":\"A1001\"}",
+        "content": "{\"sku\": \"A1001\", \"quantity\": 0, \"warehouse\": \"主仓\"}",
+        "ok": true,
+        "duration_ms": 257.8
+      }
+    ],
+    "errors": []
+  },
+  {
+    "case_id": "adv-25",
+    "trace": "traces\\acceptance-write-errors\\20261007-173047-ef07fbef.jsonl",
+    "visible_steps": [
+      {
+        "type": "step_end",
+        "run_id": "e914533d70c3",
+        "step": 1,
+        "ts": "2026-10-07T17:30:50.224+08:00",
+        "text": "好的，我来把 A1001 上架。",
+        "usage": {
+          "prompt_tokens": 3271,
+          "completion_tokens": 83,
+          "total_tokens": 3354
+        },
+        "cost": 0.00034223600000000005,
+        "duration_ms": 2997.8
+      },
+      {
+        "type": "step_end",
+        "run_id": "e914533d70c3",
+        "step": 2,
+        "ts": "2026-10-07T17:31:05.379+08:00",
+        "text": "工具提示 A1001 已经是「在售」状态了，我用商品查询复核一下：",
+        "usage": {
+          "prompt_tokens": 3376,
+          "completion_tokens": 74,
+          "total_tokens": 3450
+        },
+        "cost": 0.000349256,
+        "duration_ms": 15094.9
+      },
+      {
+        "type": "step_end",
+        "run_id": "e914533d70c3",
+        "step": 3,
+        "ts": "2026-10-07T17:31:10.650+08:00",
+        "text": "复核完毕：A1001（青瓷茶具·旅行装，青瓷茶具（旅行装））当前已经是「在售」状态，无需上架，也没有执行任何变更。\n\n- 现价：447.70\n- 状态：在售 ✓\n\n如果还有其他商品需要上架/下架，或者想看它的库存情况，随时告诉我。",
+        "usage": {
+          "prompt_tokens": 3458,
+          "completion_tokens": 126,
+          "total_tokens": 3584
+        },
+        "cost": 0.000374808,
+        "duration_ms": 5220.7
+      }
+    ],
+    "tool_calls": [
+      {
+        "type": "tool_call",
+        "run_id": "e914533d70c3",
+        "step": 1,
+        "ts": "2026-10-07T17:30:50.278+08:00",
+        "id": "64bee318-5103-45af-ab0a-45486fec2eaa",
+        "name": "set_product_status",
+        "arguments": "{\"sku\":\"A1001\",\"client_token\":\"list-a1001-001\",\"status\":\"在售\"}",
+        "content": "{\"error\": {\"code\": \"invalid_transition\", \"message\": \"商品 青瓷茶具（旅行装）（A1001）已是「在售」状态，无需变更\", \"hint\": \"空操作不执行；可用 get_product 复核当前状态\"}}",
+        "ok": true,
+        "duration_ms": 53.3
+      },
+      {
+        "type": "tool_call",
+        "run_id": "e914533d70c3",
+        "step": 2,
+        "ts": "2026-10-07T17:31:05.426+08:00",
+        "id": "d13d9e6d-2f1d-4ff1-b0f7-58cffd95bb36",
+        "name": "get_product",
+        "arguments": "{\"sku\":\"A1001\"}",
+        "content": "{\"sku\": \"A1001\", \"name\": \"青瓷茶具（旅行装）\", \"category\": \"茶具\", \"price\": 447.7, \"status\": \"在售\"}",
+        "ok": true,
+        "duration_ms": 45.6
+      }
+    ],
+    "errors": []
+  }
+]

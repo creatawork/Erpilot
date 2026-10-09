@@ -27,3 +27,6 @@ node_modules/
 # 工具生成（ZCode 环境的忽略规则镜像）
 .zcodeignore
 apps/web/.test-build/
+
+# Playwright MCP 临时产物（页面快照 / 控制台日志 / 本地验收临时库）
+.playwright-mcp/

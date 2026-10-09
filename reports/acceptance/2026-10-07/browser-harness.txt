@@ -1,0 +1,54 @@
+import asyncio
+import os
+import sys
+from pathlib import Path
+from uuid import uuid4
+
+ROOT = Path.cwd()
+sys.path.insert(0, str(ROOT / 'scripts'))
+os.environ['ERPILOT_TOOLS'] = 'demo'
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+from erpilot_api.main import create_app
+from agent_core.dotenv import load_dotenv
+from agent_core.approval import StreamApprovalGate
+from erp_store.seed import seed_database
+from erp_store.db import make_engine
+from erp_store.repository import ErpRepository
+from mcp_erp import build_agent_tools
+from demo import demo_client, demo_sku
+from psycopg import AsyncConnection, sql
+from psycopg.conninfo import make_conninfo
+from fastapi.staticfiles import StaticFiles
+import uvicorn
+
+load_dotenv(ROOT / '.env')
+output = ROOT / 'reports/acceptance/2026-10-07'
+db = output / 'browser-erp.db'
+if not db.exists():
+    seed_database(db, n_products=60, n_orders=80)
+schema_file = output / 'browser-schema.txt'
+if schema_file.exists():
+    schema = schema_file.read_text().strip()
+else:
+    schema = 'acceptance_' + uuid4().hex
+    schema_file.write_text(schema)
+async def prepare_schema():
+    async with await AsyncConnection.connect(os.environ['ERPILOT_CHECKPOINT_DATABASE_URL'], autocommit=True) as conn:
+        await conn.execute(sql.SQL('CREATE SCHEMA IF NOT EXISTS {}').format(sql.Identifier(schema)))
+asyncio.run(prepare_schema())
+os.environ['ERPILOT_CHECKPOINT_DATABASE_URL'] = make_conninfo(
+    os.environ['ERPILOT_CHECKPOINT_DATABASE_URL'], options=f'-csearch_path={schema}')
+engine = make_engine(db)
+sku = demo_sku(ErpRepository(engine))
+gate = StreamApprovalGate()
+tools = build_agent_tools(db, writes=True, approval_gate=gate)
+app = create_app(client_factory=lambda: demo_client(sku), model='scripted-acceptance',
+    trace_dir=ROOT / 'traces/acceptance-browser', tools=tools, approval_gate=gate,
+    run_store_path=output / 'browser-runs.db')
+app.mount('/', StaticFiles(directory=ROOT / 'apps/web/dist', html=True))
+print(f'Acceptance SKU: {sku}', flush=True)
+try:
+    uvicorn.run(app, host='127.0.0.1', port=8876, loop='none')
+finally:
+    engine.dispose()
