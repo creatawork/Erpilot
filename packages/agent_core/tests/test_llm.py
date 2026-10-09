@@ -5,6 +5,9 @@ import json
 import httpx2
 import pytest
 from agent_core.llm import (
+    DEFAULT_BASE_URL,
+    DEFAULT_MODEL,
+    LLMConfig,
     ReasoningDelta,
     StreamEnd,
     StreamResult,
@@ -255,3 +258,86 @@ async def test_chat_excludes_reasoning_from_final_text() -> None:
     client._config = dataclasses.replace(client.config, thinking=True)
     result = await client.chat([{"role": "user", "content": "9.9×8"}])
     assert result.text == "79.2"
+
+
+# ---- 批次 1：多模型 provider profile（from_env，纯 env mock，不烧 token）----
+
+
+def _clear_llm_env(monkeypatch) -> None:
+    for name in (
+        "LLM_PROVIDER",
+        "LLM_BASE_URL",
+        "LLM_MODEL",
+        "ERPILOT_THINKING",
+        "ZHIPU_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "DASHSCOPE_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_from_env_defaults_to_zhipu(monkeypatch) -> None:
+    """不设 LLM_PROVIDER 时与旧版一致：读 ZHIPU_API_KEY + GLM 默认端点/模型。"""
+    _clear_llm_env(monkeypatch)
+    monkeypatch.setenv("ZHIPU_API_KEY", "zk")
+    config = LLMConfig.from_env()
+    assert (config.api_key, config.base_url, config.model) == (
+        "zk",
+        DEFAULT_BASE_URL,
+        DEFAULT_MODEL,
+    )
+
+
+def test_from_env_deepseek_profile(monkeypatch) -> None:
+    _clear_llm_env(monkeypatch)
+    monkeypatch.setenv("LLM_PROVIDER", "deepseek")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "dk")
+    config = LLMConfig.from_env()
+    assert config.api_key == "dk"
+    assert config.base_url == "https://api.deepseek.com/v1"
+    assert config.model == "deepseek-chat"
+
+
+def test_from_env_qwen_profile(monkeypatch) -> None:
+    _clear_llm_env(monkeypatch)
+    monkeypatch.setenv("LLM_PROVIDER", "qwen")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "qk")
+    config = LLMConfig.from_env()
+    assert config.api_key == "qk"
+    assert config.base_url == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    assert config.model == "qwen-plus"
+
+
+def test_from_env_provider_is_case_insensitive(monkeypatch) -> None:
+    _clear_llm_env(monkeypatch)
+    monkeypatch.setenv("LLM_PROVIDER", "DeepSeek")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "dk")
+    assert LLMConfig.from_env().model == "deepseek-chat"
+
+
+def test_from_env_base_url_and_model_override_profile(monkeypatch) -> None:
+    """LLM_BASE_URL / LLM_MODEL 覆盖供应商预设（兼容旧的中转端点用法）。"""
+    _clear_llm_env(monkeypatch)
+    monkeypatch.setenv("LLM_PROVIDER", "deepseek")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "dk")
+    monkeypatch.setenv("LLM_BASE_URL", "https://proxy.example/v1")
+    monkeypatch.setenv("LLM_MODEL", "deepseek-reasoner")
+    config = LLMConfig.from_env()
+    assert config.base_url == "https://proxy.example/v1"
+    assert config.model == "deepseek-reasoner"
+
+
+def test_from_env_unknown_provider_raises(monkeypatch) -> None:
+    _clear_llm_env(monkeypatch)
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("ZHIPU_API_KEY", "zk")
+    with pytest.raises(RuntimeError, match="未知 LLM_PROVIDER"):
+        LLMConfig.from_env()
+
+
+def test_from_env_missing_key_names_provider_env(monkeypatch) -> None:
+    """key 缺失的报错须点名该供应商对应的环境变量。"""
+    _clear_llm_env(monkeypatch)
+    monkeypatch.setenv("LLM_PROVIDER", "qwen")
+    with pytest.raises(RuntimeError, match="DASHSCOPE_API_KEY"):
+        LLMConfig.from_env()

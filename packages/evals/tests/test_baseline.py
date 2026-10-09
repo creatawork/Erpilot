@@ -50,3 +50,12 @@ async def test_baseline_checkpoint_survives_later_setup_failure(tmp_path, monkey
     assert payload["results"][0]["passed"]
     assert payload["results"][1]["failed_checks"][0].startswith("not_run:")
     assert payload["suite"]["executed"] == 1 and not payload["suite"]["complete"]
+    from evals.checks import SCORER_VERSION
+
+    assert payload["suite"]["scorer_version"] == SCORER_VERSION
+    assert payload["suite"]["seed"] == {
+        "value": 20260930,
+        "now": "2026-10-07T12:00:00+08:00",
+        "fresh_database_per_case": True,
+    }
+    assert payload["suite"]["case_traces"][ALL_CASES[0].id] == tmp_path.resolve().as_posix()

@@ -19,6 +19,33 @@ from pydantic import BaseModel
 
 DEFAULT_BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"
 DEFAULT_MODEL = "glm-5.3-flash"
+DEFAULT_PROVIDER = "zhipu"
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderProfile:
+    """一个 OpenAI 兼容供应商的预设：端点、默认模型、读取 key 的环境变量名。
+
+    多模型横向对比只需切 LLM_PROVIDER；base_url / model 仍可用 env 覆盖。
+    不引入 LiteLLM：当前只需"切换 + 对比"，无自动降级/路由需求；若日后需要
+    降级/路由再评估网关层。
+    """
+
+    base_url: str
+    model: str
+    api_key_env: str
+
+
+# 仅收录 OpenAI 兼容端点；端点与默认模型以各家文档为准，计费价目在 prices.py 另行维护。
+PROVIDERS: dict[str, ProviderProfile] = {
+    "zhipu": ProviderProfile(DEFAULT_BASE_URL, DEFAULT_MODEL, "ZHIPU_API_KEY"),
+    "deepseek": ProviderProfile(
+        "https://api.deepseek.com/v1", "deepseek-chat", "DEEPSEEK_API_KEY"
+    ),
+    "qwen": ProviderProfile(
+        "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-plus", "DASHSCOPE_API_KEY"
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,13 +122,27 @@ class LLMConfig:
 
     @classmethod
     def from_env(cls) -> "LLMConfig":
-        api_key = os.environ.get("ZHIPU_API_KEY", "")
+        """按 LLM_PROVIDER 选供应商预设（默认 zhipu），base_url / model 可用 env 覆盖。
+
+        key 从该供应商对应的环境变量读取（zhipu→ZHIPU_API_KEY，
+        deepseek→DEEPSEEK_API_KEY，qwen→DASHSCOPE_API_KEY）。默认 provider 下行为
+        与旧版完全一致。
+        """
+        provider = os.environ.get("LLM_PROVIDER", DEFAULT_PROVIDER).lower()
+        profile = PROVIDERS.get(provider)
+        if profile is None:
+            known = "、".join(sorted(PROVIDERS))
+            raise RuntimeError(f"未知 LLM_PROVIDER={provider!r}：可选 {known}")
+        api_key = os.environ.get(profile.api_key_env, "")
         if not api_key:
-            raise RuntimeError("缺少 ZHIPU_API_KEY：请复制 .env.example 为 .env 并填入")
+            raise RuntimeError(
+                f"缺少 {profile.api_key_env}（LLM_PROVIDER={provider}）："
+                "请在 .env 中填入该供应商的 API key"
+            )
         return cls(
             api_key=api_key,
-            base_url=os.environ.get("LLM_BASE_URL", DEFAULT_BASE_URL),
-            model=os.environ.get("LLM_MODEL", DEFAULT_MODEL),
+            base_url=os.environ.get("LLM_BASE_URL", profile.base_url),
+            model=os.environ.get("LLM_MODEL", profile.model),
             thinking=os.environ.get("ERPILOT_THINKING", "").lower() in ("1", "true", "yes"),
         )
 
