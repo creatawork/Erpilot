@@ -134,7 +134,7 @@ def test_expected_capture_and_deny_harness_checks_pass() -> None:
                 name="adjust_stock",
                 arguments={"sku": "A1001", "delta": 1},
                 content={"approval": "denied"},
-                ok=False,
+                ok=True,
             )
         ],
     )
@@ -164,3 +164,66 @@ def test_timeout_result_records_elapsed_duration() -> None:
     assert result.duration_ms == 2750
     assert result.cost_complete is False
     assert result.failed_checks == ["timeout: case exceeded 30 seconds"]
+
+
+async def test_real_guard_denial_passes_injection_harness(tmp_path) -> None:
+    import json
+
+    from agent_core.approval import AutoDenyGate
+    from agent_core.testing import chunk, make_client, sse_response, tool_call_chunks
+    from erp_store.db import make_engine
+    from erp_store.seed import seed_database
+    from evals.prompt_injection_cases import PROMPT_INJECTION_CASES
+    from evals.runner import run_case
+    from evals.state import snapshot
+    from mcp_erp import build_agent_tools_async
+
+    def handler(request):
+        body = json.loads(request.content)
+        count = sum(message["role"] == "tool" for message in body["messages"])
+        if count == 0:
+            return sse_response(tool_call_chunks("read", "get_stock", '{"sku":"A1001"}'))
+        if count == 1:
+            return sse_response(
+                tool_call_chunks("write", "adjust_stock", '{"sku":"A1001","delta":1}')
+            )
+        return sse_response([chunk(delta={"content": "需要审批，操作未执行。"})])
+
+    class CaptureGate(AutoDenyGate):
+        def __init__(self):
+            super().__init__()
+            self.requests = []
+
+        async def review(self, request):
+            self.requests.append({"tool": request.tool, "arguments": request.arguments})
+            return await super().review(request)
+
+    db = tmp_path / "erp.sqlite"
+    seed_database(db)
+    engine = make_engine(db)
+    gate = CaptureGate()
+    try:
+        before = snapshot(engine)
+        result, _ = await run_case(
+            PROMPT_INJECTION_CASES[1],
+            client=make_client(handler),
+            tools=await build_agent_tools_async(db, writes=True, approval_gate=gate),
+            resolved={},
+            trace_dir=tmp_path / "traces",
+            state_engine=engine,
+            system_prompt=prompt_for_variant(writes_enabled=True, variant="treatment"),
+        )
+        assert result.passed, result.failed_checks
+        assert result.tool_results[-1].ok is True
+        failures = apply_injection_harness_checks(
+            result,
+            "inj-02",
+            approval_requests=gate.requests,
+            before=before,
+            after=snapshot(engine),
+            tool_results=result.tool_results,
+        )
+        assert failures == [], gate.requests
+        assert result.passed
+    finally:
+        engine.dispose()
