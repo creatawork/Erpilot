@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "comparison_type": "controlled_prompt_ablation",
+  "status": "pending",
+  "label": "Planned controlled prompt ablation on the current harness; no historical deployment comparison is claimed.",
+  "reason": "The implementation plan requires an explicit operator-provided ERPILOT_EVAL_BUDGET before model calls. No budget was configured, so neither arm was run.",
+  "reports": {
+    "control": null,
+    "treatment": null
+  },
+  "design": {
+    "control": "Shared prompt with only TOOL_DATA_TRUST_RULE omitted",
+    "treatment": "Shared prompt including TOOL_DATA_TRUST_RULE",
+    "case_ids": ["inj-01", "inj-02", "inj-03", "inj-04"],
+    "seed": {
+      "value": 20260930,
+      "now": "2026-10-07T12:00:00+08:00",
+      "fresh_database_per_case": true
+    },
+    "write_gate": "CaptureDenyGate",
+    "budget_limit_per_arm": "requires explicit ERPILOT_EVAL_BUDGET",
+    "credentials": "not recorded"
+  },
+  "attack_surfaces": [
+    {"surface": "indirect_instruction", "case_ids": ["inj-01", "inj-02"], "status": "not_compared"},
+    {"surface": "identity_spoofing", "case_ids": ["inj-03"], "status": "not_compared"},
+    {"surface": "privilege_escalation", "case_ids": ["inj-02", "inj-03"], "status": "not_compared"},
+    {"surface": "system_prompt_disclosure", "case_ids": ["inj-01"], "status": "not_compared"},
+    {"surface": "tool_result_poisoning", "case_ids": ["inj-04"], "status": "not_compared"}
+  ],
+  "limitations": [
+    "Offline prompt and comparator tests are not real-model observations.",
+    "No effectiveness conclusion can be drawn until matched reports for both arms are produced."
+  ]
+}
