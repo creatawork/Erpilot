@@ -32,6 +32,8 @@ import { approvalDraftIssue, createOrderDraft, getOrderDraft, listOrderDrafts, p
 import { DraftSummary, OrderDraftPanel } from './components/OrderDraftPanel';
 import { approvalOperationIssue, getOperation, requiresBusinessSummary, parseOperation, retainOperationSnapshot, type BusinessOperation } from './operations';
 import { BusinessApprovalSummary } from './components/BusinessApprovalSummary';
+import { SessionRequests } from './history';
+import { SessionHistory } from './components/SessionHistory';
 
 const SESSION_KEY = "erpilot-session-id";
 const FRESH_SESSION_KEY = "erpilot-fresh-session-id";
@@ -62,6 +64,9 @@ function isConflict(error: unknown): error is ApiError {
 
 export default function App() {
   const sessionIdRef = useRef<string>(sessionKey());
+  const sessionRequests = useRef(new SessionRequests(sessionIdRef.current));
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const historyButton = useRef<HTMLButtonElement>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<string>("");
@@ -99,15 +104,16 @@ export default function App() {
   const refreshDrafts = useCallback(async () => {
     if (!draftsEnabledRef.current) return;
     const sessionId = sessionIdRef.current;
+    const ticket = sessionRequests.current.capture();
     const request = ++draftRequest.current;
     setDraftsLoading(true);
     try {
       const items = await listOrderDrafts(sessionId);
-      if (sessionId !== sessionIdRef.current || request !== draftRequest.current) return;
+      if (!sessionRequests.current.isCurrent(ticket) || request !== draftRequest.current) return;
       setDrafts(items);setDraftsError('');
     } catch (error) {
-      if (sessionId === sessionIdRef.current && request === draftRequest.current) {setDrafts([]);setDraftsError(error instanceof Error ? error.message : String(error));}
-    } finally {if (sessionId === sessionIdRef.current && request === draftRequest.current) setDraftsLoading(false);}
+      if (sessionRequests.current.isCurrent(ticket) && request === draftRequest.current) {setDrafts([]);setDraftsError(error instanceof Error ? error.message : String(error));}
+    } finally {if (sessionRequests.current.isCurrent(ticket) && request === draftRequest.current) setDraftsLoading(false);}
   }, []);
 
   // 心跳与业务事件都刷新 lastEventAt；30 秒都没有才提示（设计 5.4）——
@@ -166,7 +172,9 @@ export default function App() {
     [],
   );
 
-  const consumeEvents = useCallback(async (events: AsyncIterable<SSEEvent>) => {
+  const consumeEvents = useCallback(async (events: AsyncIterable<SSEEvent>, isCurrent: () => boolean = () => true) => {
+    const ticket = sessionRequests.current.capture();
+    const valid = () => sessionRequests.current.isCurrent(ticket) && isCurrent();
     // 正文增量按浏览器帧批量合并，避免每个微小片段都触发重排
     let deltaBuffer = "";
     let deltaScheduled = false;
@@ -174,13 +182,14 @@ export default function App() {
       deltaScheduled = false;
       const text = deltaBuffer;
       deltaBuffer = "";
-      if (!text) return;
+      if (!text || !valid()) return;
       updateLastAssistant(t =>
         applyTurnEvent(t, { event: "delta", data: { text } }),
       );
     };
 
     for await (const ev of events) {
+      if (!valid()) return;
       if (!acceptEventCursor(ev, lastSeqByRun.current)) continue;
       lastEventAtRef.current = Date.now();
       if (ev.event !== "delta") flushDelta();
@@ -247,6 +256,7 @@ export default function App() {
       }
     }
     flushDelta();
+    if (!valid()) return;
     // 流结束但未收到 done：区分非预期 EOF，不静默变成完成；保留已收到内容
     setTurns(prev => {
       const next = [...prev];
@@ -298,14 +308,18 @@ export default function App() {
 
   const refreshSession = useCallback(async (signal?: AbortSignal) => {
     const sessionId = sessionIdRef.current;
+    const ticket = sessionRequests.current.refresh();
     const fresh = isFreshSession(sessionId);
     setRestoreState("loading");
     try {
       const snapshot = await loadSessionState(sessionId, signal, fresh);
-      if (signal?.aborted || sessionId !== sessionIdRef.current) return;
+      if (signal?.aborted || !sessionRequests.current.isCurrent(ticket)) return;
+      if (snapshot && snapshot.session_id !== sessionId) throw new Error('会话状态与所选会话不匹配');
+      setError('');
       applySnapshot(snapshot);
     } catch (e) {
-      if (!signal?.aborted) {
+      if (signal?.aborted || !sessionRequests.current.isCurrent(ticket)) return;
+      {
         setRestoreState("recovery_failed");
         setError(e instanceof Error ? e.message : String(e));
       }
@@ -333,6 +347,7 @@ export default function App() {
   useEffect(() => { if (draftsEnabled) void refreshDrafts(); }, [draftsEnabled, refreshDrafts]);
   useEffect(() => {
     const sessionId=sessionIdRef.current;
+    const ticket=sessionRequests.current.capture();
     const controller=new AbortController();
     for(const pending of pendingApprovals) {
       if(!requiresBusinessSummary(pending,businessEnabled))continue;
@@ -350,12 +365,12 @@ export default function App() {
         continue;
       }
       void getOperation(sessionId,id,controller.signal).then(current=>{
-        if(controller.signal.aborted||sessionId!==sessionIdRef.current)return;
+        if(controller.signal.aborted||!sessionRequests.current.isCurrent(ticket))return;
         const operation=retainOperationSnapshot(snapshot,current);
         operationSnapshots.current.set(key,operation);
         setApprovalOperations(prev=>({...prev,[key]:{operation,verified:true,loading:false}}));
       }).catch(error=>{
-        if(controller.signal.aborted||sessionId!==sessionIdRef.current)return;
+        if(controller.signal.aborted||!sessionRequests.current.isCurrent(ticket))return;
         setApprovalOperations(prev=>({...prev,[key]:{operation:snapshot,verified:false,loading:false,error:error instanceof Error?error.message:String(error)}}));
       });
     }
@@ -363,6 +378,7 @@ export default function App() {
   },[pendingApprovals,operationRefresh,businessEnabled]);
   useEffect(() => {
     const sessionId = sessionIdRef.current;
+    const ticket = sessionRequests.current.capture();
     const controller = new AbortController();
     for (const pending of pendingApprovals) {
       if (pending.tool !== 'submit_order_draft') continue;
@@ -372,7 +388,7 @@ export default function App() {
         try { const draft = parseOrderDraft(pending.draft); setApprovalDrafts(prev=>({...prev,[pending.pending_id]:draft})); } catch { /* Fail closed; retrieve the approved version. */ }
       }
       void getOrderDraft(sessionId,id,revision,controller.signal).then(draft=>{
-        if (!controller.signal.aborted && sessionId===sessionIdRef.current) setApprovalDrafts(prev=>({...prev,[pending.pending_id]:draft}));
+        if (!controller.signal.aborted && sessionRequests.current.isCurrent(ticket)) setApprovalDrafts(prev=>({...prev,[pending.pending_id]:draft}));
       }).catch(()=>{});
     }
     return ()=>controller.abort();
@@ -387,10 +403,11 @@ export default function App() {
   useEffect(() => {
     if (restoreState !== "ready" || !activeRunId || sessionStatus === "completed") return;
     const controller = new AbortController();
+    const ticket = sessionRequests.current.capture();
     void consumeEvents(streamRunEvents(
       activeRunId, lastSeqByRun.current.get(activeRunId) ?? 0, controller.signal,
-    )).catch(error => {
-      if (!controller.signal.aborted) {
+    ), () => !controller.signal.aborted && sessionRequests.current.isCurrent(ticket)).catch(error => {
+      if (!controller.signal.aborted && sessionRequests.current.isCurrent(ticket)) {
         setError(error instanceof Error ? error.message : String(error));
       }
     });
@@ -423,6 +440,7 @@ export default function App() {
 
   const respondApproval = useCallback(
     async (pendingId: string, approved: boolean) => {
+      const ticket = sessionRequests.current.capture();
       const pending = pendingApprovals.find(item=>item.pending_id===pendingId);
       if(approved&&!pending)return;
       const operationState=approvalOperations[pendingId];
@@ -446,11 +464,13 @@ export default function App() {
           }
         }
       } catch (e) {
+        if (!sessionRequests.current.isCurrent(ticket)) return;
         if (isConflict(e)) {
           try { await refreshSession(); } catch { /* Recovery state keeps the input locked. */ }
         }
         setError(e instanceof Error ? e.message : "审批提交失败，请重试。");
       } finally {
+        if (!sessionRequests.current.isCurrent(ticket)) return;
         approvalInFlight.current.delete(pendingId);
         setSubmittingApprovals(new Set(approvalInFlight.current));
       }
@@ -460,6 +480,7 @@ export default function App() {
 
   const continueInterrupted = useCallback(async () => {
     if (busy || !interrupted) return;
+    const ticket = sessionRequests.current.capture();
     setBusy(true);
     setError("");
     setStatus("正在恢复未完成任务…");
@@ -467,30 +488,41 @@ export default function App() {
     try {
       await consumeEvents(streamInterruptedResume(sessionIdRef.current));
     } catch (e) {
+      if (!sessionRequests.current.isCurrent(ticket)) return;
       setError(e instanceof Error ? e.message : String(e));
     } finally {
+      if (!sessionRequests.current.isCurrent(ticket)) return;
       liveConnection.current = false;
       setBusy(false);
     }
   }, [busy, interrupted, consumeEvents]);
 
   const cancelPending = useCallback(async () => {
+    const ticket = sessionRequests.current.capture();
     setBusy(true);
     setError("");
     try {
-      applySnapshot(await cancelSession(sessionIdRef.current));
+      const snapshot = await cancelSession(sessionIdRef.current);
+      if (sessionRequests.current.isCurrent(ticket)) applySnapshot(snapshot);
     } catch (e) {
+      if (!sessionRequests.current.isCurrent(ticket)) return;
       setError(e instanceof Error ? e.message : "取消失败");
     } finally {
+      if (!sessionRequests.current.isCurrent(ticket)) return;
       setBusy(false);
     }
   }, [applySnapshot]);
 
   const startNewSession = useCallback(() => {
+    if (busy || liveConnection.current || sessionStatus === 'running') return;
     const sessionId = newSessionId();
     localStorage.setItem(SESSION_KEY, sessionId);
     localStorage.setItem(FRESH_SESSION_KEY, sessionId);
     sessionIdRef.current = sessionId;
+    sessionRequests.current.switchTo(sessionId);
+    lastSeqByRun.current.clear();
+    approvalInFlight.current.clear();setSubmittingApprovals(new Set());
+    setShowJump(false);followRef.current=true;
     draftRequest.current++;
     operationSnapshots.current.clear();setApprovalOperations({});
     setDrafts([]);setApprovalDrafts({});setDraftsError('');setDraftsLoading(false);
@@ -505,11 +537,30 @@ export default function App() {
     setStatus("");
     setInput("");
     setRestoreState("new");
-  }, [draftsEnabled, refreshDrafts]);
+  }, [draftsEnabled, refreshDrafts, busy, sessionStatus]);
+
+  const selectHistorySession = useCallback((sessionId: string) => {
+    if (busy || liveConnection.current || sessionStatus === 'running') return;
+    sessionRequests.current.switchTo(sessionId);
+    sessionIdRef.current = sessionId;
+    localStorage.setItem(SESSION_KEY, sessionId);
+    localStorage.removeItem(FRESH_SESSION_KEY);
+    draftRequest.current++;
+    operationSnapshots.current.clear();lastSeqByRun.current.clear();
+    approvalInFlight.current.clear();setSubmittingApprovals(new Set());
+    setTurns([]);setInput('');setStatus('');setError('');
+    setPendingApprovals([]);setPendingReconciliation(null);setActiveRunId(null);
+    setSessionStatus(null);setInterrupted(false);
+    setDrafts([]);setApprovalDrafts({});setApprovalOperations({});
+    setDraftsError('');setDraftsLoading(false);setShowJump(false);followRef.current=true;
+    setHistoryOpen(false);historyButton.current?.focus();
+    void refreshSession().catch(() => {});
+  }, [busy, sessionStatus, refreshSession]);
 
   const send = useCallback(async (requestedMessage?: string) => {
     const message = (requestedMessage ?? input).trim();
     if (!message || !canSend || hasPending || interrupted) return;
+    const ticket = sessionRequests.current.capture();
     localStorage.removeItem(FRESH_SESSION_KEY);
     setInput("");
     setError("");
@@ -527,6 +578,7 @@ export default function App() {
     try {
       await consumeEvents(streamChat(message, sessionIdRef.current));
     } catch (e) {
+      if (!sessionRequests.current.isCurrent(ticket)) return;
       if (isConflict(e)) {
         setTurns(prev => prev.slice(0, -2));
         try { await refreshSession(); } catch { /* Keep recovery failure visible and locked. */ }
@@ -534,6 +586,7 @@ export default function App() {
       setError(e instanceof Error ? e.message : String(e));
       setStatus("");
     } finally {
+      if (!sessionRequests.current.isCurrent(ticket)) return;
       liveConnection.current = false;
       setBusy(false);
     }
@@ -570,24 +623,31 @@ export default function App() {
       <header>
         <h1>Erpilot 掌柜助手</h1>
         <span className="runtime-label">{runtimeLabel}</span>
+        <button ref={historyButton} className="new-session" aria-expanded={historyOpen} aria-controls="session-history-panel"
+          onClick={() => setHistoryOpen(value => !value)}>历史会话</button>
         <button className="new-session" onClick={startNewSession}
-          disabled={busy || hasPending || interrupted}>新会话</button>
+          disabled={busy || hasPending || interrupted || sessionStatus === 'running'}>新会话</button>
         <span className="status" role="status">
           {status || (restoreState === "loading" ? "加载会话…" : busy ? "生成中…" : "")}
         </span>
       </header>
 
+      {historyOpen && <div id="session-history-panel"><SessionHistory currentId={sessionIdRef.current}
+        locked={busy || sessionStatus === 'running'} onSelect={selectHistorySession}
+        onClose={() => {setHistoryOpen(false);historyButton.current?.focus();}} /></div>}
+
       <div className="chat" ref={listRef} onScroll={onScroll}>
         {draftsEnabled && <OrderDraftPanel key={sessionIdRef.current} drafts={drafts} loading={draftsLoading} error={draftsError} busy={busy && !hasPending} canSubmit={writesEnabled&&canSend&&!hasPending&&!interrupted} writesEnabled={writesEnabled} hasPending={hasPending}
           onRefresh={()=>void refreshDrafts()} onSave={async (draft,input)=>{
             const sessionId=sessionIdRef.current;
+            const ticket=sessionRequests.current.capture();
             setDraftsLoading(true);
             try {
               const saved=draft?await reviseOrderDraft(sessionId,draft.draft_id,draft.revision,input):await createOrderDraft(sessionId,input);
-              if(sessionId!==sessionIdRef.current)return;
+              if(!sessionRequests.current.isCurrent(ticket))return;
               setDrafts(prev=>[saved,...prev.filter(item=>item.draft_id!==saved.draft_id)]);
               return saved;
-            } finally {if(sessionId===sessionIdRef.current) await refreshDrafts();}
+            } finally {if(sessionRequests.current.isCurrent(ticket)) await refreshDrafts();}
           }} onSubmit={draft=>{
             if (Date.parse(draft.expires_at)<=Date.now()) {void refreshDrafts();return;}
             void send(`请调用 submit_order_draft 提交草稿 ${draft.draft_id} 的版本 ${draft.revision}，并申请审批。`);

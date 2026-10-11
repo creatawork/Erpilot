@@ -349,6 +349,8 @@ class ChatService:
                 "pending_reconciliation": reconciliation,
                 "tool_results": snapshot.values.get("tool_history", []),
             }
+        if self._drafts is not None:
+            state["order_task"] = self._drafts.task_state(session_id)
         presentation = self._presentation(session_id)
         if presentation is not None:
             state["presentation"] = presentation
@@ -369,6 +371,12 @@ class ChatService:
                 "用户确认后仅使用 submit_order_draft 提交明确的 draft_id 和 revision，等待审批。"
                 "若草稿、报价或库存已变化或过期，说明原因并刷新草稿，重新取得用户确认和审批；"
                 "不得静默提交替代版本或重试旧版本。"
+                "每轮涉及已有草稿时先调用 get_order_task 查询持久化任务事实，"
+                "不要依赖旧对话中的数量、客户或版本。返回 ambiguous 时先请用户明确草稿，"
+                "返回 none 时询问建单所需信息。"
+                "『第二个』等行号按明确草稿当前版本 items 的顺序从 1 起算；"
+                "仅数量修改使用 revise_order_draft_quantity，保持客户、备注及其他行不变。"
+                "未明确客户、商品、数量或其他约束时先澄清，不猜测；用户原有备注约束须保留。"
             )
         if self._operations is not None:
             prompt += (
@@ -507,6 +515,12 @@ class ChatService:
             if snapshot.next:
                 raise SessionError(409, "unfinished_run", "会话尚未完成，请先处理待审批操作")
             previous = await self._history(session_id)
+            # New turns use current workflow rules, including older persisted sessions.
+            rules = {"role": "system", "content": self._system_prompt()}
+            if previous and previous[0].get("role") == "system":
+                previous[0] = rules
+            else:
+                previous.insert(0, rules)
             messages = [*previous, {"role": "user", "content": message}]
             async with aclosing(self._record_run(runtime, messages, session_id, message)) as events:
                 async for event in events:

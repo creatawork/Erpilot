@@ -38,6 +38,7 @@ from starlette.background import BackgroundTask
 from erpilot_api.checkpoint import open_checkpointer
 from erpilot_api.draft_routes import register_draft_routes
 from erpilot_api.events import encode_event, sse_frame
+from erpilot_api.history_routes import register_history_routes
 from erpilot_api.operation_routes import register_operation_routes
 from erpilot_api.run_store import RunStore
 from erpilot_api.service import ChatService, SessionError
@@ -173,6 +174,7 @@ def create_app(
 
     register_draft_routes(app, session_erp_tools)
     register_operation_routes(app, service._operations)
+    register_history_routes(app, service._run_store)
 
     @app.get("/api/runtime")
     def runtime_info() -> dict[str, Any]:

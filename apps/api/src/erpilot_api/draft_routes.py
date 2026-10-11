@@ -84,6 +84,10 @@ def register_draft_routes(app: FastAPI, session_erp_tools):
     def list_drafts(session_id: str):
         return {"items": drafts_service().list_latest(session_id)}
 
+    @app.get("/api/sessions/{session_id}/order-task")
+    def order_task(session_id: str):
+        return drafts_service().task_state(session_id)
+
     @app.post("/api/sessions/{session_id}/order-drafts", status_code=201)
     def prepare_draft(session_id: str, req: DraftRequest):
         return drafts_service().prepare(

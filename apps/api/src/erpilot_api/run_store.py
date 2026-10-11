@@ -254,6 +254,24 @@ class RunStore:
         result["history"] = json.loads(result.pop("history_json"))
         return result
 
+    def list_sessions(self, *, limit: int = 20, offset: int = 0) -> dict[str, Any]:
+        """Read-only navigation projection; opening uses checkpoint execution state."""
+        if type(limit) is not int or not 1 <= limit <= 50 or type(offset) is not int or offset < 0:
+            raise ValueError("invalid history page")
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT s.session_id, strftime('%Y-%m-%dT%H:%M:%SZ', s.updated_at) AS updated_at, "
+                "(SELECT substr(r.user_input,1,80) FROM run r WHERE r.session_id=s.session_id "
+                "ORDER BY r.rowid LIMIT 1) AS title, "
+                "(SELECT r.status FROM run r WHERE r.session_id=s.session_id "
+                "ORDER BY r.rowid DESC LIMIT 1) AS status "
+                "FROM run_session s WHERE EXISTS (SELECT 1 FROM run r "
+                "WHERE r.session_id=s.session_id) "
+                "ORDER BY s.updated_at DESC, s.session_id DESC LIMIT ? OFFSET ?",
+                (limit + 1, offset),
+            ).fetchall()
+        return {"items": [dict(row) for row in rows[:limit]], "has_more": len(rows) > limit}
+
     # ---- 展示事件（设计 5.3）：只投影排版与可证明的过程 ----
 
     def next_presentation_seq(self, run_id: str) -> int:
