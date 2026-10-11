@@ -36,8 +36,8 @@ from sse_starlette.sse import EventSourceResponse
 from starlette.background import BackgroundTask
 
 from erpilot_api.checkpoint import open_checkpointer
+from erpilot_api.draft_routes import register_draft_routes
 from erpilot_api.events import encode_event, sse_frame
-from erpilot_api.recovery import erp_mutation_reconciler
 from erpilot_api.run_store import RunStore
 from erpilot_api.service import ChatService, SessionError
 
@@ -96,16 +96,26 @@ def create_app(
     mutation_reconciler=None,
     approval_ttl_seconds: int | None = None,
     clock=None,
+    session_erp_tools=None,
 ) -> FastAPI:
     """应用工厂：测试注入 mock 的 LLMClient 工厂、临时 trace 目录与工具集。"""
-    resolved_tools, env_gate = _resolve_tools(tools)
     if (
-        mutation_reconciler is None
+        session_erp_tools is None
         and tools is None
         and os.environ.get("ERPILOT_TOOLS", "").lower() == "mcp"
-        and os.environ.get("ERPILOT_WRITES", "").lower() in _WRITES_ENV
     ):
-        mutation_reconciler = erp_mutation_reconciler()
+        from mcp_erp.session_tools import SessionErpTools
+
+        writes = os.environ.get("ERPILOT_WRITES", "").lower() in _WRITES_ENV
+        session_erp_tools = asyncio.run(
+            SessionErpTools.create(
+                writes=writes, gate=approval_gate or (StreamApprovalGate() if writes else None)
+            )
+        )
+    if session_erp_tools is not None:
+        resolved_tools, env_gate = session_erp_tools.tools, session_erp_tools.gate
+    else:
+        resolved_tools, env_gate = _resolve_tools(tools)
     service = ChatService(
         client_factory=client_factory or (lambda: LLMClient(LLMConfig.from_env())),
         model=model,
@@ -123,6 +133,9 @@ def create_app(
             else int(os.environ.get("ERPILOT_APPROVAL_TTL_SECONDS", "1800"))
         ),
         clock=clock,
+        session_tools_factory=session_erp_tools.for_session if session_erp_tools else None,
+        session_reconciler_factory=session_erp_tools.reconciler if session_erp_tools else None,
+        drafts=session_erp_tools.drafts if session_erp_tools else None,
     )
 
     @asynccontextmanager
@@ -144,7 +157,8 @@ def create_app(
     @app.exception_handler(SessionError)
     async def session_error(request: Request, exc: SessionError):
         return JSONResponse(
-            status_code=exc.status, content={"error": {"code": exc.code, "message": str(exc)}}
+            status_code=exc.status,
+            content={"error": {"code": exc.code, "message": str(exc), "hint": exc.hint}},
         )
 
     @app.get("/api/sessions/{session_id}/state")
@@ -155,14 +169,19 @@ def create_app(
     def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
+    register_draft_routes(app, session_erp_tools)
+
     @app.get("/api/runtime")
     def runtime_info() -> dict[str, Any]:
         return {
-            "data_source": "custom" if tools is not None else (
-                "mcp" if os.environ.get("ERPILOT_TOOLS", "").lower() == "mcp" else "demo"
-            ),
+            "data_source": "mcp"
+            if session_erp_tools is not None
+            else "custom"
+            if tools is not None
+            else ("mcp" if os.environ.get("ERPILOT_TOOLS", "").lower() == "mcp" else "demo"),
             "writes_enabled": any(tool.risk is not None for tool in resolved_tools),
             "reasoning_enabled": os.environ.get("ERPILOT_THINKING", "").lower() in _WRITES_ENV,
+            "drafts_enabled": session_erp_tools is not None,
         }
 
     @app.post("/api/chat/stream")
@@ -205,15 +224,11 @@ def create_app(
             while True:
                 for event in store.read_events(run_id, after_seq=cursor):
                     cursor = event["seq"]
-                    frame = sse_frame(
-                        event["type"], {**event["payload"], "run_id": run_id}
-                    )
+                    frame = sse_frame(event["type"], {**event["payload"], "run_id": run_id})
                     frame["id"] = str(cursor)
                     yield frame
                 current = store.get_run(run_id)
-                if current is None or current["status"] in {
-                    "completed", "failed", "cancelled"
-                }:
+                if current is None or current["status"] in {"completed", "failed", "cancelled"}:
                     return
                 await asyncio.sleep(0.25)
 
@@ -248,9 +263,7 @@ def create_app(
                         item = await asyncio.wait_for(queue.get(), timeout=heartbeat_interval)
                     except TimeoutError:
                         # 心跳只代表连接存活，不代表模型或工具取得进展；不落展示日志
-                        yield sse_frame(
-                            "heartbeat", {"at": datetime.now(UTC).isoformat()}
-                        )
+                        yield sse_frame("heartbeat", {"at": datetime.now(UTC).isoformat()})
                         continue
                     if item is stream_end:
                         break

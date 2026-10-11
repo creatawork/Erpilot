@@ -28,6 +28,8 @@ import {
   newAssistantTurn,
 } from "./session";
 import { AssistantMessage } from "./components/AssistantMessage";
+import { approvalDraftIssue, createOrderDraft, getOrderDraft, listOrderDrafts, parseOrderDraft, reviseOrderDraft, type OrderDraft } from './drafts';
+import { DraftSummary, OrderDraftPanel } from './components/OrderDraftPanel';
 
 const SESSION_KEY = "erpilot-session-id";
 const FRESH_SESSION_KEY = "erpilot-fresh-session-id";
@@ -80,6 +82,27 @@ export default function App() {
   const [showJump, setShowJump] = useState(false);
   const lastEventAtRef = useRef(Date.now());
   const [stalled, setStalled] = useState(false);
+  const [draftsEnabled, setDraftsEnabled] = useState(false);
+  const [writesEnabled, setWritesEnabled] = useState(false);
+  const draftsEnabledRef = useRef(false);
+  const [drafts, setDrafts] = useState<OrderDraft[]>([]);
+  const [draftsLoading, setDraftsLoading] = useState(false);
+  const [draftsError, setDraftsError] = useState('');
+  const [approvalDrafts, setApprovalDrafts] = useState<Record<string, OrderDraft>>({});
+  const draftRequest = useRef(0);
+  const refreshDrafts = useCallback(async () => {
+    if (!draftsEnabledRef.current) return;
+    const sessionId = sessionIdRef.current;
+    const request = ++draftRequest.current;
+    setDraftsLoading(true);
+    try {
+      const items = await listOrderDrafts(sessionId);
+      if (sessionId !== sessionIdRef.current || request !== draftRequest.current) return;
+      setDrafts(items);setDraftsError('');
+    } catch (error) {
+      if (sessionId === sessionIdRef.current && request === draftRequest.current) {setDrafts([]);setDraftsError(error instanceof Error ? error.message : String(error));}
+    } finally {if (sessionId === sessionIdRef.current && request === draftRequest.current) setDraftsLoading(false);}
+  }, []);
 
   // 心跳与业务事件都刷新 lastEventAt；30 秒都没有才提示（设计 5.4）——
   // 这是一条连接提示，不能判定任务失败
@@ -169,6 +192,7 @@ export default function App() {
         case "tool_executing":
         case "tool_started":
         case "tool_finished":
+          if (ev.event === 'tool_finished') void refreshDrafts();
           // 阶段与工具状态在当前回答内部展示，顶部只保留简短会话状态
           updateLastAssistant(t => applyTurnEvent(t, ev));
           break;
@@ -181,6 +205,7 @@ export default function App() {
           break;
         case "approval_pending": {
           const pending = ev.data;
+          void refreshDrafts();
           setPendingApprovals(prev => [
             ...prev.filter(item => item.pending_id !== pending.pending_id), pending,
           ]);
@@ -202,6 +227,7 @@ export default function App() {
           updateLastAssistant(t => applyTurnEvent(t, ev));
           break;
         case "done":
+          void refreshDrafts();
           updateLastAssistant(t => applyTurnEvent(t, ev));
           setStatus("");
           setInterrupted(false);
@@ -227,9 +253,10 @@ export default function App() {
       }
       return next;
     });
-  }, [updateLastAssistant]);
+  }, [updateLastAssistant, refreshDrafts]);
 
   const applySnapshot = useCallback((snapshot: SessionState | null) => {
+    void refreshDrafts();
     if (snapshot) {
       setPendingApprovals(snapshot.pending_approvals);
       setPendingReconciliation(snapshot.pending_reconciliation ?? null);
@@ -261,7 +288,7 @@ export default function App() {
       setStatus("");
       setRestoreState("new");
     }
-  }, []);
+  }, [refreshDrafts]);
 
   const refreshSession = useCallback(async (signal?: AbortSignal) => {
     const sessionId = sessionIdRef.current;
@@ -269,7 +296,7 @@ export default function App() {
     setRestoreState("loading");
     try {
       const snapshot = await loadSessionState(sessionId, signal, fresh);
-      if (signal?.aborted) return;
+      if (signal?.aborted || sessionId !== sessionIdRef.current) return;
       applySnapshot(snapshot);
     } catch (e) {
       if (!signal?.aborted) {
@@ -289,9 +316,30 @@ export default function App() {
       const source = runtime.data_source === "mcp" ? "真实 ERP" :
         runtime.data_source === "demo" ? "演示数据" : "数据源未确认";
       setRuntimeLabel(`${source} · ${runtime.writes_enabled ? "写入需审批" : "只读"}`);
+      setDraftsEnabled(runtime.drafts_enabled === true);
+      setWritesEnabled(runtime.writes_enabled === true);
+      draftsEnabledRef.current = runtime.drafts_enabled === true;
     }).catch(() => {});
     return () => controller.abort();
   }, []);
+
+  useEffect(() => { if (draftsEnabled) void refreshDrafts(); }, [draftsEnabled, refreshDrafts]);
+  useEffect(() => {
+    const sessionId = sessionIdRef.current;
+    const controller = new AbortController();
+    for (const pending of pendingApprovals) {
+      if (pending.tool !== 'submit_order_draft') continue;
+      const id = pending.arguments.draft_id, revision = pending.arguments.revision;
+      if (typeof id !== 'string' || typeof revision !== 'number' || !Number.isSafeInteger(revision)) continue;
+      if (pending.draft) {
+        try { const draft = parseOrderDraft(pending.draft); setApprovalDrafts(prev=>({...prev,[pending.pending_id]:draft})); } catch { /* Fail closed; retrieve the approved version. */ }
+      }
+      void getOrderDraft(sessionId,id,revision,controller.signal).then(draft=>{
+        if (!controller.signal.aborted && sessionId===sessionIdRef.current) setApprovalDrafts(prev=>({...prev,[pending.pending_id]:draft}));
+      }).catch(()=>{});
+    }
+    return ()=>controller.abort();
+  }, [pendingApprovals]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -338,6 +386,8 @@ export default function App() {
 
   const respondApproval = useCallback(
     async (pendingId: string, approved: boolean) => {
+      const pending = pendingApprovals.find(item=>item.pending_id===pendingId);
+      if (approved && pending?.tool==='submit_order_draft' && (draftsLoading || approvalDraftIssue(pending,approvalDrafts[pendingId],drafts))) return;
       if (approvalInFlight.current.has(pendingId)) return;
       approvalInFlight.current.add(pendingId);
       setSubmittingApprovals(new Set(approvalInFlight.current));
@@ -365,7 +415,7 @@ export default function App() {
         setSubmittingApprovals(new Set(approvalInFlight.current));
       }
     },
-    [consumeEvents, refreshSession],
+    [consumeEvents, refreshSession, pendingApprovals, approvalDrafts, drafts, draftsLoading],
   );
 
   const continueInterrupted = useCallback(async () => {
@@ -401,6 +451,9 @@ export default function App() {
     localStorage.setItem(SESSION_KEY, sessionId);
     localStorage.setItem(FRESH_SESSION_KEY, sessionId);
     sessionIdRef.current = sessionId;
+    draftRequest.current++;
+    setDrafts([]);setApprovalDrafts({});setDraftsError('');setDraftsLoading(false);
+    if (draftsEnabled) void refreshDrafts();
     setTurns([]);
     setPendingApprovals([]);
     setPendingReconciliation(null);
@@ -411,10 +464,10 @@ export default function App() {
     setStatus("");
     setInput("");
     setRestoreState("new");
-  }, []);
+  }, [draftsEnabled, refreshDrafts]);
 
-  const send = useCallback(async () => {
-    const message = input.trim();
+  const send = useCallback(async (requestedMessage?: string) => {
+    const message = (requestedMessage ?? input).trim();
     if (!message || !canSend || hasPending || interrupted) return;
     localStorage.removeItem(FRESH_SESSION_KEY);
     setInput("");
@@ -452,6 +505,17 @@ export default function App() {
     }
   };
 
+  const renderDraftApproval = (pending: ApprovalPendingPayload) => {
+    const draft = approvalDrafts[pending.pending_id];
+    const issue = approvalDraftIssue(pending,draft,drafts,now);
+    const expired = pending.expires_at != null && Date.parse(pending.expires_at)<=now;
+    return <div className="approval draft-approval"><span className="approval-label">待审批 · 提交订单 · 原版本 {String(pending.arguments.revision)}</span>
+      {draft && <DraftSummary draft={draft}/>}{(issue || expired) && <p role="status">{expired?'审批已过期，请拒绝后重新提交。':issue}</p>}
+      <button className="approve" disabled={!!issue||expired||draftsLoading||submittingApprovals.has(pending.pending_id)} onClick={()=>void respondApproval(pending.pending_id,true)}>批准</button>
+      <button className="deny" disabled={submittingApprovals.has(pending.pending_id)} onClick={()=>void respondApproval(pending.pending_id,false)}>拒绝</button>
+    </div>;
+  };
+
   return (
     <div className="app">
       <header>
@@ -465,6 +529,20 @@ export default function App() {
       </header>
 
       <div className="chat" ref={listRef} onScroll={onScroll}>
+        {draftsEnabled && <OrderDraftPanel key={sessionIdRef.current} drafts={drafts} loading={draftsLoading} error={draftsError} busy={busy && !hasPending} canSubmit={writesEnabled&&canSend&&!hasPending&&!interrupted} writesEnabled={writesEnabled} hasPending={hasPending}
+          onRefresh={()=>void refreshDrafts()} onSave={async (draft,input)=>{
+            const sessionId=sessionIdRef.current;
+            setDraftsLoading(true);
+            try {
+              const saved=draft?await reviseOrderDraft(sessionId,draft.draft_id,draft.revision,input):await createOrderDraft(sessionId,input);
+              if(sessionId!==sessionIdRef.current)return;
+              setDrafts(prev=>[saved,...prev.filter(item=>item.draft_id!==saved.draft_id)]);
+              return saved;
+            } finally {if(sessionId===sessionIdRef.current) await refreshDrafts();}
+          }} onSubmit={draft=>{
+            if (Date.parse(draft.expires_at)<=Date.now()) {void refreshDrafts();return;}
+            void send(`请调用 submit_order_draft 提交草稿 ${draft.draft_id} 的版本 ${draft.revision}，并申请审批。`);
+          }} />}
         {turns.length === 0 && (
           <div className="empty">
             试试问：「订单 123 里买了什么？还有货吗？有货的话报个价」
@@ -484,10 +562,12 @@ export default function App() {
               stalled={stalled}
               submittingApprovals={submittingApprovals}
               onRespond={(pendingId, approved) => void respondApproval(pendingId, approved)}
+              renderDraftApproval={renderDraftApproval}
             />
           ),
         )}
         {unmatchedPendingApprovals.map(pending => (
+          pending.tool === 'submit_order_draft' ? <div key={pending.pending_id}>{renderDraftApproval(pending)}</div> :
           <div className="approval" key={pending.pending_id}>
             <span className="approval-label">
               待审批 · {pending.tool} · 风险等级 {pending.risk}

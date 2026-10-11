@@ -101,6 +101,7 @@ def create_server(
     *,
     include_writes: bool = False,
     policy_resolver: PolicyResolver | None = None,
+    session_id: str | None = None,
 ) -> FastMCP:
     """构建 MCP server 实例（库内集成与独立进程共用）。
 
@@ -551,4 +552,10 @@ def create_server(
                 return _err(exc.code, exc.message, exc.hint)
             return {"sku": sku, "status": parsed.value, "note": "商品状态已更新"}
 
+    if session_id is not None:
+        from mcp_erp.draft_tools import register_draft_tools
+
+        if include_writes:
+            mcp.local_provider.remove_tool("create_order")
+        register_draft_tools(mcp, engine, session_id, include_writes)
     return mcp

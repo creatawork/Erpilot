@@ -538,3 +538,22 @@ button:disabled {
   border-radius: 6px;
   padding: 1px 8px;
 }
+
+.draft-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; font-size: 13px; }
+.draft-heading, .draft-line, .draft-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.draft-heading { justify-content: space-between; }
+.draft-heading h2 { margin: 0; font-size: 15px; }
+.draft-panel form { display: grid; gap: 8px; margin-top: 12px; }
+.draft-panel label { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.draft-line label:first-child { flex: 1; }
+.draft-line input[type="number"] { width: 90px; }
+.draft-panel input, .draft-panel select { width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 8px; font: inherit; background: var(--panel); color: var(--text); }
+.draft-panel button { padding: 8px 12px; font-size: 13px; align-self: center; }
+.draft-summary { width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.draft-table { max-width: 100%; overflow-x: auto; }
+.draft-table table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.draft-table caption { text-align: left; padding-bottom: 6px; }
+.draft-table th, .draft-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.draft-approval { min-width: 0; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 640px) { header { flex-wrap: wrap; padding: 12px; } footer { flex-wrap: wrap; padding: 12px; } footer textarea { min-width: 180px; } .draft-line { align-items: flex-end; } }

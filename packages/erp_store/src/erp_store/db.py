@@ -76,6 +76,21 @@ class MutationRequestRow(Base):
     result: Mapped[str] = mapped_column(Text)
 
 
+class OrderDraftRow(Base):
+    """Immutable quote revisions; submission outcome is committed with the order."""
+
+    __tablename__ = "order_drafts"
+
+    draft_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    revision: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(128), index=True)
+    snapshot: Mapped[str] = mapped_column(Text)
+    expires_at: Mapped[str] = mapped_column(String(40))
+    created_at: Mapped[str] = mapped_column(String(40), index=True)
+    order_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    submission_result: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 def make_engine(db_path: Path = DEFAULT_DB) -> Engine:
     """SQLite 引擎。
 

@@ -3,6 +3,8 @@
  * streamChat() 用 fetch + ReadableStream 手解 SSE（EventSource 不支持 POST）。
  */
 
+import type { OrderDraft } from './drafts';
+
 export interface StartPayload {
   session_id: string;
   model: string;
@@ -74,6 +76,7 @@ export interface UsagePayload {
 }
 
 export interface ApprovalPendingPayload {
+  draft?: OrderDraft;
   call_id: string;
   pending_id: string;
   tool: string;

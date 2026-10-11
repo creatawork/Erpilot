@@ -393,7 +393,7 @@ def test_bridge_writes_with_gate_marks_risk_and_guards(seeded_db, repo) -> None:
 def test_write_tool_risk_map_covers_surface() -> None:
     from mcp_erp.bridge import WRITE_TOOL_RISK
 
-    assert set(WRITE_TOOL_RISK) == WRITE_TOOLS
+    assert set(WRITE_TOOL_RISK) == WRITE_TOOLS | {"submit_order_draft"}
 
 
 def test_error_contract_survives_bridge(seeded_db) -> None:
@@ -423,7 +423,9 @@ def test_tool_cards_doc_matches_server_tools() -> None:
         for line in doc.read_text(encoding="utf-8").splitlines()
         if line.startswith("### ")
     }
-    assert documented == EXPECTED_TOOLS | WRITE_TOOLS
+    assert documented == EXPECTED_TOOLS | WRITE_TOOLS | {
+        "prepare_order_draft", "get_order_draft", "revise_order_draft", "submit_order_draft",
+    }
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]

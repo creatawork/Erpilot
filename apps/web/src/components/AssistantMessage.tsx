@@ -10,6 +10,7 @@ import { BusinessResultCard, isUsableDisplay } from "./BusinessResultCard";
 import { MarkdownContent } from "./MarkdownContent";
 import { ReasoningPanel } from "./ReasoningPanel";
 import { WorkTimeline } from "./WorkTimeline";
+import type { ReactNode } from 'react';
 
 const STATUS_ICON: Record<ToolEntity["status"], string> = {
   prepared: "⋯",
@@ -28,11 +29,13 @@ function ToolCard({
   now,
   submittingApprovals,
   onRespond,
+  renderDraftApproval,
 }: {
   entity: ToolEntity;
   now: number;
   submittingApprovals: Set<string>;
   onRespond: (pendingId: string, approved: boolean) => void;
+  renderDraftApproval?: (pending: ApprovalPendingPayload) => ReactNode;
 }) {
   const summary = toolSummary(entity);
   return (
@@ -45,7 +48,7 @@ function ToolCard({
       </summary>
       <pre className="args">{entity.arguments}</pre>
       {entity.approval && !entity.approvalResolved && (
-        <ApprovalActions
+        entity.approval.tool === 'submit_order_draft' && renderDraftApproval ? renderDraftApproval(entity.approval) : <ApprovalActions
           pending={entity.approval}
           now={now}
           submittingApprovals={submittingApprovals}
@@ -119,6 +122,7 @@ export function AssistantMessage({
   stalled,
   submittingApprovals,
   onRespond,
+  renderDraftApproval,
 }: {
   turn: AssistantTurn;
   now: number;
@@ -126,6 +130,7 @@ export function AssistantMessage({
   stalled: boolean;
   submittingApprovals: Set<string>;
   onRespond: (pendingId: string, approved: boolean) => void;
+  renderDraftApproval?: (pending: ApprovalPendingPayload) => ReactNode;
 }) {
   const showCursor = live && turn.phase === "generating";
   return (
@@ -155,6 +160,7 @@ export function AssistantMessage({
             now={now}
             submittingApprovals={submittingApprovals}
             onRespond={onRespond}
+            renderDraftApproval={renderDraftApproval}
           />
         );
       })}

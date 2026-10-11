@@ -74,80 +74,72 @@ class ErpMutations:
         """
         customer, merged, request = self._create_order_request(customer, items, note)
         with self._write_session() as s:
-            prior = self._prior(s, client_token, request)
-            if prior is not None:
-                return Order.model_validate(prior)
-            products = {
-                p.sku: p
-                for p in s.scalars(
-                    select(ProductRow).where(ProductRow.sku.in_(merged))
-                )
-            }
-            missing = [sku for sku in merged if sku not in products]
-            if missing:
-                raise MutationError(
-                    "not_found",
-                    f"商品不存在：{'、'.join(missing)}",
-                    "可用 search_products 按名称/品类确认 SKU",
-                )
-            off_sale = [
-                sku for sku, p in products.items()
-                if p.status != ProductStatus.ON_SALE.value
-            ]
-            if off_sale:
-                raise MutationError(
-                    "invalid_transition",
-                    f"商品已下架，不可下单：{'、'.join(off_sale)}",
-                    "已下架商品需先上架（set_product_status）或换在售商品",
-                )
-            stocks = {
-                st.sku: st
-                for st in s.scalars(select(StockRow).where(StockRow.sku.in_(merged)))
-            }
-            for sku, quantity in merged.items():
-                stock = stocks.get(sku)
-                have = stock.quantity if stock else 0
-                if have < quantity:
-                    raise MutationError(
-                        "insufficient_stock",
-                        f"商品 {products[sku].name}（{sku}）库存不足：需 {quantity}，"
-                        f"当前 {have}",
-                        "可减少数量或改报其他在售商品；库存数据可用 get_stock 复核",
-                    )
-            unit_prices = {}
-            for sku, quantity in merged.items():
-                try:
-                    unit_prices[sku] = price_for_quantity(products[sku].price, quantity)[1]
-                except PricingError as exc:
-                    raise MutationError(
-                        "invalid_argument", f"商品 {sku} 无法计价：{exc}",
-                        "请检查商品现价与数量折扣；成交单价不能为零",
-                    ) from exc
-            now = datetime.now()
-            order = OrderRow(
-                order_id=self._next_order_id(s, now),
-                customer=customer.strip(),
-                status=OrderStatus.PENDING_PAYMENT.value,
-                created_at=now,
-                note=note,
-                items=[
-                    OrderItemRow(
-                        sku=sku,
-                        name=products[sku].name,
-                        quantity=quantity,
-                        unit_price=unit_prices[sku],
-                    )
-                    for sku, quantity in merged.items()
-                ],
-            )
-            for sku, quantity in merged.items():
-                stocks[sku].quantity -= quantity
-            s.add(order)
-            s.flush()
-            result = self._load_order(s, order.order_id)
-            self._remember(s, client_token, request, result.model_dump(mode="json"))
+            result = self._create_order_in_session(s, customer, merged, note, client_token, request)
             s.commit()
             return result
+
+    def _create_order_in_session(self, s, customer, merged, note, client_token, request):
+        """Caller owns the write lock and commits all associated domain changes."""
+        prior = self._prior(s, client_token, request)
+        if prior is not None:
+            return Order.model_validate(prior)
+        products = {
+            p.sku: p for p in s.scalars(select(ProductRow).where(ProductRow.sku.in_(merged)))
+        }
+        missing = [sku for sku in merged if sku not in products]
+        if missing:
+            raise MutationError(
+                "not_found",
+                f"商品不存在：{'、'.join(missing)}",
+                "可用 search_products 按名称/品类确认 SKU",
+            )
+        off_sale = [sku for sku, p in products.items() if p.status != ProductStatus.ON_SALE.value]
+        if off_sale:
+            raise MutationError(
+                "invalid_transition",
+                f"商品已下架，不可下单：{'、'.join(off_sale)}",
+                "已下架商品需先上架（set_product_status）或换在售商品",
+            )
+        stocks = {st.sku: st for st in s.scalars(select(StockRow).where(StockRow.sku.in_(merged)))}
+        for sku, quantity in merged.items():
+            have = stocks[sku].quantity if sku in stocks else 0
+            if have < quantity:
+                raise MutationError(
+                    "insufficient_stock",
+                    f"商品 {products[sku].name}（{sku}）库存不足：需 {quantity}，当前 {have}",
+                    "可减少数量或改报其他在售商品；库存数据可用 get_stock 复核",
+                )
+        unit_prices = {}
+        for sku, quantity in merged.items():
+            try:
+                unit_prices[sku] = price_for_quantity(products[sku].price, quantity)[1]
+            except PricingError as exc:
+                raise MutationError(
+                    "invalid_argument",
+                    f"商品 {sku} 无法计价：{exc}",
+                    "请检查商品现价与数量折扣；成交单价不能为零",
+                ) from exc
+        now = datetime.now()
+        order = OrderRow(
+            order_id=self._next_order_id(s, now),
+            customer=customer,
+            note=note,
+            status=OrderStatus.PENDING_PAYMENT.value,
+            created_at=now,
+            items=[
+                OrderItemRow(
+                    sku=sku, name=products[sku].name, quantity=quantity, unit_price=unit_prices[sku]
+                )
+                for sku, quantity in merged.items()
+            ],
+        )
+        for sku, quantity in merged.items():
+            stocks[sku].quantity -= quantity
+        s.add(order)
+        s.flush()
+        result = self._load_order(s, order.order_id)
+        self._remember(s, client_token, request, result.model_dump(mode="json"))
+        return result
 
     def cancel_order(self, order_id: str, *, client_token: str | None = None) -> Order:
         """取消订单：仅待付款/待发货可取消（状态机），取消回补库存。"""
@@ -261,7 +253,8 @@ class ErpMutations:
             return None
         if row.request != self._request_json(request):
             raise MutationError(
-                "idempotency_conflict", "幂等键已用于不同写请求",
+                "idempotency_conflict",
+                "幂等键已用于不同写请求",
                 "重试原请求须保留原参数；新操作请使用新的 client_token",
             )
         return json.loads(row.result)
@@ -275,9 +268,7 @@ class ErpMutations:
     @staticmethod
     def _create_order_request(customer, items, note):
         if not customer.strip():
-            raise MutationError(
-                "invalid_argument", "客户名不能为空", "请提供下单客户的全名"
-            )
+            raise MutationError("invalid_argument", "客户名不能为空", "请提供下单客户的全名")
         if not items:
             raise MutationError(
                 "invalid_argument", "订单至少要有一行商品", "请提供 (SKU, 数量) 列表"
@@ -318,9 +309,7 @@ class ErpMutations:
         return ["set_product_status", sku, status.value]
 
     @classmethod
-    def _request_from_arguments(
-        cls, tool_name: str, arguments: dict[str, object]
-    ) -> list:
+    def _request_from_arguments(cls, tool_name: str, arguments: dict[str, object]) -> list:
         if tool_name == "create_order":
             _customer, _merged, request = cls._create_order_request(
                 arguments["customer"], arguments["items"], arguments.get("note")
@@ -331,17 +320,18 @@ class ErpMutations:
         if tool_name == "adjust_stock":
             return cls._adjust_stock_request(arguments["sku"], arguments["delta"])
         if tool_name == "set_product_status":
-            return cls._set_product_status_request(
-                arguments["sku"], arguments["status"]
-            )
+            return cls._set_product_status_request(arguments["sku"], arguments["status"])
         raise ValueError(f"unsupported mutation tool: {tool_name}")
 
     def _remember(self, session: Session, token: str | None, request: list, result) -> None:
         if token is not None:
-            session.add(MutationRequestRow(
-                client_token=token, request=self._request_json(request),
-                result=json.dumps(result, ensure_ascii=False, sort_keys=True),
-            ))
+            session.add(
+                MutationRequestRow(
+                    client_token=token,
+                    request=self._request_json(request),
+                    result=json.dumps(result, ensure_ascii=False, sort_keys=True),
+                )
+            )
 
     @staticmethod
     def _request_json(request: list) -> str:
@@ -350,9 +340,7 @@ class ErpMutations:
     def _next_order_id(self, s: Session, now: datetime) -> str:
         """SO+日期+序号：取当日最大序号 +1（与种子数据的单号格式一致）。"""
         prefix = f"SO{now:%Y%m%d}-"
-        rows = s.scalars(
-            select(OrderRow.order_id).where(OrderRow.order_id.like(prefix + "%"))
-        )
+        rows = s.scalars(select(OrderRow.order_id).where(OrderRow.order_id.like(prefix + "%")))
         max_seq = 0
         for order_id in rows:
             try:

@@ -1,6 +1,6 @@
-# 当前阶段：功能深化 B1 · 计价一致
+# 当前阶段：功能深化 B2 · 订单草稿与版本审批
 
-2026-10-11：用户确认暂不考虑部署，先推进业务功能深化。新阶段以 [业务里程碑与后续路径](../docs/business-roadmap.md) 为准；B1 的 [设计](../docs/superpowers/specs/2026-10-11-pricing-consistency-design.md) 与 [实施计划](../docs/superpowers/plans/2026-10-11-pricing-consistency.md) 已落地，计价一致已通过 [验收](../reports/acceptance/2026-10-11-pricing-consistency.md)（417 passed / 21 skipped / 47 deselected）。后续顺序为订单草稿与审批闭环、业务审批摘要、多轮任务与历史会话、业务 RAG、补货建议。
+2026-10-11：B1 计价一致与 B2 草稿确认闭环已完成；B2 支持多商品编辑、版本审批、事务复核与重复提交只建一单，详见 [验收报告](../reports/acceptance/2026-10-11-order-draft.md)（447 passed / 21 skipped / 47 deselected；前端 60 测试与构建通过）。继续按 [业务里程碑与后续路径](../docs/business-roadmap.md) 推进 B3 取消订单与库存调整摘要，再进入多轮任务、业务 RAG、补货建议；暂不考虑部署。
 
 ## 上一阶段：批次 2 · RAG 政策问答（批次 1 待 key 收尾）
 

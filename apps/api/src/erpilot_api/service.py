@@ -5,7 +5,7 @@ import copy
 import os
 import time
 from collections.abc import AsyncIterator, Callable, Sequence
-from contextlib import aclosing
+from contextlib import aclosing, suppress
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -38,9 +38,10 @@ from erpilot_api.run_store import RunStore
 
 
 class SessionError(RuntimeError):
-    def __init__(self, status, code, message):
+    def __init__(self, status, code, message, hint=""):
         super().__init__(message)
         self.status, self.code = status, code
+        self.hint = hint
 
 
 class _PresentationLogger:
@@ -84,21 +85,29 @@ class _PresentationLogger:
                 )
             case ToolExecuting(call_id=cid, name=name):
                 self._boundary("tool_executing", {"id": cid, "name": name})
-            case ToolCallFinished(
-                call_id=cid, name=name, content=content, ok=ok, display=display
-            ):
+            case ToolCallFinished(call_id=cid, name=name, content=content, ok=ok, display=display):
                 self._boundary(
                     "tool_finished",
                     {"id": cid, "name": name, "content": content, "ok": ok, "display": display},
                 )
             case ApprovalPending(
-                call_id=cid, pending_id=pid, tool=name, risk=risk, arguments=args,
+                call_id=cid,
+                pending_id=pid,
+                tool=name,
+                risk=risk,
+                arguments=args,
                 expires_at=expires_at,
             ):
                 self._boundary(
                     "approval_pending",
-                    {"call_id": cid, "pending_id": pid, "tool": name, "risk": risk,
-                     "arguments": args, "expires_at": expires_at},
+                    {
+                        "call_id": cid,
+                        "pending_id": pid,
+                        "tool": name,
+                        "risk": risk,
+                        "arguments": args,
+                        "expires_at": expires_at,
+                    },
                 )
             case ReconciliationPending(call_id=cid, client_token=token, code=code, message=message):
                 self._boundary(
@@ -110,8 +119,13 @@ class _PresentationLogger:
             ):
                 self._boundary(
                     "approval_resolved",
-                    {"call_id": cid, "pending_id": pid, "tool": name,
-                     "approved": approved, "reason": reason},
+                    {
+                        "call_id": cid,
+                        "pending_id": pid,
+                        "tool": name,
+                        "approved": approved,
+                        "reason": reason,
+                    },
                 )
             case LoopEnd(steps=steps, usage=usage, completed=completed):
                 self._boundary(
@@ -146,25 +160,29 @@ class _PresentationLogger:
 
     def _append(self, etype: str, payload: dict) -> None:
         self._seq += 1
-        self._pending.append({
-            "event_id": uuid4().hex,
-            "session_id": self._session_id,
-            "run_id": self._run_id,
-            "segment_id": self._segment_id,
-            "seq": self._seq,
-            "type": etype,
-            "payload": payload,
-        })
+        self._pending.append(
+            {
+                "event_id": uuid4().hex,
+                "session_id": self._session_id,
+                "run_id": self._run_id,
+                "segment_id": self._segment_id,
+                "seq": self._seq,
+                "type": etype,
+                "payload": payload,
+            }
+        )
 
     def _flush(self, force: bool = False) -> None:
         if self._delta and (
-            force or len(self._delta) >= 40
+            force
+            or len(self._delta) >= 40
             or time.monotonic() - self._last_flush > self._FLUSH_SECONDS
         ):
             self._append("delta", {"text": "".join(self._delta)})
             self._delta = []
         if self._pending and (
-            force or len(self._pending) >= self._FLUSH_EVENTS
+            force
+            or len(self._pending) >= self._FLUSH_EVENTS
             or time.monotonic() - self._last_flush > self._FLUSH_SECONDS
         ):
             self._seq = self._store.append_presentation_events(self._pending)
@@ -199,6 +217,9 @@ class ChatService:
         mutation_reconciler=None,
         approval_ttl_seconds=1800,
         clock=None,
+        session_tools_factory=None,
+        session_reconciler_factory=None,
+        drafts=None,
     ):
         self._client_factory = client_factory
         self._model, self._trace_dir = model, trace_dir
@@ -208,6 +229,9 @@ class ChatService:
             raise ValueError("write tools require approval runtime")
         self._run_store, self._checkpointer = run_store, checkpointer
         self._mutation_reconciler = mutation_reconciler
+        self._session_tools_factory = session_tools_factory
+        self._session_reconciler_factory = session_reconciler_factory
+        self._drafts = drafts
         self._approval_ttl_seconds, self._clock = approval_ttl_seconds, clock
         self._sinks = _sinks_from_env()
         self._client = None
@@ -218,16 +242,20 @@ class ChatService:
     def model(self):
         return self._model
 
-    def _runtime(self):
+    def _runtime(self, session_id):
         if self._client is None:
             self._client = self._client_factory()
         return LangGraphRuntime(
             self._client,
-            self._tools,
+            self._session_tools_factory(session_id) if self._session_tools_factory else self._tools,
             self._loop_config,
             self._checkpointer,
             approval_enabled=self._approval_gate is not None,
-            mutation_reconciler=self._mutation_reconciler,
+            mutation_reconciler=(
+                self._session_reconciler_factory(session_id)
+                if self._session_reconciler_factory
+                else self._mutation_reconciler
+            ),
             approval_ttl_seconds=self._approval_ttl_seconds,
             clock=self._clock,
         )
@@ -239,7 +267,7 @@ class ChatService:
         return bool(self._approval_gate and self._approval_gate.respond(pending_id, decision))
 
     async def _history(self, session_id):
-        snapshot = await self._runtime().get_state(thread_id_for_session(session_id))
+        snapshot = await self._runtime(session_id).get_state(thread_id_for_session(session_id))
         if snapshot.values:
             return copy.deepcopy(snapshot.values["messages"])
         saved = self._run_store.get_session(session_id) if self._run_store else None
@@ -247,12 +275,12 @@ class ChatService:
             saved["history"]
             if saved
             else [
-                {"role": "system", "content": system_prompt(any(t.risk for t in self._tools))},
+                {"role": "system", "content": self._system_prompt()},
             ]
         )
 
     async def session_state(self, session_id):
-        snapshot = await self._runtime().get_state(thread_id_for_session(session_id))
+        snapshot = await self._runtime(session_id).get_state(thread_id_for_session(session_id))
         if not snapshot.values:
             saved = self._run_store.get_session(session_id) if self._run_store else None
             if not saved:
@@ -266,7 +294,20 @@ class ChatService:
             }
         else:
             interrupts = [i.value for task in snapshot.tasks for i in task.interrupts]
-            pending = [p for p in interrupts if p.get("kind") != "reconciliation_required"]
+            pending = [
+                copy.deepcopy(p) for p in interrupts if p.get("kind") != "reconciliation_required"
+            ]
+            if self._drafts is not None:
+                from erp_store.mutations import MutationError
+
+                for approval in pending:
+                    if approval.get("tool") == "submit_order_draft":
+                        args = approval.get("arguments", {})
+                        # Missing or foreign drafts cannot expose another session's data.
+                        with suppress(MutationError):
+                            approval["draft"] = self._drafts.get(
+                                session_id, args["draft_id"], revision=args["revision"]
+                            )
             reconciliation = next(
                 (p for p in interrupts if p.get("kind") == "reconciliation_required"), None
             )
@@ -275,8 +316,10 @@ class ChatService:
                 for item in snapshot.values.get("tool_history", [])
             )
             status = (
-                "reconciliation_required" if reconciliation
-                else "unknown" if has_unknown and not snapshot.next
+                "reconciliation_required"
+                if reconciliation
+                else "unknown"
+                if has_unknown and not snapshot.next
                 else "waiting_approval"
                 if pending
                 else (
@@ -303,6 +346,18 @@ class ChatService:
                 state["last_seq"] = self._run_store.last_seq(latest_run["run_id"])
                 state["run_status"] = latest_run["status"]
         return state
+
+    def _system_prompt(self):
+        prompt = system_prompt(any(t.risk for t in self._tools))
+        if self._drafts is not None:
+            prompt += (
+                "\n建单前先使用 prepare_order_draft 保存报价草稿；"
+                "修改或刷新使用 revise_order_draft。"
+                "用户确认后仅使用 submit_order_draft 提交明确的 draft_id 和 revision，等待审批。"
+                "若草稿、报价或库存已变化或过期，说明原因并刷新草稿，重新取得用户确认和审批；"
+                "不得静默提交替代版本或重试旧版本。"
+            )
+        return prompt
 
     def _presentation(self, session_id):
         """展示投影（设计 5.3）：可选字段，旧客户端忽略；缺失时前端走旧 messages。"""
@@ -335,10 +390,12 @@ class ChatService:
                 lock.release()
 
         try:
-            runtime = self._runtime()
+            runtime = self._runtime(session_id)
             snapshot = await runtime.get_state(thread_id_for_session(session_id))
             pending = [
-                i.value for task in snapshot.tasks for i in task.interrupts
+                i.value
+                for task in snapshot.tasks
+                for i in task.interrupts
                 if i.value.get("kind") != "reconciliation_required"
             ]
             approval = next((p for p in pending if p.get("pending_id") == pending_id), None)
@@ -376,7 +433,7 @@ class ChatService:
         if lock.locked():
             raise SessionError(409, "session_busy", "会话已有活动执行，无法取消")
         async with lock:
-            runtime = self._runtime()
+            runtime = self._runtime(session_id)
             thread = thread_id_for_session(session_id)
             snapshot = await runtime.get_state(thread)
             if not snapshot.values:
@@ -423,7 +480,7 @@ class ChatService:
 
     async def stream_run(self, session_id, message) -> AsyncIterator[AgentEvent]:
         async with self.lock(session_id):
-            runtime = self._runtime()
+            runtime = self._runtime(session_id)
             thread = thread_id_for_session(session_id)
             snapshot = await runtime.get_state(thread)
             if snapshot.next:
@@ -437,7 +494,7 @@ class ChatService:
     async def stream_resume(self, session_id, pending_id, approved, reason="", *, reserved=False):
         release = None if reserved else await self.reserve_resume(session_id, pending_id)
         try:
-            runtime = self._runtime()
+            runtime = self._runtime(session_id)
             messages = await self._history(session_id)
             decision = {"pending_id": pending_id, "approved": approved, "reason": reason}
             async with aclosing(
@@ -451,7 +508,7 @@ class ChatService:
 
     async def stream_retry(self, session_id):
         async with self.lock(session_id):
-            runtime = self._runtime()
+            runtime = self._runtime(session_id)
             thread = thread_id_for_session(session_id)
             snapshot = await runtime.get_state(thread)
             if not snapshot.next:
@@ -469,7 +526,10 @@ class ChatService:
                 messages = copy.deepcopy(snapshot.values["messages"])
                 async with aclosing(
                     self._record_run(
-                        runtime, messages, session_id, None,
+                        runtime,
+                        messages,
+                        session_id,
+                        None,
                         reconciliation_call_id=reconciliation["call_id"],
                     )
                 ) as events:
@@ -486,8 +546,14 @@ class ChatService:
                     yield event
 
     async def _drive(
-        self, runtime, messages, thread, decision=None, continuation=False,
-        reconciliation_call_id=None, reconciliation_retry=True,
+        self,
+        runtime,
+        messages,
+        thread,
+        decision=None,
+        continuation=False,
+        reconciliation_call_id=None,
+        reconciliation_retry=True,
     ):
         if decision:
             stream = runtime.resume(thread, decision)
@@ -526,8 +592,16 @@ class ChatService:
                     self._approval_gate.discard(pending.pending_id)
 
     async def _record_run(
-        self, runtime, messages, session_id, message, *, decision=None, continuation=False,
-        reconciliation_call_id=None, reconciliation_retry=True,
+        self,
+        runtime,
+        messages,
+        session_id,
+        message,
+        *,
+        decision=None,
+        continuation=False,
+        reconciliation_call_id=None,
+        reconciliation_retry=True,
     ):
         thread = thread_id_for_session(session_id)
         self.last_trace = new_trace_path(self._trace_dir, self._model)
@@ -546,8 +620,13 @@ class ChatService:
                 run_id = self._run_store.resume_run(session_id)
         stream = recorder.record(
             self._drive(
-                runtime, messages, thread, decision, continuation,
-                reconciliation_call_id, reconciliation_retry,
+                runtime,
+                messages,
+                thread,
+                decision,
+                continuation,
+                reconciliation_call_id,
+                reconciliation_retry,
             ),
             messages,
         )
@@ -569,7 +648,8 @@ class ChatService:
                     if isinstance(event, (ApprovalPending, ReconciliationPending)) and run_id:
                         snapshot = await runtime.get_state(thread)
                         self._run_store.project_run(
-                            run_id, snapshot.values["messages"],
+                            run_id,
+                            snapshot.values["messages"],
                             "reconciliation_required"
                             if isinstance(event, ReconciliationPending)
                             else "waiting_approval",
@@ -599,10 +679,12 @@ class ChatService:
                 if any(task.interrupts for task in snapshot.tasks):
                     reconciliation = any(
                         i.value.get("kind") == "reconciliation_required"
-                        for task in snapshot.tasks for i in task.interrupts
+                        for task in snapshot.tasks
+                        for i in task.interrupts
                     )
                     self._run_store.project_run(
-                        run_id, snapshot.values["messages"],
+                        run_id,
+                        snapshot.values["messages"],
                         "reconciliation_required" if reconciliation else "waiting_approval",
                     )
                 else:

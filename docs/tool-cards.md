@@ -1,4 +1,4 @@
-# MCP 工具卡（erpilot-erp · 16 个只读工具 + 4 个写工具）
+# MCP 工具卡（基础工具与会话草稿工具）
 
 > M3 第 3 周 · 工具设计精研（上）；M4 第 1 周起增补写操作（ADR-0005）。
 > 每个工具一张卡：用途 / 参数 / 返回 / 错误。
@@ -24,6 +24,38 @@
 - 业务校验在工具体内做并返回此结构，而不是靠 schema 约束抛协议异常——
   协议异常到模型手里只剩一句 pydantic 报错，没有自愈线索
 - 空**列表**结果不是错误（`{"total": 0, "items": []}`），模型自行向用户说明
+
+## 会话订单草稿（B2）
+
+API 的 MCP 组合层绑定可信会话标识，不在工具参数中接受 `session_id`。
+会话工具面替换原始 `create_order` 为 `submit_order_draft`；CLI / 独立 MCP
+仍保留原始建单入口。只读模式允许保存草稿，但不注册提交工具。
+草稿按版本保存，不占库存；每版有效期 30 分钟。修改或刷新生成新版本。
+
+### prepare_order_draft
+- 用途：为当前会话准备确定性报价草稿，不建立订单、不扣库存
+- 参数：`customer`、`items: [{sku,quantity}]`、可选 `note`
+- 返回：`draft_id`、`revision`、客户、备注、含基础价/折扣/成交单价/行金额/库存前后的 `items`、`total_amount`、`expires_at`、`status`、`order_id`
+- 错误：`invalid_argument`、`not_found`、`invalid_transition`、`insufficient_stock`
+
+### get_order_draft
+- 用途：查看当前版本，或不可变的历史报价版本
+- 参数：`draft_id`、可选 `revision`
+- 返回：草稿；状态为 `open` / `expired` / `superseded` / `submitted`
+- 错误：`not_found`（含其他会话的草稿，不泄露归属信息）
+
+### revise_order_draft
+- 用途：修改客户、商品、数量、备注或刷新报价，重新取得 30 分钟有效期
+- 参数：`draft_id`、`expected_revision`、`customer`、`items`、可选 `note`
+- 返回：新版本草稿；旧审批仍引用旧版本，不能成交
+- 错误：草稿基础校验错误、`draft_changed`（并发编辑）、`draft_submitted`
+
+### submit_order_draft
+- 用途：批准指定版本后原子建单（**single_confirm**）
+- 参数：`draft_id`、`revision`、可选 `client_token`
+- 返回：原始创建订单结果和 `result_note`；同版本不同 token 仍只建一单
+- 错误：`draft_changed`、`draft_expired`、`quote_changed`、`stock_changed`、`idempotency_conflict`、`not_found`
+- 执行契约：事务内复核版本、有效期、价格、名称、折扣、在售状态及库存；变化须刷新草稿并重新审批，不静默接受新报价。提交状态、结果、订单、库存与 token 同事务保存；断线恢复可核对原结果。
 
 ## 订单
 

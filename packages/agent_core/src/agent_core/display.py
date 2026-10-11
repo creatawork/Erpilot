@@ -119,4 +119,5 @@ _BUILDERS = {
     "get_stock": {"kind": "stock_query", "fields": _stock_query_fields},
     "adjust_stock": {"kind": "stock_adjustment", "fields": _stock_adjustment_fields},
     "create_order": {"kind": "order_creation", "fields": _order_creation_fields},
+    "submit_order_draft": {"kind": "order_creation", "fields": _order_creation_fields},
 }

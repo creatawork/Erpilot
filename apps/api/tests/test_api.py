@@ -24,8 +24,12 @@ async def test_runtime_reports_actual_tool_mode_and_write_capability(tmp_path, m
     ) as client:
         response = await client.get("/api/runtime")
     assert response.status_code == 200
-    assert response.json() == {"data_source": "demo", "writes_enabled": False,
-                               "reasoning_enabled": True}
+    assert response.json() == {
+        "data_source": "demo",
+        "writes_enabled": False,
+        "reasoning_enabled": True,
+        "drafts_enabled": False,
+    }
 
 
 def _handler_pair(requests: list[httpx2.Request]):
@@ -577,8 +581,14 @@ async def test_heartbeat_frames_appear_without_cancelling_stream(tmp_path, monke
     assert "heartbeat" in names
     # 心跳之外，业务事件序列保持完整
     assert [n for n in names if n != "heartbeat"] == [
-        "start", "step", "tool_started", "tool_executing", "tool_finished",
-        "step", "delta", "done",
+        "start",
+        "step",
+        "tool_started",
+        "tool_executing",
+        "tool_finished",
+        "step",
+        "delta",
+        "done",
     ]
 
 

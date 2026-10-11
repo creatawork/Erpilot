@@ -47,6 +47,7 @@ _TYPE_MAP: dict[str, type] = {
 
 # 写工具的风险分级（ADR-0005：资金/单据单笔确认，低风险批量确认）
 WRITE_TOOL_RISK: dict[str, str] = {
+    "submit_order_draft": RISK_SINGLE_CONFIRM,
     "create_order": RISK_SINGLE_CONFIRM,
     "cancel_order": RISK_SINGLE_CONFIRM,
     "adjust_stock": RISK_BATCH_CONFIRM,
@@ -62,16 +63,22 @@ def build_agent_tools(
     policy_resolver: PolicyResolver | None = None,
 ) -> list[Tool]:
     """同步入口（应用启动 / CLI main，不能在事件循环内调用）。"""
-    return asyncio.run(build_agent_tools_async(
-        db_path, writes=writes, approval_gate=approval_gate, policy_resolver=policy_resolver,
-    ))
+    return asyncio.run(
+        build_agent_tools_async(
+            db_path,
+            writes=writes,
+            approval_gate=approval_gate,
+            policy_resolver=policy_resolver,
+        )
+    )
 
 
 class ErpMutationReconciler:
     """Read mutation outcomes from the same ERP database used by MCP handlers."""
 
-    def __init__(self, db_path: Path | str = DEFAULT_DB):
+    def __init__(self, db_path: Path | str = DEFAULT_DB, *, session_id: str | None = None):
         self.db_path = Path(db_path)
+        self.session_id = session_id
 
     async def lookup(self, tool_name: str, arguments: dict, client_token: str):
         from agent_core.recovery import MutationLookup
@@ -79,6 +86,14 @@ class ErpMutationReconciler:
         def read():
             engine = make_engine(self.db_path)
             try:
+                if tool_name == "submit_order_draft":
+                    from erp_store.drafts import ErpDrafts
+
+                    if self.session_id is None:
+                        return "absent", None
+                    return ErpDrafts(engine).lookup_submission(
+                        self.session_id, arguments, client_token
+                    )
                 return ErpMutations(engine).lookup_result(tool_name, arguments, client_token)
             finally:
                 engine.dispose()
@@ -95,7 +110,7 @@ def build_mutation_reconciler(db_path: Path | str = DEFAULT_DB) -> ErpMutationRe
 
 def _format_mutation_result(tool_name: str, arguments: dict, result: Any) -> Any:
     """Adapt stored domain results to the exact response shape returned by MCP tools."""
-    if tool_name == "create_order":
+    if tool_name in {"create_order", "submit_order_draft"}:
         return {**result, "result_note": "订单已创建，当前状态「待付款」；金额按下单快照价"}
     if tool_name == "cancel_order":
         return {**result, "result_note": "订单已取消，库存已回补"}
@@ -118,6 +133,7 @@ async def build_agent_tools_async(
     writes: bool = False,
     approval_gate: ApprovalGate | None = None,
     policy_resolver: PolicyResolver | None = None,
+    session_id: str | None = None,
 ) -> list[Tool]:
     """发现 MCP 工具并转换为 agent_core Tool 列表（可在运行中的 loop 内调用）。
 
@@ -133,11 +149,21 @@ async def build_agent_tools_async(
             f"ERP 数据库不存在：{db_path}（先运行 uv run --package erp-store "
             "python -m erp_store seed 生成）"
         )
-    server = create_server(db_path, include_writes=writes, policy_resolver=policy_resolver)
+    server = create_server(
+        db_path, include_writes=writes, policy_resolver=policy_resolver, session_id=session_id
+    )
     async with Client(server) as client:
         mcp_tools = await client.list_tools()
     tools = [
-        _convert(t.name, t.description or "", t.input_schema, db_path, writes, policy_resolver)
+        _convert(
+            t.name,
+            t.description or "",
+            t.input_schema,
+            db_path,
+            writes,
+            policy_resolver,
+            session_id,
+        )
         for t in mcp_tools
     ]
     if writes:
@@ -163,8 +189,13 @@ def _with_risk_and_gate(tool: Tool, gate: ApprovalGate | None) -> Tool:
 
 
 def _convert(
-    name: str, description: str, schema: dict[str, Any], db_path: Path, writes: bool,
+    name: str,
+    description: str,
+    schema: dict[str, Any],
+    db_path: Path,
+    writes: bool,
     policy_resolver: PolicyResolver | None = None,
+    session_id: str | None = None,
 ) -> Tool:
     """把一个 MCP 工具转成 agent Tool；调用侧必须以同一 writes 口径建 server。
 
@@ -178,7 +209,9 @@ def _convert(
         if _name in WRITE_TOOL_RISK and args.client_token is None:
             # 同次工具执行的超时/异常重试复用同一个参数对象与 token。
             args.client_token = uuid4().hex
-        server = create_server(db_path, include_writes=writes, policy_resolver=policy_resolver)
+        server = create_server(
+            db_path, include_writes=writes, policy_resolver=policy_resolver, session_id=session_id
+        )
         async with Client(server) as client:
             result = await client.call_tool(_name, args.model_dump(mode="json", exclude_none=True))
         return _extract(result)
