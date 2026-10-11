@@ -554,8 +554,12 @@ def create_server(
 
     if session_id is not None:
         from mcp_erp.draft_tools import register_draft_tools
+        from mcp_erp.operation_tools import register_operation_tools
 
         if include_writes:
             mcp.local_provider.remove_tool("create_order")
+            mcp.local_provider.remove_tool("cancel_order")
+            mcp.local_provider.remove_tool("adjust_stock")
         register_draft_tools(mcp, engine, session_id, include_writes)
+        register_operation_tools(mcp, engine, session_id, include_writes)
     return mcp

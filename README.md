@@ -105,6 +105,8 @@ M1 各周验收入口：第 1–3 周为 `python -m agent_core`（最简演示�
 
 使用订单草稿页面需设置 `ERPILOT_TOOLS=mcp`；保存草稿不扣库存。`ERPILOT_WRITES=true` 且审批启用时才可提交建单。草稿每版有效 30 分钟，价格或库存变化后需刷新并重新确认；跨会话草稿不可读取或提交。直接调用独立 MCP 的原始 `create_order` 仍按执行时现价建单，审批由调用方负责。
 
+B3 取消订单与库存调整先保存业务预览再审批：确认页展示客户、原单金额、状态及库存变化，条件变化会停止执行并提示重新确认；同一预览重复提交只生效一次。取消不执行退款，缺失库存行会明确提示无法回补。设计与开发入口见 [B3 业务审批计划](docs/superpowers/plans/2026-10-11-business-approval.md)。
+
 新订单和报价共用数量折扣与十进制舍入口径：同 SKU 合并数量后计算折扣单价，四舍五入到两位再乘数量；历史成交价和幂等重放结果保持原值。报价不锁价或预留库存。政策源文件更新后默认检索会拒绝旧索引，须运行 `uv run --env-file .env --package rag python -m rag build` 重新生成索引（消耗嵌入 token；`--env-file` 显式加载配置）。
 
 M6–8 的 LangGraph + PostgreSQL HITL 已实施。基线验收见[2026-10-07 报告](reports/acceptance/2026-10-07-baseline.md)。崩溃恢复矩阵已在隔离 PostgreSQL 上通过，见[2026-10-08 报告](reports/acceptance/2026-10-08-crash-recovery.md)；[ADR-0010](docs/adr/0010-crash-recovery-reconciliation-scope.md) 仍待评审。下一阶段方向（多模型横向对比 · RAG 政策问答 · 评测迭代曲线 · 可展示部署收口）见 [tasks/plan-next-phase.md](tasks/plan-next-phase.md)，当前批次清单见 [tasks/todo.md](tasks/todo.md)；历史恢复协议见 [tasks/plan.md](tasks/plan.md)，当前运行时边界见 [ADR-0009](docs/adr/0009-langgraph-runtime.md)。

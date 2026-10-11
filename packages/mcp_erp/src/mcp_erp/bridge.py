@@ -86,6 +86,15 @@ class ErpMutationReconciler:
         def read():
             engine = make_engine(self.db_path)
             try:
+                if self.session_id is not None and tool_name in {"cancel_order", "adjust_stock"}:
+                    from erp_store.operations import ErpOperations
+
+                    # Legacy pending arguments must not accidentally reconcile against a new schema.
+                    if "operation_id" not in arguments:
+                        return "absent", None
+                    return ErpOperations(engine).lookup_operation(
+                        self.session_id, tool_name, arguments, client_token
+                    )
                 if tool_name == "submit_order_draft":
                     from erp_store.drafts import ErpDrafts
 
@@ -99,7 +108,7 @@ class ErpMutationReconciler:
                 engine.dispose()
 
         status, result = await asyncio.to_thread(read)
-        if status == "found":
+        if status == "found" and "operation_id" not in arguments:
             result = _format_mutation_result(tool_name, arguments, result)
         return MutationLookup(status, result)
 

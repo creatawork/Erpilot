@@ -46,8 +46,10 @@ class ErpOperations(ErpMutations):
             )
         order = self._load_order(s, order_id)
         items = []
+        returned = {}
         for item in order.items:
             stock = s.get(StockRow, item.sku)
+            before = stock.quantity + returned.get(item.sku, 0) if stock else None
             items.append(
                 dict(
                     sku=item.sku,
@@ -55,11 +57,12 @@ class ErpOperations(ErpMutations):
                     quantity=item.quantity,
                     unit_price=item.unit_price,
                     line_total=round(item.unit_price * item.quantity, 2),
-                    stock_before=stock.quantity if stock else None,
-                    stock_after=stock.quantity + item.quantity if stock else None,
+                    stock_before=before,
+                    stock_after=before + item.quantity if stock else None,
                     warehouse=stock.warehouse if stock else None,
                 )
             )
+            returned[item.sku] = returned.get(item.sku, 0) + item.quantity
         return dict(
             order_id=order_id,
             customer=order.customer,

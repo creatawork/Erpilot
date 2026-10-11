@@ -11,6 +11,7 @@ import { MarkdownContent } from "./MarkdownContent";
 import { ReasoningPanel } from "./ReasoningPanel";
 import { WorkTimeline } from "./WorkTimeline";
 import type { ReactNode } from 'react';
+import { isBusinessApproval, requiresBusinessSummary } from '../operations';
 
 const STATUS_ICON: Record<ToolEntity["status"], string> = {
   prepared: "⋯",
@@ -30,12 +31,16 @@ function ToolCard({
   submittingApprovals,
   onRespond,
   renderDraftApproval,
+  renderBusinessApproval,
+  businessApprovalsEnabled = false,
 }: {
   entity: ToolEntity;
   now: number;
   submittingApprovals: Set<string>;
   onRespond: (pendingId: string, approved: boolean) => void;
   renderDraftApproval?: (pending: ApprovalPendingPayload) => ReactNode;
+  renderBusinessApproval?: (pending: ApprovalPendingPayload) => ReactNode;
+  businessApprovalsEnabled?: boolean;
 }) {
   const summary = toolSummary(entity);
   return (
@@ -46,10 +51,11 @@ function ToolCard({
         {summary && <span className="tool-summary">{summary}</span>}
         <span className="tool-status">{toolStatusLabel(entity)}</span>
       </summary>
-      <pre className="args">{entity.arguments}</pre>
+      {isBusinessApproval(entity.name)?<details><summary>技术详情</summary><pre className="args">{entity.arguments}</pre></details>:<pre className="args">{entity.arguments}</pre>}
       {entity.approval && !entity.approvalResolved && (
-        entity.approval.tool === 'submit_order_draft' && renderDraftApproval ? renderDraftApproval(entity.approval) : <ApprovalActions
+        requiresBusinessSummary(entity.approval,businessApprovalsEnabled) && renderBusinessApproval ? renderBusinessApproval(entity.approval) : entity.approval.tool === 'submit_order_draft' && renderDraftApproval ? renderDraftApproval(entity.approval) : <ApprovalActions
           pending={entity.approval}
+          businessApprovalsEnabled={businessApprovalsEnabled}
           now={now}
           submittingApprovals={submittingApprovals}
           onRespond={onRespond}
@@ -76,12 +82,14 @@ function isSettled(entity: ToolEntity): boolean {
 }
 
 function ApprovalActions({
+  businessApprovalsEnabled,
   pending,
   now,
   submittingApprovals,
   onRespond,
 }: {
   pending: ApprovalPendingPayload;
+  businessApprovalsEnabled: boolean;
   now: number;
   submittingApprovals: Set<string>;
   onRespond: (pendingId: string, approved: boolean) => void;
@@ -101,7 +109,7 @@ function ApprovalActions({
         <>
           <button
             className="approve"
-            disabled={submittingApprovals.has(pending.pending_id)}
+            disabled={submittingApprovals.has(pending.pending_id)||requiresBusinessSummary(pending,businessApprovalsEnabled)}
             onClick={() => onRespond(pending.pending_id, true)}
           >批准</button>
           <button
@@ -123,6 +131,8 @@ export function AssistantMessage({
   submittingApprovals,
   onRespond,
   renderDraftApproval,
+  renderBusinessApproval,
+  businessApprovalsEnabled = false,
 }: {
   turn: AssistantTurn;
   now: number;
@@ -131,6 +141,8 @@ export function AssistantMessage({
   submittingApprovals: Set<string>;
   onRespond: (pendingId: string, approved: boolean) => void;
   renderDraftApproval?: (pending: ApprovalPendingPayload) => ReactNode;
+  renderBusinessApproval?: (pending: ApprovalPendingPayload) => ReactNode;
+  businessApprovalsEnabled?: boolean;
 }) {
   const showCursor = live && turn.phase === "generating";
   return (
@@ -161,6 +173,8 @@ export function AssistantMessage({
             submittingApprovals={submittingApprovals}
             onRespond={onRespond}
             renderDraftApproval={renderDraftApproval}
+            renderBusinessApproval={renderBusinessApproval}
+            businessApprovalsEnabled={businessApprovalsEnabled}
           />
         );
       })}

@@ -11,11 +11,13 @@ import type {
 } from "../protocol";
 
 export function isUsableDisplay(display: BusinessDisplay | null | undefined): boolean {
-  if (!display || display.version !== 1 || display.outcome !== "succeeded") return false;
-  for (const field of ["sku", "message", "error_code", "order_id", "customer", "status"]) {
+  if (!display || display.version !== 1) return false;
+  for (const field of ["sku", "message", "hint", "error_code", "order_id", "customer", "status"]) {
     const value = (display as unknown as Record<string, unknown>)[field];
     if (value !== undefined && typeof value !== "string") return false;
   }
+  if ((display.kind==='order_cancellation'||display.kind==='stock_adjustment')&&['failed','denied'].includes(display.outcome))return typeof display.message==='string'&&display.message.length>0;
+  if(display.outcome!=="succeeded")return false;
   switch (display.kind) {
     case "stock_query":
       return Number.isSafeInteger(display.quantity) &&
@@ -23,6 +25,7 @@ export function isUsableDisplay(display: BusinessDisplay | null | undefined): bo
     case "stock_adjustment":
       return Number.isSafeInteger(display.delta) && Number.isSafeInteger(display.quantity_after);
     case "order_creation":
+    case "order_cancellation":
       return typeof display.order_id === "string" && display.order_id.length > 0 &&
         (display.total_amount === undefined ||
           (typeof display.total_amount === "number" && Number.isFinite(display.total_amount)));
@@ -39,6 +42,7 @@ const OUTCOME_LABEL: Record<string, string> = {
 
 export function BusinessResultCard({ display }: { display: BusinessDisplay }) {
   if (!isUsableDisplay(display)) return null;
+  if(display.outcome==='failed'||display.outcome==='denied')return <div className={`card ${display.outcome}`}><div className="card-head"><span className="card-title">{display.kind==='order_cancellation'?'取消订单':'库存调整'}</span><Outcome outcome={display.outcome}/></div><div className="card-body">{display.message}{display.hint&&<p>{display.hint}</p>}</div></div>;
   switch (display.kind) {
     case "stock_query": {
       const { sku, quantity, available } = display as StockQueryDisplay;
@@ -95,6 +99,10 @@ export function BusinessResultCard({ display }: { display: BusinessDisplay }) {
           </div>
         </div>
       );
+    }
+    case "order_cancellation": {
+      const {order_id,customer,status,total_amount}=display as unknown as OrderCreationDisplay;
+      return <div className={`card ${display.outcome}`}><div className="card-head"><span className="card-title">取消订单</span><Outcome outcome={display.outcome}/></div><div className="card-body">订单 <strong>{order_id}</strong>{customer?` · ${customer}`:''}{status?` · ${status}`:''}{typeof total_amount==='number'?` · 原单金额 ¥${total_amount.toFixed(2)}`:''}{display.message?` · ${display.message}`:''}</div></div>;
     }
     default:
       return null; // 未知 kind：回退通用结果详情

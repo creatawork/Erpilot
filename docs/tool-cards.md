@@ -57,6 +57,35 @@ API 的 MCP 组合层绑定可信会话标识，不在工具参数中接受 `ses
 - 错误：`draft_changed`、`draft_expired`、`quote_changed`、`stock_changed`、`idempotency_conflict`、`not_found`
 - 执行契约：事务内复核版本、有效期、价格、名称、折扣、在售状态及库存；变化须刷新草稿并重新审批，不静默接受新报价。提交状态、结果、订单、库存与 token 同事务保存；断线恢复可核对原结果。
 
+## 会话业务审批（B3）
+
+网页 MCP 先保存不可变操作预览，再提交该引用审批。同名 `cancel_order` 与
+`adjust_stock` 在会话面仅接受 `operation_id`、可选 `client_token`；下文原始参数
+仅用于 CLI / 独立 MCP。可信会话归属和类型均在宿主及业务层检查，模型无 session_id。
+有效期 30 分钟，拒绝不执行；条件变化或过期须重新预览并审批。原始成交结果、
+业务变更及 token 同事务保存，同引用新 token 也只执行一次。
+
+### prepare_cancel_order
+- 用途：保存取消影响：客户、原单金额、状态变化、商品明细及库存回补，不执行取消或退款
+- 参数：`order_id`
+- 返回：`operation_id`、`kind=cancel_order`、`status`、`expires_at`、不可变 `summary`、`invalid_reason`
+- summary：`order_id/customer/status_before/status_after/total_amount/note/items`；行包含 `sku/name/quantity/unit_price/line_total/stock_before/stock_after/warehouse`
+- 库存行缺失时库存与仓库字段为 null，明确该行不能回补；旧单同 SKU 多行的库存影响逐行累计
+- 错误：`not_found`、`invalid_transition`（仅待付款/待发货可取消）
+
+### prepare_stock_adjustment
+- 用途：保存商品、仓库和调整前后的确定性影响，不改变库存
+- 参数：`sku`、非零整数 `delta`
+- 返回：操作预览，`kind=adjust_stock`；summary 包含 `sku/name/delta/quantity_before/quantity_after/warehouse/stock_exists`
+- 错误：`not_found`、`invalid_argument`、`insufficient_stock`（预期库存为负数）
+- 原库存行不存在时预览明确将新建主仓记录，不伪造已有库存记录
+
+会话执行错误：`operation_changed`、`operation_expired`、`not_found`（外会话或类型不符）、
+`idempotency_conflict`。取消复核原单状态、客户、金额、明细和受影响库存；调整复核
+商品名称、库存量、仓库与记录存在性。`GET /api/sessions/{sid}/operations/{id}`
+始终返回原摘要并实时判断 open/changed/expired/executed；恢复后的 pending.operation
+展示同一批准对象，失效或未核对时网页只能拒绝。
+
 ## 订单
 
 ### get_order

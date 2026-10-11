@@ -4,6 +4,7 @@ from pathlib import Path
 
 from erp_store.db import DEFAULT_DB, make_engine
 from erp_store.drafts import ErpDrafts
+from erp_store.operations import ErpOperations
 from fastmcp import Client
 
 from mcp_erp.bridge import ErpMutationReconciler, _convert, _with_risk_and_gate
@@ -29,6 +30,7 @@ class SessionErpTools:
         self.db_path, self.writes, self.gate = path, writes, gate
         self.policy_resolver, self._metadata = policy_resolver, metadata
         self.drafts = ErpDrafts(make_engine(path))
+        self.operations = ErpOperations(make_engine(path))
         self.tools = self.for_session("discovery")
 
     def for_session(self, session_id):

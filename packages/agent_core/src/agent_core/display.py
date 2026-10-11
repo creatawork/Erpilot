@@ -60,6 +60,7 @@ def build_display(
                 args,
                 error_code=str(error.get("code") or ""),
                 message=str(error.get("message") or ""),
+                hint=str(error.get("hint") or ""),
             )
         fields = builder["fields"](args, result)
         if fields is None:
@@ -91,14 +92,21 @@ def _stock_query_fields(args: dict, result: dict) -> dict[str, Any] | None:
 
 
 def _stock_adjustment_fields(args: dict, result: dict) -> dict[str, Any] | None:
-    delta = args.get("delta")
+    scoped = isinstance(args.get("operation_id"), str)
+    delta = result.get("delta") if scoped else args.get("delta")
     quantity_after = result.get("quantity")
     if not isinstance(delta, int) or isinstance(delta, bool):
         return None
     if not isinstance(quantity_after, int) or isinstance(quantity_after, bool):
         # 调整成功的返回必须带调整后的库存；缺失即无法确认
         return None
-    return {"delta": delta, "quantity_after": quantity_after}
+    fields = {"delta": delta, "quantity_after": quantity_after}
+    if scoped:
+        sku = result.get("sku")
+        if not isinstance(sku, str) or not sku:
+            return None
+        fields["sku"] = sku
+    return fields
 
 
 def _order_creation_fields(args: dict, result: dict) -> dict[str, Any] | None:
@@ -114,10 +122,18 @@ def _order_creation_fields(args: dict, result: dict) -> dict[str, Any] | None:
     }
 
 
+def _order_cancellation_fields(args: dict, result: dict) -> dict[str, Any] | None:
+    fields = _order_creation_fields(args, result)
+    if fields is not None and isinstance(result.get("result_note"), str):
+        fields["message"] = result["result_note"]
+    return fields
+
+
 _BUILDERS = {
     "check_stock": {"kind": "stock_query", "fields": _stock_query_fields},
     "get_stock": {"kind": "stock_query", "fields": _stock_query_fields},
     "adjust_stock": {"kind": "stock_adjustment", "fields": _stock_adjustment_fields},
     "create_order": {"kind": "order_creation", "fields": _order_creation_fields},
     "submit_order_draft": {"kind": "order_creation", "fields": _order_creation_fields},
+    "cancel_order": {"kind": "order_cancellation", "fields": _order_cancellation_fields},
 }

@@ -306,6 +306,8 @@ const TOOL_TITLES: Record<string, string> = {
   adjust_stock: "调整库存",
   create_order: "创建订单",
   cancel_order: "取消订单",
+  prepare_cancel_order: "预览订单取消",
+  prepare_stock_adjustment: "预览库存调整",
   set_product_status: "商品上下架",
 };
 

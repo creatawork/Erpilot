@@ -4,6 +4,7 @@
  */
 
 import type { OrderDraft } from './drafts';
+import type { BusinessOperation } from './operations';
 
 export interface StartPayload {
   session_id: string;
@@ -40,6 +41,7 @@ export interface BusinessDisplayBase {
   outcome: BusinessOutcome;
   sku?: string;
   message?: string;
+  hint?: string;
   error_code?: string;
 }
 
@@ -64,6 +66,7 @@ export interface OrderCreationDisplay extends BusinessDisplayBase {
 }
 
 export type BusinessDisplay =
+  | (Omit<OrderCreationDisplay, 'kind'> & {kind: 'order_cancellation'})
   | StockQueryDisplay
   | StockAdjustmentDisplay
   | OrderCreationDisplay
@@ -76,6 +79,7 @@ export interface UsagePayload {
 }
 
 export interface ApprovalPendingPayload {
+  operation?: BusinessOperation;
   draft?: OrderDraft;
   call_id: string;
   pending_id: string;

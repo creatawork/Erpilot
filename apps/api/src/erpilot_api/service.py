@@ -220,6 +220,7 @@ class ChatService:
         session_tools_factory=None,
         session_reconciler_factory=None,
         drafts=None,
+        operations=None,
     ):
         self._client_factory = client_factory
         self._model, self._trace_dir = model, trace_dir
@@ -232,6 +233,7 @@ class ChatService:
         self._session_tools_factory = session_tools_factory
         self._session_reconciler_factory = session_reconciler_factory
         self._drafts = drafts
+        self._operations = operations
         self._approval_ttl_seconds, self._clock = approval_ttl_seconds, clock
         self._sinks = _sinks_from_env()
         self._client = None
@@ -308,6 +310,17 @@ class ChatService:
                             approval["draft"] = self._drafts.get(
                                 session_id, args["draft_id"], revision=args["revision"]
                             )
+            if self._operations is not None:
+                from erp_store.mutations import MutationError
+
+                for approval in pending:
+                    kind = approval.get("tool")
+                    operation_id = approval.get("arguments", {}).get("operation_id")
+                    if kind in {"cancel_order", "adjust_stock"} and isinstance(operation_id, str):
+                        with suppress(MutationError):
+                            operation = self._operations.get(session_id, operation_id)
+                            if operation["kind"] == kind:
+                                approval["operation"] = operation
             reconciliation = next(
                 (p for p in interrupts if p.get("kind") == "reconciliation_required"), None
             )
@@ -356,6 +369,14 @@ class ChatService:
                 "用户确认后仅使用 submit_order_draft 提交明确的 draft_id 和 revision，等待审批。"
                 "若草稿、报价或库存已变化或过期，说明原因并刷新草稿，重新取得用户确认和审批；"
                 "不得静默提交替代版本或重试旧版本。"
+            )
+        if self._operations is not None:
+            prompt += (
+                "\n取消订单前先使用 prepare_cancel_order 保存业务预览；"
+                "调整库存前先使用 prepare_stock_adjustment 保存业务预览。"
+                "用户确认后使用 cancel_order 或 adjust_stock 提交对应的 operation_id，等待审批。"
+                "若业务数据已变化或预览过期，说明原因并重新预览，重新取得用户确认和审批；"
+                "不得静默更换已批准的操作引用。"
             )
         return prompt
 

@@ -29,6 +29,7 @@ async def test_runtime_reports_actual_tool_mode_and_write_capability(tmp_path, m
         "writes_enabled": False,
         "reasoning_enabled": True,
         "drafts_enabled": False,
+        "business_approvals_enabled": False,
     }
 
 

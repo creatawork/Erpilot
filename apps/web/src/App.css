@@ -557,3 +557,11 @@ button:disabled {
 .draft-approval { min-width: 0; }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (max-width: 640px) { header { flex-wrap: wrap; padding: 12px; } footer { flex-wrap: wrap; padding: 12px; } footer textarea { min-width: 180px; } .draft-line { align-items: flex-end; } }
+.business-approval { display: block; }
+.business-approval p { margin: .75rem 0; }
+.business-approval > button { margin-right: .5rem; }
+.business-table { max-width: 100%; overflow-x: auto; margin: .75rem 0; }
+.business-table table { border-collapse: collapse; width: 100%; font-size: .875rem; }
+.business-table th, .business-table td { padding: .5rem; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--line); }
+.business-table caption { text-align: left; font-weight: 600; padding-bottom: .5rem; }
+.business-technical { margin-top: .75rem; }

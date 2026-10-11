@@ -31,9 +31,15 @@ def register_draft_routes(app: FastAPI, session_erp_tools):
             404
             if exc.code == "not_found"
             else 410
-            if exc.code == "draft_expired"
+            if exc.code in {"draft_expired", "operation_expired"}
             else 409
-            if exc.code in {"draft_changed", "quote_changed", "stock_changed", "draft_submitted"}
+            if exc.code in {
+                "draft_changed",
+                "quote_changed",
+                "stock_changed",
+                "draft_submitted",
+                "operation_changed",
+            }
             else 422
         )
         return JSONResponse(

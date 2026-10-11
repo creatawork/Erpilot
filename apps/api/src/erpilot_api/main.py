@@ -38,6 +38,7 @@ from starlette.background import BackgroundTask
 from erpilot_api.checkpoint import open_checkpointer
 from erpilot_api.draft_routes import register_draft_routes
 from erpilot_api.events import encode_event, sse_frame
+from erpilot_api.operation_routes import register_operation_routes
 from erpilot_api.run_store import RunStore
 from erpilot_api.service import ChatService, SessionError
 
@@ -136,6 +137,7 @@ def create_app(
         session_tools_factory=session_erp_tools.for_session if session_erp_tools else None,
         session_reconciler_factory=session_erp_tools.reconciler if session_erp_tools else None,
         drafts=session_erp_tools.drafts if session_erp_tools else None,
+        operations=getattr(session_erp_tools, "operations", None),
     )
 
     @asynccontextmanager
@@ -170,6 +172,7 @@ def create_app(
         return {"status": "ok"}
 
     register_draft_routes(app, session_erp_tools)
+    register_operation_routes(app, service._operations)
 
     @app.get("/api/runtime")
     def runtime_info() -> dict[str, Any]:
@@ -182,6 +185,10 @@ def create_app(
             "writes_enabled": any(tool.risk is not None for tool in resolved_tools),
             "reasoning_enabled": os.environ.get("ERPILOT_THINKING", "").lower() in _WRITES_ENV,
             "drafts_enabled": session_erp_tools is not None,
+            "business_approvals_enabled": (
+                service._operations is not None
+                and any(tool.risk is not None for tool in resolved_tools)
+            ),
         }
 
     @app.post("/api/chat/stream")

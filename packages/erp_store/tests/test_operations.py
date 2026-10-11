@@ -2,7 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from erp_store.db import OrderRow, ProductRow, StockRow, init_db, make_engine
+from erp_store.db import OrderItemRow, OrderRow, ProductRow, StockRow, init_db, make_engine
 from erp_store.models import OrderStatus, ProductStatus
 from erp_store.mutations import MutationError
 from erp_store.operations import ErpOperations
@@ -114,6 +114,23 @@ def test_missing_stock_is_explicit_for_cancel_and_can_be_created_for_adjust(stor
     assert adjust["summary"]["stock_exists"] is False
     result = ops.execute("s1", adjust["operation_id"], "adjust_stock", "adjust")
     assert result["quantity"] == 3 and repo.get_stock("A").quantity == 3
+
+
+def test_legacy_duplicate_sku_lines_show_cumulative_restock_impact(store):
+    engine, repo, ops = store
+    order = ops.create_order("客户", [("A", 10)])
+    with Session(engine) as s:
+        row = s.get(OrderRow, order.order_id)
+        row.items[0].quantity = 5
+        row.items.append(OrderItemRow(sku="A", name="商品", quantity=5, unit_price=98))
+        s.commit()
+    preview = ops.prepare_cancel("s1", order.order_id)
+    assert [(i["stock_before"], i["stock_after"]) for i in preview["summary"]["items"]] == [
+        (90, 95),
+        (95, 100),
+    ]
+    ops.execute("s1", preview["operation_id"], "cancel_order", "approve")
+    assert repo.get_stock("A").quantity == 100
 
 
 def test_expiry_boundary_and_replay_after_expiry(store):

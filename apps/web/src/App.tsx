@@ -30,6 +30,8 @@ import {
 import { AssistantMessage } from "./components/AssistantMessage";
 import { approvalDraftIssue, createOrderDraft, getOrderDraft, listOrderDrafts, parseOrderDraft, reviseOrderDraft, type OrderDraft } from './drafts';
 import { DraftSummary, OrderDraftPanel } from './components/OrderDraftPanel';
+import { approvalOperationIssue, getOperation, requiresBusinessSummary, parseOperation, retainOperationSnapshot, type BusinessOperation } from './operations';
+import { BusinessApprovalSummary } from './components/BusinessApprovalSummary';
 
 const SESSION_KEY = "erpilot-session-id";
 const FRESH_SESSION_KEY = "erpilot-fresh-session-id";
@@ -89,6 +91,10 @@ export default function App() {
   const [draftsLoading, setDraftsLoading] = useState(false);
   const [draftsError, setDraftsError] = useState('');
   const [approvalDrafts, setApprovalDrafts] = useState<Record<string, OrderDraft>>({});
+  const [businessEnabled, setBusinessEnabled] = useState(false);
+  const [operationRefresh, setOperationRefresh] = useState(0);
+  const [approvalOperations, setApprovalOperations] = useState<Record<string,{operation?:BusinessOperation;verified:boolean;loading:boolean;error?:string}>>({});
+  const operationSnapshots = useRef(new Map<string,BusinessOperation>());
   const draftRequest = useRef(0);
   const refreshDrafts = useCallback(async () => {
     if (!draftsEnabledRef.current) return;
@@ -122,10 +128,10 @@ export default function App() {
   const hasLiveTurn = turns.some(t => isAssistantTurn(t) && !isTerminalPhase(t.phase));
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
-    if (!hasLiveTurn && !busy) return;
+    if (!hasLiveTurn && !busy && pendingApprovals.length === 0) return;
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
-  }, [hasLiveTurn, busy]);
+  }, [hasLiveTurn, busy, pendingApprovals.length]);
 
   const onScroll = () => {
     const el = listRef.current;
@@ -192,7 +198,7 @@ export default function App() {
         case "tool_executing":
         case "tool_started":
         case "tool_finished":
-          if (ev.event === 'tool_finished') void refreshDrafts();
+          if (ev.event === 'tool_finished') {void refreshDrafts();setOperationRefresh(value=>value+1);}
           // 阶段与工具状态在当前回答内部展示，顶部只保留简短会话状态
           updateLastAssistant(t => applyTurnEvent(t, ev));
           break;
@@ -318,12 +324,43 @@ export default function App() {
       setRuntimeLabel(`${source} · ${runtime.writes_enabled ? "写入需审批" : "只读"}`);
       setDraftsEnabled(runtime.drafts_enabled === true);
       setWritesEnabled(runtime.writes_enabled === true);
+      setBusinessEnabled(runtime.business_approvals_enabled === true);
       draftsEnabledRef.current = runtime.drafts_enabled === true;
     }).catch(() => {});
     return () => controller.abort();
   }, []);
 
   useEffect(() => { if (draftsEnabled) void refreshDrafts(); }, [draftsEnabled, refreshDrafts]);
+  useEffect(() => {
+    const sessionId=sessionIdRef.current;
+    const controller=new AbortController();
+    for(const pending of pendingApprovals) {
+      if(!requiresBusinessSummary(pending,businessEnabled))continue;
+      const key=pending.pending_id;
+      let snapshot=operationSnapshots.current.get(key);
+      let snapshotError='';
+      if(!snapshot&&pending.operation!==undefined) {
+        try {snapshot=parseOperation(pending.operation);operationSnapshots.current.set(key,snapshot);}
+        catch(error){snapshotError=error instanceof Error?error.message:String(error);}
+      }
+      setApprovalOperations(prev=>({...prev,[key]:{operation:snapshot,verified:false,loading:true,error:snapshotError}}));
+      const id=pending.arguments.operation_id;
+      if(typeof id!=='string'||!id||snapshotError) {
+        setApprovalOperations(prev=>({...prev,[key]:{operation:snapshot,verified:false,loading:false,error:snapshotError||'审批引用缺失，请拒绝后重新准备。'}}));
+        continue;
+      }
+      void getOperation(sessionId,id,controller.signal).then(current=>{
+        if(controller.signal.aborted||sessionId!==sessionIdRef.current)return;
+        const operation=retainOperationSnapshot(snapshot,current);
+        operationSnapshots.current.set(key,operation);
+        setApprovalOperations(prev=>({...prev,[key]:{operation,verified:true,loading:false}}));
+      }).catch(error=>{
+        if(controller.signal.aborted||sessionId!==sessionIdRef.current)return;
+        setApprovalOperations(prev=>({...prev,[key]:{operation:snapshot,verified:false,loading:false,error:error instanceof Error?error.message:String(error)}}));
+      });
+    }
+    return ()=>controller.abort();
+  },[pendingApprovals,operationRefresh,businessEnabled]);
   useEffect(() => {
     const sessionId = sessionIdRef.current;
     const controller = new AbortController();
@@ -387,6 +424,9 @@ export default function App() {
   const respondApproval = useCallback(
     async (pendingId: string, approved: boolean) => {
       const pending = pendingApprovals.find(item=>item.pending_id===pendingId);
+      if(approved&&!pending)return;
+      const operationState=approvalOperations[pendingId];
+      if(approved&&pending&&requiresBusinessSummary(pending,businessEnabled)&&(!businessEnabled||operationState?.loading||approvalOperationIssue(pending,operationState?.operation,operationState?.verified===true)))return;
       if (approved && pending?.tool==='submit_order_draft' && (draftsLoading || approvalDraftIssue(pending,approvalDrafts[pendingId],drafts))) return;
       if (approvalInFlight.current.has(pendingId)) return;
       approvalInFlight.current.add(pendingId);
@@ -415,7 +455,7 @@ export default function App() {
         setSubmittingApprovals(new Set(approvalInFlight.current));
       }
     },
-    [consumeEvents, refreshSession, pendingApprovals, approvalDrafts, drafts, draftsLoading],
+    [consumeEvents, refreshSession, pendingApprovals, approvalDrafts, drafts, draftsLoading, approvalOperations, businessEnabled],
   );
 
   const continueInterrupted = useCallback(async () => {
@@ -452,6 +492,7 @@ export default function App() {
     localStorage.setItem(FRESH_SESSION_KEY, sessionId);
     sessionIdRef.current = sessionId;
     draftRequest.current++;
+    operationSnapshots.current.clear();setApprovalOperations({});
     setDrafts([]);setApprovalDrafts({});setDraftsError('');setDraftsLoading(false);
     if (draftsEnabled) void refreshDrafts();
     setTurns([]);
@@ -516,6 +557,14 @@ export default function App() {
     </div>;
   };
 
+  const renderBusinessApproval = (pending:ApprovalPendingPayload) => {
+    const state=approvalOperations[pending.pending_id];
+    return <BusinessApprovalSummary pending={pending} operation={state?.operation} verified={state?.verified===true} enabled={businessEnabled} loading={state?.loading===true} error={state?.error} now={now} submitting={submittingApprovals.has(pending.pending_id)} onRespond={(id,approved)=>void respondApproval(id,approved)} onRefresh={()=>{
+      setApprovalOperations(prev=>({...prev,[pending.pending_id]:{...prev[pending.pending_id],verified:false,loading:true}}));
+      setOperationRefresh(value=>value+1);
+    }}/>;
+  };
+
   return (
     <div className="app">
       <header>
@@ -563,10 +612,13 @@ export default function App() {
               submittingApprovals={submittingApprovals}
               onRespond={(pendingId, approved) => void respondApproval(pendingId, approved)}
               renderDraftApproval={renderDraftApproval}
+              renderBusinessApproval={renderBusinessApproval}
+              businessApprovalsEnabled={businessEnabled}
             />
           ),
         )}
         {unmatchedPendingApprovals.map(pending => (
+          requiresBusinessSummary(pending,businessEnabled) ? <div key={pending.pending_id}>{renderBusinessApproval(pending)}</div> :
           pending.tool === 'submit_order_draft' ? <div key={pending.pending_id}>{renderDraftApproval(pending)}</div> :
           <div className="approval" key={pending.pending_id}>
             <span className="approval-label">
