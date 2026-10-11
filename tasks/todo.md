@@ -1,4 +1,8 @@
-# 当前阶段：批次 2 · RAG 政策问答（批次 1 待 key 收尾）
+# 当前阶段：功能深化 B1 · 计价一致
+
+2026-10-11：用户确认暂不考虑部署，先推进业务功能深化。新阶段以 [业务里程碑与后续路径](../docs/business-roadmap.md) 为准；B1 的 [设计](../docs/superpowers/specs/2026-10-11-pricing-consistency-design.md) 与 [实施计划](../docs/superpowers/plans/2026-10-11-pricing-consistency.md) 已落地，计价一致已通过 [验收](../reports/acceptance/2026-10-11-pricing-consistency.md)（417 passed / 21 skipped / 47 deselected）。后续顺序为订单草稿与审批闭环、业务审批摘要、多轮任务与历史会话、业务 RAG、补货建议。
+
+## 上一阶段：批次 2 · RAG 政策问答（批次 1 待 key 收尾）
 
 更新日期：2026-10-09。目标：在现有 loop 上接入**只读检索**的政策问答（价格/折扣/退换货），回答基于检索片段并给出来源，语料外问题如实拒答。优先 JD 硬指标（多模型 + RAG），深度优先，不设固定发布日期。
 

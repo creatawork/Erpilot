@@ -31,9 +31,8 @@ from erp_store.models import (
     StockItem,
     StockValuationLine,
 )
-
-# 数量门槛 → 折扣，从高到低取第一个命中的档
-QUOTE_TIERS: list[tuple[int, float]] = [(200, 0.90), (50, 0.95), (10, 0.98)]
+from erp_store.pricing import QUOTE_TIERS as QUOTE_TIERS
+from erp_store.pricing import price_for_quantity
 
 # 销量统计的有效口径：已成交未流失的订单（取消 / 退款 / 待付款不计入）
 VALID_SALES_STATUSES = (
@@ -272,8 +271,7 @@ class ErpRepository:
         product = self.get_product(sku)
         if product is None or product.status is not ProductStatus.ON_SALE:
             return None
-        discount = next((d for threshold, d in QUOTE_TIERS if quantity >= threshold), 1.0)
-        unit = round(product.price * discount, 2)
+        discount, unit, total = price_for_quantity(product.price, quantity)
         stock = self.get_stock(sku)
         return Quote(
             sku=product.sku,
@@ -281,7 +279,7 @@ class ErpRepository:
             unit_price=unit,
             quantity=quantity,
             discount=discount,
-            total=round(unit * quantity, 2),
+            total=total,
             stock_quantity=stock.quantity if stock else 0,
         )
 

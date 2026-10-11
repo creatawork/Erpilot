@@ -12,7 +12,7 @@ import pytest
 from agent_core.events import ToolCallFinished
 from agent_core.graph_runtime import LangGraphRuntime
 from agent_core.testing import chunk, make_client, sse_response, tool_call_chunks
-from erp_store.db import OrderItemRow, OrderRow, init_db, make_engine
+from erp_store.db import OrderItemRow, OrderRow, ProductRow, StockRow, init_db, make_engine
 from erp_store.models import OrderStatus, ProductStatus
 from erp_store.repository import ErpRepository
 from erp_store.seed import seed_database
@@ -573,6 +573,124 @@ async def test_write_retry_after_lost_response_changes_stock_once(tmp_path, monk
 
 
 # ---- 政策检索（RAG，只读）：注入 fake 嵌入器，离线可测 ----
+
+
+async def test_mcp_quote_matches_discounted_order_and_replay(tmp_path) -> None:
+    from fastmcp import Client
+
+    path = tmp_path / "fixed-price.db"
+    engine = make_engine(path)
+    init_db(engine)
+    with Session(engine) as session:
+        session.add(ProductRow(
+            sku="FIXED", name="固定商品", category="测试", price=0.75,
+            status=ProductStatus.ON_SALE.value,
+        ))
+        session.add(StockRow(sku="FIXED", quantity=30, warehouse="主仓"))
+        session.commit()
+    args = {
+        "customer": "MCP 折扣客户",
+        "items": [{"sku": "FIXED", "quantity": 6}, {"sku": "FIXED", "quantity": 4}],
+        "client_token": "mcp-priced-order",
+    }
+    async with Client(create_server(path, include_writes=True)) as client:
+        quote = await client.call_tool("compute_quote", {"sku": "FIXED", "quantity": 10})
+        created = await client.call_tool("create_order", args)
+    assert quote.data["discount"] == 0.98
+    assert quote.data["unit_price"] == created.data["items"][0]["unit_price"] == 0.74
+    assert quote.data["total"] == created.data["total_amount"] == 7.4
+    # A new MCP server models restart; the same token returns the original order.
+    async with Client(create_server(path, include_writes=True)) as client:
+        replay = await client.call_tool("create_order", args)
+        stock = await client.call_tool("get_stock", {"sku": "FIXED"})
+    assert replay.data["order_id"] == created.data["order_id"]
+    assert replay.data["total_amount"] == 7.4
+    assert stock.data["quantity"] == 20
+
+
+@pytest.mark.parametrize("change", ["changed", "added", "removed"])
+async def test_default_policy_resolver_refuses_stale_corpus(tmp_path, monkeypatch, change):
+    from fastmcp import Client
+    from mcp_erp import server as server_mod
+    from rag.chunk import Chunk
+    from rag.corpus import load_corpus
+    from rag.index import PolicyIndex
+
+    chunks = load_corpus()
+    if change == "changed":
+        chunks[0] = chunks[0].model_copy(update={"text": "obsolete policy"})
+    elif change == "added":
+        chunks.append(Chunk(source="old.md", title="Old", text="removed document"))
+    else:
+        chunks.pop()
+    path = tmp_path / "stale.json"
+    PolicyIndex(chunks, [[1.0] for _ in chunks]).save(path)
+    monkeypatch.setattr(server_mod, "DEFAULT_INDEX_PATH", path)
+    # Avoid real credentials/network so an unavailable key cannot hide a stale-index bug.
+    monkeypatch.setattr(server_mod.EmbedConfig, "from_env", classmethod(lambda cls: object()))
+
+    class Embedder:
+        def embed(self, texts):
+            return [[1.0] for _ in texts]
+
+    monkeypatch.setattr(server_mod, "OpenAIEmbedder", lambda config: Embedder())
+    async with Client(create_server(tmp_path / "erp.db")) as client:
+        result = await client.call_tool("search_policy", {"query": "价格"})
+    assert result.data["error"]["code"] == "policy_unavailable"
+    assert "更新" in result.data["error"]["message"]
+    assert "rag build" in result.data["error"]["hint"]
+
+
+async def test_default_policy_resolver_accepts_current_corpus(tmp_path, monkeypatch):
+    from fastmcp import Client
+    from mcp_erp import server as server_mod
+    from rag.corpus import load_corpus
+    from rag.index import PolicyIndex
+
+    class Embedder:
+        def embed(self, texts):
+            return [[1.0] for _ in texts]
+
+    chunks = load_corpus()
+    path = tmp_path / "current.json"
+    PolicyIndex.build(chunks, Embedder()).save(path)
+    monkeypatch.setattr(server_mod, "DEFAULT_INDEX_PATH", path)
+    monkeypatch.setattr(server_mod.EmbedConfig, "from_env", classmethod(lambda cls: object()))
+    monkeypatch.setattr(server_mod, "OpenAIEmbedder", lambda config: Embedder())
+    async with Client(create_server(tmp_path / "erp.db")) as client:
+        result = await client.call_tool("search_policy", {"query": "价格"})
+    assert result.data["matches"][0]["text"] == chunks[0].text
+
+
+async def test_zero_settlement_price_returns_business_error_for_quote_and_order(tmp_path):
+    from fastmcp import Client
+
+    path = tmp_path / "zero-price.db"
+    engine = make_engine(path)
+    init_db(engine)
+    with Session(engine) as session:
+        for sku, price in [("LOW", 0.005), ("OK", 100.0)]:
+            session.add(ProductRow(
+                sku=sku, name=sku, category="测试", price=price,
+                status=ProductStatus.ON_SALE.value,
+            ))
+            session.add(StockRow(sku=sku, quantity=1000, warehouse="主仓"))
+        session.commit()
+    async with Client(create_server(path, include_writes=True)) as client:
+        quote = await client.call_tool("compute_quote", {"sku": "LOW", "quantity": 200})
+        compared = await client.call_tool(
+            "compare_quotes", {"skus": ["LOW", "OK"], "quantity": 200},
+        )
+        order = await client.call_tool("create_order", {
+            "customer": "零成交价", "items": [{"sku": "LOW", "quantity": 200}],
+        })
+    for result in [quote, compared, order]:
+        assert not result.is_error
+        assert result.data["error"]["code"] == "invalid_argument"
+        assert result.data["error"]["hint"]
+    repo = ErpRepository(engine)
+    assert repo.get_stock("LOW").quantity == 1000
+    assert repo.count_orders(customer="零成交价") == 0
 
 _POLICY_VOCAB = ["退货", "折扣", "取消", "价格"]
 

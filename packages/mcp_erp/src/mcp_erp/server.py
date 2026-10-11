@@ -28,10 +28,11 @@ from typing import Annotated, Any
 from erp_store.db import DEFAULT_DB, make_engine
 from erp_store.models import OrderStatus, ProductStatus
 from erp_store.mutations import ErpMutations, MutationError
+from erp_store.pricing import PricingError
 from erp_store.repository import ErpRepository
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field
-from rag.corpus import DEFAULT_INDEX_PATH
+from rag.corpus import DEFAULT_INDEX_PATH, load_corpus
 from rag.embed import Embedder
 from rag.index import PolicyIndex
 from rag.openai_embedder import EmbedConfig, OpenAIEmbedder
@@ -51,7 +52,10 @@ def _default_policy_resolver() -> tuple[PolicyIndex, Embedder]:
 
     索引缺失或 key 未配置时抛错，由 search_policy 捕获转成 policy_unavailable。
     """
-    return PolicyIndex.load(DEFAULT_INDEX_PATH), OpenAIEmbedder(EmbedConfig.from_env())
+    index = PolicyIndex.load(DEFAULT_INDEX_PATH)
+    if index.chunks != load_corpus():
+        raise ValueError("政策文档已更新，索引需要重新构建")
+    return index, OpenAIEmbedder(EmbedConfig.from_env())
 
 
 def _err(code: str, message: str, hint: str = "") -> dict[str, Any]:
@@ -312,7 +316,12 @@ def create_server(
         """按现价与数量梯度折扣报价；附带当前库存（为 0 时报价仅参考）。"""
         if quantity < 1:
             return _err("invalid_argument", f"数量至少为 1（收到 {quantity}）")
-        quote = repo.compute_quote(sku, quantity)
+        try:
+            quote = repo.compute_quote(sku, quantity)
+        except PricingError as exc:
+            return _err(
+                "invalid_argument", f"商品 {sku} 无法计价：{exc}", "请检查商品现价与数量折扣",
+            )
         if quote is None:
             return _not_found(
                 "可报价商品（不存在或已下架）", sku,
@@ -332,7 +341,12 @@ def create_server(
             return _err("invalid_argument", f"数量至少为 1（收到 {quantity}）")
         quotes, unavailable = [], []
         for sku in dict.fromkeys(skus):  # 去重且保序
-            quote = repo.compute_quote(sku, quantity)
+            try:
+                quote = repo.compute_quote(sku, quantity)
+            except PricingError as exc:
+                return _err(
+                    "invalid_argument", f"商品 {sku} 无法计价：{exc}", "请检查商品现价与数量折扣",
+                )
             if quote is None:
                 unavailable.append(sku)
             else:
@@ -423,7 +437,8 @@ def create_server(
             return _err(
                 "policy_unavailable",
                 f"政策检索未就绪：{exc}",
-                "先运行 uv run --package rag python -m rag build 生成索引并配置嵌入 key",
+                "配置嵌入 key 后运行 uv run --env-file .env --package rag "
+                "python -m rag build 生成索引",
             )
         hits = index.search(query, embedder, k=k, threshold=POLICY_SCORE_THRESHOLD)
         if not hits:
@@ -458,8 +473,9 @@ def create_server(
                 str | None, Field(description="幂等键；重试同一请求须保留，新操作用新键")
             ] = None,
         ) -> dict[str, Any]:
-            """创建订单（需人工审批后执行）：快照价取现价，校验在售与库存，
-            新订单从「待付款」起步。同 SKU 多行自动合并数量。"""
+            """创建订单（需人工审批后执行）：同 SKU 合并数量后按现价与数量折扣
+            保存成交价，和 compute_quote 同口径；单价四舍五入到两位后乘数量。
+            校验在售与库存，新订单从「待付款」起步。报价不锁价，执行时按现价。"""
             try:
                 order = mutations.create_order(
                     customer,
@@ -470,7 +486,7 @@ def create_server(
             except MutationError as exc:
                 return _err(exc.code, exc.message, exc.hint)
             data = order.model_dump(mode="json")
-            data["result_note"] = "订单已创建，当前状态「待付款」；金额按下单快照价"
+            data["result_note"] = "订单已创建，当前状态「待付款」；金额按下单折扣成交快照价"
             return data
 
         @mcp.tool

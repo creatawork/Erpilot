@@ -101,6 +101,10 @@ M1 各周验收入口：第 1–3 周为 `python -m agent_core`（最简演示�
 
 ## 下一阶段规划
 
+功能深化路线见 [业务里程碑与后续路径](docs/business-roadmap.md)：计价一致 → 订单草稿与审批闭环 → 业务审批摘要 → 多轮任务与历史会话 → 业务 RAG → 补货建议。本阶段暂不考虑部署。首项设计与实施入口见 [B1 计价一致计划](docs/superpowers/plans/2026-10-11-pricing-consistency.md)。
+
+新订单和报价共用数量折扣与十进制舍入口径：同 SKU 合并数量后计算折扣单价，四舍五入到两位再乘数量；历史成交价和幂等重放结果保持原值。报价不锁价或预留库存。政策源文件更新后默认检索会拒绝旧索引，须运行 `uv run --env-file .env --package rag python -m rag build` 重新生成索引（消耗嵌入 token；`--env-file` 显式加载配置）。
+
 M6–8 的 LangGraph + PostgreSQL HITL 已实施。基线验收见[2026-10-07 报告](reports/acceptance/2026-10-07-baseline.md)。崩溃恢复矩阵已在隔离 PostgreSQL 上通过，见[2026-10-08 报告](reports/acceptance/2026-10-08-crash-recovery.md)；[ADR-0010](docs/adr/0010-crash-recovery-reconciliation-scope.md) 仍待评审。下一阶段方向（多模型横向对比 · RAG 政策问答 · 评测迭代曲线 · 可展示部署收口）见 [tasks/plan-next-phase.md](tasks/plan-next-phase.md)，当前批次清单见 [tasks/todo.md](tasks/todo.md)；历史恢复协议见 [tasks/plan.md](tasks/plan.md)，当前运行时边界见 [ADR-0009](docs/adr/0009-langgraph-runtime.md)。
 
 ## 路线图

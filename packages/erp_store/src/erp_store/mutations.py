@@ -4,7 +4,7 @@
 执行，错误以 MutationError（code/message/hint，错误契约 v1 的写路径延伸）
 抛出，MCP 工具层负责转成 {"error": {...}} 回填给模型：
 
-- create_order：商品须在售、库存须足量；快照价取现价，扣库存与建单同事务
+- create_order：商品须在售、库存须足量；按现价与数量折扣保存成交价，扣库存与建单同事务
 - cancel_order：仅待付款/待发货可取消（状态机），取消回补库存
 - adjust_stock：库存不为负
 - set_product_status：目标状态与现状一致返回 invalid_transition——空操作
@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from erp_store.db import MutationRequestRow, OrderItemRow, OrderRow, ProductRow, StockRow
 from erp_store.models import Order, OrderStatus, ProductStatus
+from erp_store.pricing import PricingError, price_for_quantity
 
 
 class MutationError(Exception):
@@ -66,7 +67,7 @@ class ErpMutations:
         note: str | None = None,
         client_token: str | None = None,
     ) -> Order:
-        """建单：快照价取现价，校验在售与库存，扣减与建单同事务。
+        """建单：按现价与合并数量折扣保存成交价，扣减与建单同事务。
 
         items 为 (sku, quantity) 列表，同 SKU 自动合并数量；新订单从
         待付款起步（收款确认后走发货，本工具面不管收款）。
@@ -113,6 +114,15 @@ class ErpMutations:
                         f"当前 {have}",
                         "可减少数量或改报其他在售商品；库存数据可用 get_stock 复核",
                     )
+            unit_prices = {}
+            for sku, quantity in merged.items():
+                try:
+                    unit_prices[sku] = price_for_quantity(products[sku].price, quantity)[1]
+                except PricingError as exc:
+                    raise MutationError(
+                        "invalid_argument", f"商品 {sku} 无法计价：{exc}",
+                        "请检查商品现价与数量折扣；成交单价不能为零",
+                    ) from exc
             now = datetime.now()
             order = OrderRow(
                 order_id=self._next_order_id(s, now),
@@ -125,7 +135,7 @@ class ErpMutations:
                         sku=sku,
                         name=products[sku].name,
                         quantity=quantity,
-                        unit_price=products[sku].price,  # 快照价 = 下单时现价
+                        unit_price=unit_prices[sku],
                     )
                     for sku, quantity in merged.items()
                 ],

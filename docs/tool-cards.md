@@ -84,14 +84,15 @@
 - 参数：`sku`（必填）、`quantity`（必填，≥1）
 - 返回：`{"sku", "name", "unit_price", "quantity", "discount", "total", "stock_quantity"}`——
   `stock_quantity` 为 0 时报价仅参考（工具层应向用户说明缺货）
-- 错误：`invalid_argument`（数量 < 1）；`not_found`（商品不存在或**已下架**，hint 建议换在售商品）
+- 计价：十进制 ROUND_HALF_UP 舍入折后单价至两位，再乘数量；与新单成交价同口径。报价不锁价或预留库存。
+- 错误：`invalid_argument`（数量 < 1 或折后单价舍入为零）；`not_found`（商品不存在或**已下架**，hint 建议换在售商品）
 
 ### compare_quotes
 - 用途：多商品同数量批量比价，结果按总价升序
 - 参数：`skus`（必填，2~10 个，自动去重保序）、`quantity`（必填，≥1）
 - 返回：`{"quantity", "quotes": [...], "unavailable": [...]}`——不可报价（不存在/已下架）的 SKU
   进 `unavailable` 而不是整体报错
-- 错误：`invalid_argument`（skus 数量不在 2~10、quantity < 1）
+- 错误：`invalid_argument`（skus 数量不在 2~10、quantity < 1 或任一折后单价舍入为零）
 
 ### list_low_stock
 - 用途：低库存商品清单（按库存升序）——盘库存、补货建议
@@ -140,7 +141,7 @@
 - 用途：检索店铺政策片段，依据返回内容作答并注明来源（不臆造政策）
 - 参数：`query`（政策问题/关键词）、`k`（返回片段数 1~5，默认 3）
 - 返回：`{"matches": [{"source", "title", "text", "score"}]}`；无命中时 `matches` 为空并附拒答提示
-- 错误：`invalid_argument`（空 query / k 越界）、`policy_unavailable`（索引未构建或嵌入 key 未配置，hint 指向 `python -m rag build`）
+- 错误：`invalid_argument`（空 query / k 越界）、`policy_unavailable`（索引未构建、政策内容与索引不一致或嵌入 key 未配置，hint 指向 `uv run --env-file .env --package rag python -m rag build`）
 
 ## 写操作（include_writes=True 才注册；ADR-0005）
 
@@ -156,10 +157,10 @@
 直接调用 MCP Server 仅执行领域校验；审批门由 agent bridge 装配。
 
 ### create_order
-- 用途：创建订单（**single_confirm**）——快照价取现价，校验在售与库存，扣库存与建单同事务
+- 用途：创建订单（**single_confirm**）——同 SKU 合并数量后按现价与数量折扣保存成交快照价，与报价同口径；校验在售与库存，扣库存与建单同事务
 - 参数：`customer`（必填，全名）、`items`（必填，`[{sku, quantity}]`，同 SKU 自动合并）、`note`（可选）
 - 返回：订单对象（状态「待付款」，金额按下单快照价）+ `result_note`
-- 错误：`invalid_argument`（客户名空 / 数量 < 1）；`not_found`（SKU 不存在，hint 用 search_products）；
+- 错误：`invalid_argument`（客户名空 / 数量 < 1 / 折后单价舍入为零）；`not_found`（SKU 不存在，hint 用 search_products）；
   `invalid_transition`（商品已下架不可下单）；`insufficient_stock`（库存不足，报需量与现量）
 
 ### cancel_order

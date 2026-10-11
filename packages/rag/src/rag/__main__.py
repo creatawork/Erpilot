@@ -1,7 +1,7 @@
 """rag 构建入口：嵌入政策语料一次并持久化索引（消耗嵌入 token）。
 
-    uv run --package rag python -m rag build            # 写默认 policy_index.json
-    uv run --package rag python -m rag build --out x.json
+    uv run --env-file .env --package rag python -m rag build  # 写默认 policy_index.json
+    uv run --env-file .env --package rag python -m rag build --out x.json
 """
 
 import argparse

@@ -5,6 +5,7 @@
 """
 
 from datetime import datetime, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 
 import pytest
 from erp_store import (
@@ -162,7 +163,11 @@ def test_compute_quote_quantity_tiers(seeded) -> None:
     for qty, disc in [(10, 0.98), (50, 0.95), (200, 0.90)]:
         quote = repo.compute_quote(sku, quantity=qty)
         assert quote.discount == disc
-        assert quote.total == round(round(price * disc, 2) * qty, 2)
+        expected_unit = (Decimal(str(price)) * Decimal(str(disc))).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP,
+        )
+        assert quote.unit_price == float(expected_unit)
+        assert quote.total == float(expected_unit * qty)
 
 
 def test_compute_quote_flags_zero_stock(seeded) -> None:

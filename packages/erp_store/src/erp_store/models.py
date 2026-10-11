@@ -3,8 +3,9 @@
 Pydantic 模型是对外（M3 工具层、API、前端）的唯一形态；SQLAlchemy 表
 （db.py）只是持久化形态，两侧字段一一对应。
 
-v1 金额用 float 并在生成边界 round 保留两位——真实 ERP 该用 Decimal，
-评测阶段若出现精度问题再切换（本注释即决策记录，不是疏忽）。
+API 与数据库金额字段保持 float 兼容；报价和新单成交价在 pricing 中用
+Decimal 计算并按 ROUND_HALF_UP 舍入。订单汇总保留历史算法，避免改写旧单与
+旧幂等结果。本版本未迁移全库金额字段类型。
 """
 
 from datetime import datetime
@@ -45,7 +46,7 @@ class OrderItem(BaseModel):
     sku: str
     name: str
     quantity: int = Field(ge=1)
-    unit_price: float = Field(gt=0, description="下单时快照价，可能与现价不同")
+    unit_price: float = Field(gt=0, description="下单时成交快照价（含数量折扣），可能与现价不同")
 
 
 class Order(BaseModel):
@@ -64,7 +65,7 @@ class Order(BaseModel):
 
 
 class Quote(BaseModel):
-    """报价 = 现价 × 数量 × 数量梯度折扣（见 repository.QUOTE_TIERS）。"""
+    """报价 = 舍入后的折扣单价 × 数量（见 pricing.QUOTE_TIERS）。"""
 
     sku: str
     name: str
