@@ -91,6 +91,18 @@ class OrderDraftRow(Base):
     submission_result: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class BusinessOperationRow(Base):
+    """Immutable approved impact and its original committed outcome."""
+
+    __tablename__ = "business_operations"
+    operation_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(128), index=True)
+    kind: Mapped[str] = mapped_column(String(32))
+    snapshot: Mapped[str] = mapped_column(Text)
+    expires_at: Mapped[str] = mapped_column(String(40))
+    result: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 def make_engine(db_path: Path = DEFAULT_DB) -> Engine:
     """SQLite 引擎。
 

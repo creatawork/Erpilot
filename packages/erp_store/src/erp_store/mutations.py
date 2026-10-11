@@ -145,33 +145,37 @@ class ErpMutations:
         """取消订单：仅待付款/待发货可取消（状态机），取消回补库存。"""
         request = self._cancel_order_request(order_id)
         with self._write_session() as s:
-            prior = self._prior(s, client_token, request)
-            if prior is not None:
-                return Order.model_validate(prior)
-            order = s.get(OrderRow, order_id)
-            if order is None:
-                raise MutationError(
-                    "not_found",
-                    f"订单不存在：{order_id}",
-                    "订单号为 SO+日期+序号 格式；可用 list_orders 浏览现有订单",
-                )
-            status = OrderStatus(order.status)
-            if status not in CANCELLABLE_STATUSES:
-                raise MutationError(
-                    "invalid_transition",
-                    f"订单 {order_id} 当前状态为「{status.value}」，不可取消",
-                    "仅待付款/待发货可取消；已发货/已签收走退款流程（工具面未开放）",
-                )
-            order.status = OrderStatus.CANCELLED.value
-            for item in order.items:  # 回补库存；商品可能已被删，逐行容错
-                stock = s.get(StockRow, item.sku)
-                if stock is not None:
-                    stock.quantity += item.quantity
-            s.flush()
-            result = self._load_order(s, order_id)
-            self._remember(s, client_token, request, result.model_dump(mode="json"))
+            result = self._cancel_order_in_session(s, order_id, client_token, request)
             s.commit()
             return result
+
+    def _cancel_order_in_session(self, s, order_id, client_token, request):
+        prior = self._prior(s, client_token, request)
+        if prior is not None:
+            return Order.model_validate(prior)
+        order = s.get(OrderRow, order_id)
+        if order is None:
+            raise MutationError(
+                "not_found",
+                f"订单不存在：{order_id}",
+                "订单号为 SO+日期+序号 格式；可用 list_orders 浏览现有订单",
+            )
+        status = OrderStatus(order.status)
+        if status not in CANCELLABLE_STATUSES:
+            raise MutationError(
+                "invalid_transition",
+                f"订单 {order_id} 当前状态为「{status.value}」，不可取消",
+                "仅待付款/待发货可取消；已发货/已签收走退款流程（工具面未开放）",
+            )
+        order.status = OrderStatus.CANCELLED.value
+        for item in order.items:  # 回补库存；商品可能已被删，逐行容错
+            stock = s.get(StockRow, item.sku)
+            if stock is not None:
+                stock.quantity += item.quantity
+        s.flush()
+        result = self._load_order(s, order_id)
+        self._remember(s, client_token, request, result.model_dump(mode="json"))
+        return result
 
     def adjust_stock(
         self, sku: str, delta: int, *, client_token: str | None = None
@@ -179,34 +183,38 @@ class ErpMutations:
         """库存增减（delta 正入负出），返回 (sku, 调整后数量)。库存不为负。"""
         request = self._adjust_stock_request(sku, delta)
         with self._write_session() as s:
-            prior = self._prior(s, client_token, request)
-            if prior is not None:
-                return tuple(prior)
-            product = s.get(ProductRow, sku)
-            if product is None:
-                raise MutationError(
-                    "not_found",
-                    f"商品不存在：{sku}",
-                    "可用 search_products 按名称/品类确认 SKU",
-                )
-            stock = s.get(StockRow, sku)
-            current = stock.quantity if stock else 0
-            new_quantity = current + delta
-            if new_quantity < 0:
-                raise MutationError(
-                    "insufficient_stock",
-                    f"商品 {product.name}（{sku}）当前库存 {current}，"
-                    f"不能减 {abs(delta)}（会变为负数）",
-                    "出库量不能超过当前库存；可先用 get_stock 复核",
-                )
-            if stock is None:
-                stock = StockRow(sku=sku, quantity=new_quantity)
-                s.add(stock)
-            else:
-                stock.quantity = new_quantity
-            self._remember(s, client_token, request, [sku, new_quantity])
+            result = self._adjust_stock_in_session(s, sku, delta, client_token, request)
             s.commit()
-            return sku, new_quantity
+            return result
+
+    def _adjust_stock_in_session(self, s, sku, delta, client_token, request):
+        prior = self._prior(s, client_token, request)
+        if prior is not None:
+            return tuple(prior)
+        product = s.get(ProductRow, sku)
+        if product is None:
+            raise MutationError(
+                "not_found",
+                f"商品不存在：{sku}",
+                "可用 search_products 按名称/品类确认 SKU",
+            )
+        stock = s.get(StockRow, sku)
+        current = stock.quantity if stock else 0
+        new_quantity = current + delta
+        if new_quantity < 0:
+            raise MutationError(
+                "insufficient_stock",
+                f"商品 {product.name}（{sku}）当前库存 {current}，"
+                f"不能减 {abs(delta)}（会变为负数）",
+                "出库量不能超过当前库存；可先用 get_stock 复核",
+            )
+        if stock is None:
+            stock = StockRow(sku=sku, quantity=new_quantity)
+            s.add(stock)
+        else:
+            stock.quantity = new_quantity
+        self._remember(s, client_token, request, [sku, new_quantity])
+        return sku, new_quantity
 
     def set_product_status(
         self, sku: str, status: ProductStatus, *, client_token: str | None = None
