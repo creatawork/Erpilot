@@ -79,3 +79,62 @@ async def test_readonly_session_can_edit_drafts_but_cannot_submit(db):
     names = {tool.name for tool in factory.for_session("readonly")}
     assert {"prepare_order_draft", "get_order_draft", "revise_order_draft"} <= names
     assert "submit_order_draft" not in names and "create_order" not in names
+
+
+async def test_task_tools_rebuild_context_and_edit_without_business_write(db):
+    async with Client(create_server(db, session_id="s1")) as client:
+        schemas = {tool.name: tool.input_schema for tool in await client.list_tools()}
+        assert "get_order_task" in schemas and "revise_order_draft_quantity" in schemas
+        assert schemas["get_order_task"]["properties"] == {}
+        assert set(schemas["revise_order_draft_quantity"]["properties"]) == {
+            "draft_id", "expected_revision", "item_number", "quantity"
+        }
+        assert (await client.call_tool("get_order_task", {})).data["status"] == "none"
+        draft = (await client.call_tool("prepare_order_draft", {
+            "customer": "保留客户", "items": [{"sku": "A", "quantity": 2}], "note": "保留备注"
+        })).data
+    async with Client(create_server(db, session_id="s1")) as client:
+        state = (await client.call_tool("get_order_task", {})).data
+        assert state["status"] == "active" and state["draft"]["draft_id"] == draft["draft_id"]
+        arguments = {
+            "draft_id": draft["draft_id"], "expected_revision": 1, "item_number": 1, "quantity": 50
+        }
+        changed = (await client.call_tool("revise_order_draft_quantity", arguments)).data
+        assert changed["customer"] == "保留客户" and changed["note"] == "保留备注"
+        assert changed["items"][0]["quantity"] == 50 and changed["revision"] == 2
+        assert changed["order_id"] is None
+        stale = (await client.call_tool("revise_order_draft_quantity", arguments)).data
+        assert stale["error"]["code"] == "draft_changed"
+    async with Client(create_server(db, session_id="other")) as client:
+        assert (await client.call_tool("get_order_task", {})).data["status"] == "none"
+        stolen = (await client.call_tool("revise_order_draft_quantity", {
+            **arguments, "expected_revision": 2
+        })).data
+        assert stolen["error"]["code"] == "not_found"
+    factory = await SessionErpTools.create(db, writes=False)
+    tools = {tool.name: tool for tool in factory.for_session("s1")}
+    assert tools["get_order_task"].risk == tools["get_order_draft"].risk
+    assert tools["revise_order_draft_quantity"].risk == tools["revise_order_draft"].risk
+    assert "submit_order_draft" not in tools
+
+
+@pytest.mark.parametrize("key,value", [
+    ("expected_revision", True), ("expected_revision", "1"),
+    ("item_number", True), ("item_number", 1.5), ("quantity", True), ("quantity", "3"),
+])
+async def test_quantity_tool_rejects_coerced_numbers(db, key, value):
+    async with Client(create_server(db, session_id="s1")) as client:
+        draft = (await client.call_tool("prepare_order_draft", {
+            "customer": "客户", "items": [{"sku": "A", "quantity": 2}]
+        })).data
+        args = {
+            "draft_id": draft["draft_id"], "expected_revision": 1, "item_number": 1, "quantity": 3
+        }
+        result = await client.call_tool(
+            "revise_order_draft_quantity", {**args, key: value}, raise_on_error=False
+        )
+        assert result.is_error
+        current = (await client.call_tool("get_order_draft", {
+            "draft_id": draft["draft_id"]
+        })).data
+        assert current["revision"] == 1

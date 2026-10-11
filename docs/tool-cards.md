@@ -50,6 +50,18 @@ API 的 MCP 组合层绑定可信会话标识，不在工具参数中接受 `ses
 - 返回：新版本草稿；旧审批仍引用旧版本，不能成交
 - 错误：草稿基础校验错误、`draft_changed`（并发编辑）、`draft_submitted`
 
+### get_order_task
+- 用途：每轮从持久化草稿找回客户、明细、数量、备注和当前版本，不依赖旧聊天文本
+- 参数：无（会话由宿主绑定）
+- 返回：`status=none/active/ambiguous`、`draft`、`candidates`、`has_more`；唯一未提交草稿为 active，多份须澄清；过期草稿仍保留，最多显示 20 个候选
+- 执行：只读；不能按更新时间猜测多个草稿中的目标
+
+### revise_order_draft_quantity
+- 用途：按明确草稿当前版本的行号修改数量，保留客户、备注和其他商品；只保存新报价，不建单
+- 参数：`draft_id`、`expected_revision`、`item_number`（1 起算整数）、`quantity`（正整数）
+- 返回：新版本完整草稿；需重新确认并按原流程提交审批
+- 错误：`invalid_argument`（越界或非法数量）、`draft_changed`、`draft_submitted`、`not_found`
+
 ### submit_order_draft
 - 用途：批准指定版本后原子建单（**single_confirm**）
 - 参数：`draft_id`、`revision`、可选 `client_token`

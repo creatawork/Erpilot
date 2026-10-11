@@ -190,6 +190,62 @@ class ErpDrafts(ErpMutations):
             session.commit()
             return result
 
+    def task_state(self, session_id):
+        with Session(self._engine) as session:
+            versions = (
+                select(OrderDraftRow.draft_id, func.max(OrderDraftRow.revision).label("rev"))
+                .where(OrderDraftRow.session_id == session_id)
+                .group_by(OrderDraftRow.draft_id)
+                .subquery()
+            )
+            rows = list(session.scalars(
+                select(OrderDraftRow)
+                .join(
+                    versions,
+                    (OrderDraftRow.draft_id == versions.c.draft_id)
+                    & (OrderDraftRow.revision == versions.c.rev),
+                )
+                .where(OrderDraftRow.order_id.is_(None))
+                .order_by(OrderDraftRow.created_at.desc(), OrderDraftRow.draft_id)
+            ))
+            payloads = [self._payload(row) for row in rows[:20]]
+            return {
+                "status": "none" if not rows else "active" if len(rows) == 1 else "ambiguous",
+                "draft": payloads[0] if len(rows) == 1 else None,
+                "candidates": [
+                    {key: payload[key] for key in ("draft_id", "revision", "customer", "status")}
+                    for payload in payloads
+                ],
+                "has_more": len(rows) > 20,
+            }
+
+    def revise_quantity(self, session_id, draft_id, expected_revision, item_number, quantity):
+        with self._write_session() as session:
+            latest = self._latest(session, session_id, draft_id)
+            if latest.order_id:
+                raise MutationError("draft_submitted", "草稿已提交，不能修改", "请创建新的草稿")
+            for value in (expected_revision, item_number, quantity):
+                if type(value) is not int or value < 1:
+                    raise MutationError("invalid_argument", "版本、行号和数量须为正整数")
+            if latest.revision != expected_revision:
+                raise MutationError("draft_changed", "草稿已有新版本", _REFRESH_HINT)
+            previous = json.loads(latest.snapshot)
+            if item_number > len(previous["items"]):
+                raise MutationError("invalid_argument", "商品行号超出草稿明细范围")
+            items = [
+                (line["sku"], quantity if index == item_number else line["quantity"])
+                for index, line in enumerate(previous["items"], 1)
+            ]
+            customer, merged = self._normalize(
+                session_id, previous["customer"], items, previous["note"]
+            )
+            snapshot = self._snapshot(session, customer, merged, previous["note"])
+            result = self._save_revision(
+                session, session_id, draft_id, latest.revision + 1, snapshot
+            )
+            session.commit()
+            return result
+
     @staticmethod
     def _submission_request(session_id, draft_id, revision):
         return ["submit_order_draft", session_id, draft_id, revision]

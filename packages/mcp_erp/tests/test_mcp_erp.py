@@ -425,6 +425,7 @@ def test_tool_cards_doc_matches_server_tools() -> None:
     }
     assert documented == EXPECTED_TOOLS | WRITE_TOOLS | {
         "prepare_order_draft", "get_order_draft", "revise_order_draft", "submit_order_draft",
+        "get_order_task", "revise_order_draft_quantity",
         "prepare_cancel_order", "prepare_stock_adjustment",
     }
 

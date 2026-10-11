@@ -197,3 +197,101 @@ def test_invalid_items_do_not_create_draft(store, items):
         drafts.prepare("s1", "客户", items)
     assert error.value.code == "invalid_argument"
     assert drafts.list_latest("s1") == []
+
+
+def test_task_state_rebuilds_latest_unsubmitted_and_keeps_expired(store):
+    engine, _, _ = store
+    now = datetime(2026, 10, 11, tzinfo=UTC)
+    drafts = ErpDrafts(engine, clock=lambda: now)
+    assert drafts.task_state("s1") == {
+        "status": "none", "draft": None, "candidates": [], "has_more": False
+    }
+    first = drafts.prepare("s1", "客户", [("A", 2)], "备注")
+    revised = drafts.revise("s1", first["draft_id"], 1, "客户", [("A", 3)], "备注")
+    now += timedelta(minutes=31)
+    engine.dispose()
+    restarted = ErpDrafts(engine, clock=lambda: now)
+    state = restarted.task_state("s1")
+    assert state["status"] == "active" and state["has_more"] is False
+    assert state["draft"]["revision"] == 2
+    assert state["draft"]["items"][0]["quantity"] == 3
+    assert state["candidates"] == [{
+        "draft_id": revised["draft_id"], "revision": 2, "customer": "客户", "status": "expired"
+    }]
+    assert restarted.task_state("other")["status"] == "none"
+    refreshed = restarted.revise("s1", first["draft_id"], 2, "客户", [("A", 3)])
+    restarted.submit("s1", first["draft_id"], refreshed["revision"], "approved")
+    assert restarted.task_state("s1")["status"] == "none"
+
+
+def test_task_state_never_guesses_among_twenty_one_drafts(store):
+    _, _, drafts = store
+    for i in range(21):
+        drafts.prepare("s1", f"客户{i}", [("A", 1)])
+    state = drafts.task_state("s1")
+    assert state["status"] == "ambiguous" and state["draft"] is None
+    assert len(state["candidates"]) == 20 and state["has_more"] is True
+
+
+def test_quantity_revision_uses_one_based_order_and_preserves_context(store):
+    _, repo, drafts = store
+    first = drafts.prepare("s1", "客户", [("B", 2), ("A", 3)], "送到前台")
+    changed = drafts.revise_quantity("s1", first["draft_id"], 1, 2, 50)
+    assert changed["revision"] == 2
+    assert changed["customer"] == "客户" and changed["note"] == "送到前台"
+    assert [(line["sku"], line["quantity"]) for line in changed["items"]] == [
+        ("B", 2), ("A", 50)
+    ]
+    assert changed["items"][0] == first["items"][0]
+    assert changed["total_amount"] == 4790.0
+    assert drafts.get("s1", first["draft_id"], 1)["items"][1]["quantity"] == 3
+    assert repo.count_orders(customer="客户") == 0 and repo.get_stock("A").quantity == 1000
+
+
+@pytest.mark.parametrize("revision,row,quantity", [
+    (True, 1, 2), (1.0, 1, 2), ("1", 1, 2),
+    (1, 0, 2), (1, 3, 2), (1, True, 2), (1, 1.5, 2), (1, "1", 2),
+    (1, 1, 0), (1, 1, True), (1, 1, 1.5), (1, 1, "2"),
+])
+def test_quantity_revision_rejects_invalid_numbers_without_new_revision(
+    store, revision, row, quantity
+):
+    _, _, drafts = store
+    draft = drafts.prepare("s1", "客户", [("A", 2), ("B", 3)])
+    with pytest.raises(MutationError) as error:
+        drafts.revise_quantity("s1", draft["draft_id"], revision, row, quantity)
+    assert error.value.code == "invalid_argument"
+    assert drafts.get("s1", draft["draft_id"])["revision"] == 1
+
+
+def test_quantity_revision_rejects_foreign_stale_and_submitted_draft(store):
+    _, _, drafts = store
+    draft = drafts.prepare("s1", "客户", [("A", 2)])
+    with pytest.raises(MutationError) as error:
+        drafts.revise_quantity("other", draft["draft_id"], 1, 1, 3)
+    assert error.value.code == "not_found"
+    drafts.revise_quantity("s1", draft["draft_id"], 1, 1, 3)
+    with pytest.raises(MutationError) as error:
+        drafts.revise_quantity("s1", draft["draft_id"], 1, 1, 4)
+    assert error.value.code == "draft_changed"
+    drafts.submit("s1", draft["draft_id"], 2, "approved")
+    with pytest.raises(MutationError) as error:
+        drafts.revise_quantity("s1", draft["draft_id"], 2, 1, 4)
+    assert error.value.code == "draft_submitted"
+
+
+def test_parallel_quantity_edits_accept_only_one_expected_revision(store):
+    engine, _, drafts = store
+    draft = drafts.prepare("s1", "客户", [("A", 2)])
+
+    def edit(quantity):
+        try:
+            return ErpDrafts(engine).revise_quantity("s1", draft["draft_id"], 1, 1, quantity)
+        except MutationError as error:
+            return error.code
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(edit, [3, 4]))
+    assert sum(isinstance(result, dict) for result in results) == 1
+    assert "draft_changed" in results
+    assert drafts.get("s1", draft["draft_id"])["revision"] == 2

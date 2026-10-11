@@ -31,6 +31,23 @@ def register_draft_tools(mcp, engine, session_id: str, writes: bool):
         return invoke(drafts.get, draft_id, revision)
 
     @mcp.tool
+    def get_order_task() -> dict:
+        """查询当前会话未提交草稿任务；多份草稿须明确选择，不按时间猜测。
+        修改草稿前先查询，以当前版本明细的 1 起算行号确定商品。"""
+        return invoke(drafts.task_state)
+
+    @mcp.tool
+    def revise_order_draft_quantity(
+        draft_id: str,
+        expected_revision: Annotated[int, Field(strict=True, ge=1)],
+        item_number: Annotated[int, Field(strict=True, ge=1)],
+        quantity: Annotated[int, Field(strict=True, ge=1)],
+    ) -> dict:
+        """按指定版本的 1 起算行号修改一行数量，保留客户、备注和其他商品。
+        只保存新报价版本，不创建订单；旧版本或无效行号拒绝，须重新查询。"""
+        return invoke(drafts.revise_quantity, draft_id, expected_revision, item_number, quantity)
+
+    @mcp.tool
     def revise_order_draft(
         draft_id: str,
         expected_revision: int,
