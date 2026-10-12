@@ -5,6 +5,7 @@
 """
 
 import json
+import math
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -41,6 +42,17 @@ class PolicyIndex:
     ) -> list[Hit]:
         """检索与 query 最相似的 k 个片段（得分 ≥ threshold）；无命中返回空。"""
         query_vec = embedder.embed([query])[0]
+        vectors = [query_vec, *self.vectors]
+        if not query_vec or any(len(vector) != len(query_vec) for vector in vectors):
+            raise ValueError("检索向量维度不一致")
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            for vector in vectors
+            for value in vector
+        ):
+            raise ValueError("检索向量须为有限数值")
         scored = [
             Hit(chunk=chunk, score=cosine(query_vec, vec))
             for chunk, vec in zip(self.chunks, self.vectors, strict=True)
