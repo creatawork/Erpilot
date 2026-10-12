@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "documents": [
+    {
+      "source": "order-policy.md",
+      "policy_id": "order-policy",
+      "version": "2026-10-12.1",
+      "effective_from": "2026-10-11T16:00:00Z",
+      "effective_until": null,
+      "source_sha256": "ec768d3c162e8ffa8a36ca24126afdf1024ab894bee3e847c379b9ed1779c290",
+      "rules": {
+        "order.cancel": {
+          "titles": [
+            "可取消的订单",
+            "已发货或已签收的订单"
+          ],
+          "values": [
+            "待付款",
+            "待发货"
+          ]
+        }
+      }
+    },
+    {
+      "source": "pricing-policy.md",
+      "policy_id": "pricing-policy",
+      "version": "2026-10-12.1",
+      "effective_from": "2026-10-11T16:00:00Z",
+      "effective_until": null,
+      "source_sha256": "dff3357f163cc8b8e8cb30e36fee0d8401eb0249e1eab36aeef091b7d955910b",
+      "rules": {}
+    },
+    {
+      "source": "return-policy.md",
+      "policy_id": "return-policy",
+      "version": "2026-10-12.1",
+      "effective_from": "2026-10-11T16:00:00Z",
+      "effective_until": null,
+      "source_sha256": "50a87a110e77aed17e6d6473382aaa961d9531a60f9dc1be84e4110401a4617c",
+      "rules": {}
+    }
+  ]
+}

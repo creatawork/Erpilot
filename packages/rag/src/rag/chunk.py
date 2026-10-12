@@ -5,6 +5,8 @@
 
 from pydantic import BaseModel, Field
 
+from rag.policy import PolicyMetadata
+
 
 class Chunk(BaseModel):
     """一个检索片段：来源文档、小节标题、正文。"""
@@ -12,6 +14,7 @@ class Chunk(BaseModel):
     source: str = Field(description="来源文档标识，如文件名")
     title: str = Field(description="小节标题（无标题的前言用 source 兜底）")
     text: str = Field(description="片段正文（不含标题行）")
+    metadata: PolicyMetadata | None = None
 
 
 def _heading_title(line: str) -> str | None:
