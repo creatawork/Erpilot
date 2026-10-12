@@ -1,3 +1,5 @@
+from datetime import timedelta, timezone
+
 import pytest
 from erp_store.seed import seed_database
 from fastmcp import Client
@@ -43,3 +45,18 @@ async def test_embedding_failure_is_sanitized(seeded_db):
         result = (await client.call_tool("search_policy", {"query": "政策"})).data
     assert result["error"]["code"] == "policy_unavailable"
     assert "secret-key" not in str(result)
+
+
+async def test_reference_dates_are_normalized_to_utc(seeded_db):
+    chunks = load_corpus()
+    for chunk in chunks:
+        chunk.metadata.effective_from = chunk.metadata.effective_from.astimezone(
+            timezone(timedelta(hours=8))
+        )
+    embedder = Embedder()
+    index = PolicyIndex.build(chunks, embedder)
+    async with Client(
+        create_server(seeded_db, policy_resolver=lambda: (index, embedder))
+    ) as client:
+        result = (await client.call_tool("search_policy", {"query": "政策"})).data
+    assert result["matches"][0]["effective_from"] == "2026-10-11T16:00:00Z"

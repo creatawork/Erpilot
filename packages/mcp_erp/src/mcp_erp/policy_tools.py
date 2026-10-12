@@ -25,6 +25,9 @@ def reference(hit: Hit) -> dict:
     if metadata is None:
         raise ValueError("政策缺少元数据")
     data = metadata.model_dump(mode="json")
+    for key in ("effective_from", "effective_until"):
+        value = getattr(metadata, key)
+        data[key] = value.astimezone(UTC).isoformat().replace("+00:00", "Z") if value else None
     return {
         "source": hit.chunk.source,
         "title": hit.chunk.title,

@@ -112,6 +112,11 @@ def chat(
     if writes:
         gate = StreamApprovalGate()
     tools = _resolve_tools(tools_mode, writes=writes, gate=gate)
+    prompt_rules = system_prompt(any(t.risk for t in tools))
+    if any(t.name == "assess_order_cancellation" for t in tools):
+        from mcp_erp.policy_tools import CANCELLATION_GUIDANCE
+
+        prompt_rules += "\n" + CANCELLATION_GUIDANCE
     agent = LangGraphRuntime(
         LLMClient(config),
         tools=tools,
@@ -119,7 +124,7 @@ def chat(
         approval_enabled=gate is not None,
     )
     messages: list = [
-        {"role": "system", "content": system_prompt(any(t.risk for t in tools))},
+        {"role": "system", "content": prompt_rules},
         {"role": "user", "content": text},
     ]
     trace_path = new_trace_path(trace_dir, config.model)

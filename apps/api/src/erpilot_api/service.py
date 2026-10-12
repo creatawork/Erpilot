@@ -364,6 +364,10 @@ class ChatService:
 
     def _system_prompt(self):
         prompt = system_prompt(any(t.risk for t in self._tools))
+        if any(t.name == "assess_order_cancellation" for t in self._tools):
+            from mcp_erp.policy_tools import CANCELLATION_GUIDANCE
+
+            prompt += "\n" + CANCELLATION_GUIDANCE
         if self._drafts is not None:
             prompt += (
                 "\n建单前先使用 prepare_order_draft 保存报价草稿；"
