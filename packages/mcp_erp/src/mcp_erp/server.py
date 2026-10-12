@@ -414,50 +414,10 @@ def create_server(
         cats = repo.list_categories()
         return {"total": len(cats), "items": [c.model_dump(mode="json") for c in cats]}
 
-    # ---- 政策检索（RAG，只读）----
+    from mcp_erp.policy_tools import register_policy_tools
 
-    @mcp.tool
-    def search_policy(
-        query: Annotated[
-            str, Field(description="政策相关问题或关键词，如 退货时效、满多少件打折、能不能取消")
-        ],
-        k: Annotated[int, Field(description="返回片段数（1~5）")] = 3,
-    ) -> dict[str, Any]:
-        """检索店铺政策文档（价格/折扣/订单取消/退换货），返回最相关片段作为作答依据。
-
-        依据返回片段回答并注明来源（source/title）；matches 为空表示政策文档未覆盖，
-        须如实说明、不要臆造政策。"""
-        if not query.strip():
-            return _err("invalid_argument", "查询不能为空", "例如：满多少件有折扣、几天内可退货")
-        if not 1 <= k <= 5:
-            return _err("invalid_argument", "k 须在 1~5")
-        resolver = policy_resolver or _default_policy_resolver
-        try:
-            index, embedder = resolver()
-        except Exception as exc:  # 索引缺失/key 未配置等：转成可自愈的结构化错误
-            return _err(
-                "policy_unavailable",
-                f"政策检索未就绪：{exc}",
-                "配置嵌入 key 后运行 uv run --env-file .env --package rag "
-                "python -m rag build 生成索引",
-            )
-        hits = index.search(query, embedder, k=k, threshold=POLICY_SCORE_THRESHOLD)
-        if not hits:
-            return {
-                "matches": [],
-                "note": "政策文档未找到相关内容；请如实告知用户未覆盖，不要臆造政策",
-            }
-        return {
-            "matches": [
-                {
-                    "source": h.chunk.source,
-                    "title": h.chunk.title,
-                    "text": h.chunk.text,
-                    "score": round(h.score, 4),
-                }
-                for h in hits
-            ]
-        }
+    register_policy_tools(mcp, repo, policy_resolver or _default_policy_resolver,
+                          POLICY_SCORE_THRESHOLD)
 
     # ---- 写操作（include_writes=True 才注册；执行受 agent 侧审批门拦截） ----
 

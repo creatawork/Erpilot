@@ -715,6 +715,9 @@ def _fake_policy_resolver():
         Chunk(source="pricing-policy.md", title="数量梯度折扣", text="满 10 件有折扣"),
         Chunk(source="order-policy.md", title="可取消的订单", text="待付款待发货可取消"),
     ]
+    from rag.corpus import load_corpus
+    metadata = {c.source: c.metadata for c in load_corpus()}
+    chunks = [c.model_copy(update={"metadata": metadata[c.source]}) for c in chunks]
     embedder = _FakePolicyEmbedder()
     return PolicyIndex.build(chunks, embedder), embedder
 
@@ -752,7 +755,7 @@ def _borderline_policy_resolver():
             return [[0.5, 0.8660254] for _ in texts]
 
     index = PolicyIndex(
-        [Chunk(source="policy.md", title="Policy", text="stored policy")],
+        [__import__("rag.corpus", fromlist=["load_corpus"]).load_corpus()[0]],
         [[1.0, 0.0]],
     )
     return index, Embedder()
