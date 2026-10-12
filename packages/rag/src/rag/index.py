@@ -64,7 +64,7 @@ class PolicyIndex:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
-            "chunks": [c.model_dump() for c in self.chunks],
+            "chunks": [c.model_dump(mode="json") for c in self.chunks],
             "vectors": self.vectors,
         }
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -74,3 +74,13 @@ class PolicyIndex:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
         chunks = [Chunk.model_validate(c) for c in payload["chunks"]]
         return cls(chunks, payload["vectors"])
+
+
+def refresh_index_metadata(index: PolicyIndex, chunks: list[Chunk]) -> PolicyIndex:
+    if any(c.metadata is None or c.metadata.source != c.source for c in chunks):
+        raise ValueError("新语料缺少一致的政策元数据")
+    original = [(c.source, c.title, c.text) for c in index.chunks]
+    current = [(c.source, c.title, c.text) for c in chunks]
+    if original != current:
+        raise ValueError("语料片段或正文已变化，需重新构建嵌入索引")
+    return PolicyIndex(chunks, index.vectors)

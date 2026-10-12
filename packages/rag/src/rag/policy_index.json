@@ -3,92 +3,320 @@
     {
       "source": "order-policy.md",
       "title": "订单与取消政策",
-      "text": "订单状态流转与取消规则的统一口径。"
+      "text": "订单状态流转与取消规则的统一口径。",
+      "metadata": {
+        "source": "order-policy.md",
+        "policy_id": "order-policy",
+        "version": "2026-10-12.1",
+        "effective_from": "2026-10-11T16:00:00Z",
+        "effective_until": null,
+        "source_sha256": "ec768d3c162e8ffa8a36ca24126afdf1024ab894bee3e847c379b9ed1779c290",
+        "rules": {
+          "order.cancel": {
+            "titles": [
+              "可取消的订单",
+              "已发货或已签收的订单"
+            ],
+            "values": [
+              "待付款",
+              "待发货"
+            ]
+          }
+        }
+      }
     },
     {
       "source": "order-policy.md",
       "title": "订单状态",
-      "text": "订单有六种状态：待付款、待发货、已发货、已签收、已取消、已退款。正常流程为待付款 → 待发货 → 已发货 → 已签收。新建订单从「待付款」起步。"
+      "text": "订单有六种状态：待付款、待发货、已发货、已签收、已取消、已退款。正常流程为待付款 → 待发货 → 已发货 → 已签收。新建订单从「待付款」起步。",
+      "metadata": {
+        "source": "order-policy.md",
+        "policy_id": "order-policy",
+        "version": "2026-10-12.1",
+        "effective_from": "2026-10-11T16:00:00Z",
+        "effective_until": null,
+        "source_sha256": "ec768d3c162e8ffa8a36ca24126afdf1024ab894bee3e847c379b9ed1779c290",
+        "rules": {
+          "order.cancel": {
+            "titles": [
+              "可取消的订单",
+              "已发货或已签收的订单"
+            ],
+            "values": [
+              "待付款",
+              "待发货"
+            ]
+          }
+        }
+      }
     },
     {
       "source": "order-policy.md",
       "title": "可取消的订单",
-      "text": "仅「待付款」或「待发货」的订单可直接取消。取消后系统会把订单内商品的库存**回补**。"
+      "text": "仅「待付款」或「待发货」的订单可直接取消。取消后系统会把订单内商品的库存**回补**。",
+      "metadata": {
+        "source": "order-policy.md",
+        "policy_id": "order-policy",
+        "version": "2026-10-12.1",
+        "effective_from": "2026-10-11T16:00:00Z",
+        "effective_until": null,
+        "source_sha256": "ec768d3c162e8ffa8a36ca24126afdf1024ab894bee3e847c379b9ed1779c290",
+        "rules": {
+          "order.cancel": {
+            "titles": [
+              "可取消的订单",
+              "已发货或已签收的订单"
+            ],
+            "values": [
+              "待付款",
+              "待发货"
+            ]
+          }
+        }
+      }
     },
     {
       "source": "order-policy.md",
       "title": "已发货或已签收的订单",
-      "text": "已发货、已签收的订单不可直接取消，需走退款流程处理（见退换货政策）。"
+      "text": "已发货、已签收的订单不可直接取消，需走退款流程处理（见退换货政策）。",
+      "metadata": {
+        "source": "order-policy.md",
+        "policy_id": "order-policy",
+        "version": "2026-10-12.1",
+        "effective_from": "2026-10-11T16:00:00Z",
+        "effective_until": null,
+        "source_sha256": "ec768d3c162e8ffa8a36ca24126afdf1024ab894bee3e847c379b9ed1779c290",
+        "rules": {
+          "order.cancel": {
+            "titles": [
+              "可取消的订单",
+              "已发货或已签收的订单"
+            ],
+            "values": [
+              "待付款",
+              "待发货"
+            ]
+          }
+        }
+      }
     },
     {
       "source": "order-policy.md",
       "title": "销量与金额的有效口径",
-      "text": "销量汇总与客户有效花费只统计「待发货 / 已发货 / 已签收」三种状态；已取消、已退款、待付款不计入有效销量口径。"
+      "text": "销量汇总与客户有效花费只统计「待发货 / 已发货 / 已签收」三种状态；已取消、已退款、待付款不计入有效销量口径。",
+      "metadata": {
+        "source": "order-policy.md",
+        "policy_id": "order-policy",
+        "version": "2026-10-12.1",
+        "effective_from": "2026-10-11T16:00:00Z",
+        "effective_until": null,
+        "source_sha256": "ec768d3c162e8ffa8a36ca24126afdf1024ab894bee3e847c379b9ed1779c290",
+        "rules": {
+          "order.cancel": {
+            "titles": [
+              "可取消的订单",
+              "已发货或已签收的订单"
+            ],
+            "values": [
+              "待付款",
+              "待发货"
+            ]
+          }
+        }
+      }
     },
     {
       "source": "order-policy.md",
       "title": "建单规则",
-      "text": "建单按现价生成快照价，校验商品在售与库存充足；同一 SKU 多行自动合并数量。库存不足时不建单，也不会把库存改为负数。"
+      "text": "建单按现价生成快照价，校验商品在售与库存充足；同一 SKU 多行自动合并数量。库存不足时不建单，也不会把库存改为负数。",
+      "metadata": {
+        "source": "order-policy.md",
+        "policy_id": "order-policy",
+        "version": "2026-10-12.1",
+        "effective_from": "2026-10-11T16:00:00Z",
+        "effective_until": null,
+        "source_sha256": "ec768d3c162e8ffa8a36ca24126afdf1024ab894bee3e847c379b9ed1779c290",
+        "rules": {
+          "order.cancel": {
+            "titles": [
+              "可取消的订单",
+              "已发货或已签收的订单"
+            ],
+            "values": [
+              "待付款",
+              "待发货"
+            ]
+          }
+        }
+      }
     },
     {
       "source": "pricing-policy.md",
       "title": "价格与报价政策",
-      "text": "本店商品定价与报价的统一口径。所有报价以系统工具计算为准，不接受口头折扣或外部传言价格。"
+      "text": "本店商品定价与报价的统一口径。所有报价以系统工具计算为准，不接受口头折扣或外部传言价格。",
+      "metadata": {
+        "source": "pricing-policy.md",
+        "policy_id": "pricing-policy",
+        "version": "2026-10-12.1",
+        "effective_from": "2026-10-11T16:00:00Z",
+        "effective_until": null,
+        "source_sha256": "dff3357f163cc8b8e8cb30e36fee0d8401eb0249e1eab36aeef091b7d955910b",
+        "rules": {}
+      }
     },
     {
       "source": "pricing-policy.md",
       "title": "报价基准价",
-      "text": "对外报价一律以商品的**当前现价**为基准。现价以商品档案为准，随运营调整；历史订单金额不随现价变动。"
+      "text": "对外报价一律以商品的**当前现价**为基准。现价以商品档案为准，随运营调整；历史订单金额不随现价变动。",
+      "metadata": {
+        "source": "pricing-policy.md",
+        "policy_id": "pricing-policy",
+        "version": "2026-10-12.1",
+        "effective_from": "2026-10-11T16:00:00Z",
+        "effective_until": null,
+        "source_sha256": "dff3357f163cc8b8e8cb30e36fee0d8401eb0249e1eab36aeef091b7d955910b",
+        "rules": {}
+      }
     },
     {
       "source": "pricing-policy.md",
       "title": "下单快照价与现价的区别",
-      "text": "新订单先合并同一 SKU 的数量，再按**下单时现价与数量梯度折扣**计算成交单价，将该单价作为快照长期保留。报价与新订单使用同一计价口径；历史订单保留原成交价，不因现价或折扣规则变化重算。\n\n报价仅供参考，不锁定价格或预留库存。执行建单时复核商品在售状态与库存，并按当时现价计价；现价变化后应重新报价。原请求的幂等重放返回首次提交结果，不按新现价重复建单。"
+      "text": "新订单先合并同一 SKU 的数量，再按**下单时现价与数量梯度折扣**计算成交单价，将该单价作为快照长期保留。报价与新订单使用同一计价口径；历史订单保留原成交价，不因现价或折扣规则变化重算。\n\n报价仅供参考，不锁定价格或预留库存。执行建单时复核商品在售状态与库存，并按当时现价计价；现价变化后应重新报价。原请求的幂等重放返回首次提交结果，不按新现价重复建单。",
+      "metadata": {
+        "source": "pricing-policy.md",
+        "policy_id": "pricing-policy",
+        "version": "2026-10-12.1",
+        "effective_from": "2026-10-11T16:00:00Z",
+        "effective_until": null,
+        "source_sha256": "dff3357f163cc8b8e8cb30e36fee0d8401eb0249e1eab36aeef091b7d955910b",
+        "rules": {}
+      }
     },
     {
       "source": "pricing-policy.md",
       "title": "数量梯度折扣",
-      "text": "按单品购买数量提供梯度折扣，从高到低命中第一档：\n\n- 数量 ≥ 200 件：9 折（折扣系数 0.90）\n- 数量 ≥ 50 件：95 折（折扣系数 0.95）\n- 数量 ≥ 10 件：98 折（折扣系数 0.98）\n- 数量 < 10 件：无折扣（折扣系数 1.00）\n\n折后单价 = 现价 × 折扣系数，以十进制四舍五入（ROUND_HALF_UP）保留两位；行金额 = 已舍入折后单价 × 数量；订单总额为各行金额之和，保留两位。梯度按单个 SKU 合并后的数量计算，不跨商品累加。例如 0.75 元购买 10 件，折后单价 0.735 元舍入为 0.74 元，合计 7.40 元。"
+      "text": "按单品购买数量提供梯度折扣，从高到低命中第一档：\n\n- 数量 ≥ 200 件：9 折（折扣系数 0.90）\n- 数量 ≥ 50 件：95 折（折扣系数 0.95）\n- 数量 ≥ 10 件：98 折（折扣系数 0.98）\n- 数量 < 10 件：无折扣（折扣系数 1.00）\n\n折后单价 = 现价 × 折扣系数，以十进制四舍五入（ROUND_HALF_UP）保留两位；行金额 = 已舍入折后单价 × 数量；订单总额为各行金额之和，保留两位。梯度按单个 SKU 合并后的数量计算，不跨商品累加。例如 0.75 元购买 10 件，折后单价 0.735 元舍入为 0.74 元，合计 7.40 元。",
+      "metadata": {
+        "source": "pricing-policy.md",
+        "policy_id": "pricing-policy",
+        "version": "2026-10-12.1",
+        "effective_from": "2026-10-11T16:00:00Z",
+        "effective_until": null,
+        "source_sha256": "dff3357f163cc8b8e8cb30e36fee0d8401eb0249e1eab36aeef091b7d955910b",
+        "rules": {}
+      }
     },
     {
       "source": "pricing-policy.md",
       "title": "已下架商品不报价",
-      "text": "已下架（非在售）商品不提供报价。如需采购，请选择在售替代商品。"
+      "text": "已下架（非在售）商品不提供报价。如需采购，请选择在售替代商品。",
+      "metadata": {
+        "source": "pricing-policy.md",
+        "policy_id": "pricing-policy",
+        "version": "2026-10-12.1",
+        "effective_from": "2026-10-11T16:00:00Z",
+        "effective_until": null,
+        "source_sha256": "dff3357f163cc8b8e8cb30e36fee0d8401eb0249e1eab36aeef091b7d955910b",
+        "rules": {}
+      }
     },
     {
       "source": "pricing-policy.md",
       "title": "零库存商品的报价",
-      "text": "库存为 0 的在售商品仍可给出参考报价，但需明确告知当前无货，实际可售数量以库存为准。"
+      "text": "库存为 0 的在售商品仍可给出参考报价，但需明确告知当前无货，实际可售数量以库存为准。",
+      "metadata": {
+        "source": "pricing-policy.md",
+        "policy_id": "pricing-policy",
+        "version": "2026-10-12.1",
+        "effective_from": "2026-10-11T16:00:00Z",
+        "effective_until": null,
+        "source_sha256": "dff3357f163cc8b8e8cb30e36fee0d8401eb0249e1eab36aeef091b7d955910b",
+        "rules": {}
+      }
     },
     {
       "source": "return-policy.md",
       "title": "退换货政策",
-      "text": "本店退换货的统一口径。退换货需以实际订单状态为准。"
+      "text": "本店退换货的统一口径。退换货需以实际订单状态为准。",
+      "metadata": {
+        "source": "return-policy.md",
+        "policy_id": "return-policy",
+        "version": "2026-10-12.1",
+        "effective_from": "2026-10-11T16:00:00Z",
+        "effective_until": null,
+        "source_sha256": "50a87a110e77aed17e6d6473382aaa961d9531a60f9dc1be84e4110401a4617c",
+        "rules": {}
+      }
     },
     {
       "source": "return-policy.md",
       "title": "七天无理由退货",
-      "text": "签收后 7 天内可申请无理由退货，商品需保持完好、不影响二次销售，包装与赠品齐全。定制类商品不适用无理由退货。"
+      "text": "签收后 7 天内可申请无理由退货，商品需保持完好、不影响二次销售，包装与赠品齐全。定制类商品不适用无理由退货。",
+      "metadata": {
+        "source": "return-policy.md",
+        "policy_id": "return-policy",
+        "version": "2026-10-12.1",
+        "effective_from": "2026-10-11T16:00:00Z",
+        "effective_until": null,
+        "source_sha256": "50a87a110e77aed17e6d6473382aaa961d9531a60f9dc1be84e4110401a4617c",
+        "rules": {}
+      }
     },
     {
       "source": "return-policy.md",
       "title": "质量问题退换",
-      "text": "商品存在质量问题的，自签收起 15 天内可申请退换，运费由本店承担，并优先换货或全额退款。"
+      "text": "商品存在质量问题的，自签收起 15 天内可申请退换，运费由本店承担，并优先换货或全额退款。",
+      "metadata": {
+        "source": "return-policy.md",
+        "policy_id": "return-policy",
+        "version": "2026-10-12.1",
+        "effective_from": "2026-10-11T16:00:00Z",
+        "effective_until": null,
+        "source_sha256": "50a87a110e77aed17e6d6473382aaa961d9531a60f9dc1be84e4110401a4617c",
+        "rules": {}
+      }
     },
     {
       "source": "return-policy.md",
       "title": "退款流程与时效",
-      "text": "已发货或已签收的订单不能直接取消，需发起退款流程：核验商品状态后办理退款，退款在审核通过后 3 个工作日内原路退回。"
+      "text": "已发货或已签收的订单不能直接取消，需发起退款流程：核验商品状态后办理退款，退款在审核通过后 3 个工作日内原路退回。",
+      "metadata": {
+        "source": "return-policy.md",
+        "policy_id": "return-policy",
+        "version": "2026-10-12.1",
+        "effective_from": "2026-10-11T16:00:00Z",
+        "effective_until": null,
+        "source_sha256": "50a87a110e77aed17e6d6473382aaa961d9531a60f9dc1be84e4110401a4617c",
+        "rules": {}
+      }
     },
     {
       "source": "return-policy.md",
       "title": "不支持退换的情形",
-      "text": "人为损坏、超过时效、缺失配件或已明确标注不支持退换的特价/定制商品，不在退换范围内。"
+      "text": "人为损坏、超过时效、缺失配件或已明确标注不支持退换的特价/定制商品，不在退换范围内。",
+      "metadata": {
+        "source": "return-policy.md",
+        "policy_id": "return-policy",
+        "version": "2026-10-12.1",
+        "effective_from": "2026-10-11T16:00:00Z",
+        "effective_until": null,
+        "source_sha256": "50a87a110e77aed17e6d6473382aaa961d9531a60f9dc1be84e4110401a4617c",
+        "rules": {}
+      }
     },
     {
       "source": "return-policy.md",
       "title": "换货库存处理",
-      "text": "换货以退回商品入库、换出商品出库为准；库存调整属于动账操作，需经人工审批后执行。"
+      "text": "换货以退回商品入库、换出商品出库为准；库存调整属于动账操作，需经人工审批后执行。",
+      "metadata": {
+        "source": "return-policy.md",
+        "policy_id": "return-policy",
+        "version": "2026-10-12.1",
+        "effective_from": "2026-10-11T16:00:00Z",
+        "effective_until": null,
+        "source_sha256": "50a87a110e77aed17e6d6473382aaa961d9531a60f9dc1be84e4110401a4617c",
+        "rules": {}
+      }
     }
   ],
   "vectors": [
