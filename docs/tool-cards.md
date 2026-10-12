@@ -256,3 +256,11 @@ API 的 MCP 组合层绑定可信会话标识，不在工具参数中接受 `ses
 - 返回：`{"sku", "status", "note"}`
 - 错误：`invalid_argument`（状态取值非法）；`not_found`（SKU 不存在）；
   `invalid_transition`（**已是目标状态**——空操作不报成功，让模型如实转述"无需变更"）
+
+
+### assess_order_cancellation
+
+- 用途：只读判断指定订单能否发起取消申请；参数仅 `order_id`，单号不明确时先澄清。
+- 返回：`schema_version=1`、UTC `assessed_at`、当前订单与原成交金额、业务状态判断、政策状态及来源/版本/生效区间/片段，`decision` 为 eligible / ineligible / needs_review。
+- eligible 仅表示可发起申请，仍需审批；政策缺失、失效、不可用或冲突时需核对。业务禁止状态始终不可直接取消，不承诺退款。
+- 风险：只读，所有工具面可用。不保存预览、审批、幂等记录，不修改订单或库存；明确取消请求仍走原写工具审批和执行时校验。

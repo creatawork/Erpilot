@@ -15,6 +15,8 @@ import json
 import logging
 from typing import Any
 
+from agent_core.policy_display import assessment_fields
+
 logger = logging.getLogger("agent_core.display")
 
 DISPLAY_VERSION = 1
@@ -130,6 +132,7 @@ def _order_cancellation_fields(args: dict, result: dict) -> dict[str, Any] | Non
 
 
 _BUILDERS = {
+    "assess_order_cancellation": {"kind": "cancellation_assessment", "fields": assessment_fields},
     "check_stock": {"kind": "stock_query", "fields": _stock_query_fields},
     "get_stock": {"kind": "stock_query", "fields": _stock_query_fields},
     "adjust_stock": {"kind": "stock_adjustment", "fields": _stock_adjustment_fields},

@@ -53,6 +53,7 @@ EXPECTED_TOOLS = {
     "stock_valuation",
     "list_categories",
     "search_policy",
+    "assess_order_cancellation",
 }
 
 
@@ -62,7 +63,7 @@ async def test_server_exposes_all_readonly_tools(seeded_db) -> None:
     async with Client(create_server(seeded_db)) as client:
         tools = {t.name for t in await client.list_tools()}
     assert tools == EXPECTED_TOOLS
-    assert len(EXPECTED_TOOLS) == 17  # §4 冻结线 15~20 区间内（含政策检索）
+    assert len(EXPECTED_TOOLS) == 18  # §4 冻结线 15~20 区间内（含政策检索）
 
 
 async def test_get_order_error_contract_v1(seeded_db) -> None:
@@ -342,7 +343,7 @@ async def test_write_server_exposes_full_surface(seeded_db) -> None:
     async with Client(create_server(seeded_db, include_writes=True)) as client:
         tools = {t.name for t in await client.list_tools()}
     assert tools == EXPECTED_TOOLS | WRITE_TOOLS
-    assert len(tools) == 21  # 17 只读（含政策检索）+ 4 写 区间内
+    assert len(tools) == 22  # 18 只读（含政策检索）+ 4 写 区间内
 
 
 async def test_write_error_contract_via_mcp(seeded_db, repo) -> None:
@@ -747,7 +748,7 @@ async def test_search_policy_refuses_out_of_corpus(seeded_db) -> None:
 
 
 def _borderline_policy_resolver():
-    from rag.chunk import Chunk
+    from rag.corpus import load_corpus
     from rag.index import PolicyIndex
 
     class Embedder:
@@ -755,7 +756,7 @@ def _borderline_policy_resolver():
             return [[0.5, 0.8660254] for _ in texts]
 
     index = PolicyIndex(
-        [__import__("rag.corpus", fromlist=["load_corpus"]).load_corpus()[0]],
+        [load_corpus()[0]],
         [[1.0, 0.0]],
     )
     return index, Embedder()
