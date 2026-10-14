@@ -47,7 +47,7 @@
 |---|---|---|
 | 1：多模型网关与横向对比 | M01–M05 | C1：模型可配置切换且 `agent_core` 保持零业务依赖；现有基线跨 GLM/DeepSeek/Qwen 各留原始报告，产出成功率/成本/延迟/重试对照表，不混比 |
 | 2：RAG 单场景（政策问答） | R01–R05 | C2：可复现语料 + 检索工具接入 loop；grounded 回答、超出语料拒答、引用来源三类评测通过并留证据 |
-| 3：评测叙事 + 注入专题 | E01–E04 | C3：`reports/evals` 聚合成版本化成功率/成本曲线（脚本可复跑 + 图）；注入攻击面清单 + 防护前后对照报告 |
+| 3：评测叙事 + 注入专题 | E01–E04 | C3 已于 2026-10-09 验收：`reports/evals` 版本化趋势脚本/图、注入攻击面清单、匹配真实模型对照及 v2.6 trace 离线复判；证据见[趋势报告](../reports/evals/trends-v1.md)、[攻击面清单](../docs/security/prompt-injection-attack-surface.md)和[复判说明](../reports/security/20261009-prompt-injection-v26-rescore.md)。 |
 | 4：可展示收口（部署 + demo） | D01–D04 | C4：api/web 容器化，全栈一键起，安全演示模式无真实 key/写入风险，公网可访问；档案页 + 2–3 分钟演示视频 |
 | 5：文章与面试素材 | A01–A04 | C5：HITL/崩溃恢复/评测三篇文稿 + 三方向面试叙事卡 |
 

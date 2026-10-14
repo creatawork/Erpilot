@@ -32,6 +32,10 @@ Cost values are estimated CNY, not invoices; incomplete values show the known su
 | glm-5.3-flash | v2.4 | targeted | standard | `f4291133cf7d` | 20261008-110820 (1/1) | 100.0% (1/1) | ¥0.0003 | complete | 4042.7 | complete | `bed00790fb35` | `20261008-110815-1a9599.json` |
 | glm-5.3-flash | unknown | unknown | unknown | `unknown` | 20261008-111318 (2/2) | 100.0% (2/2) | ¥0.0020 | complete | 41577.2 | unknown | `bed00790fb35` | `20261008-111318-3e982d.json` |
 | glm-5.3-flash | unknown | unknown | unknown | `unknown` | 20261008-111459 (2/2) | 100.0% (2/2) | ¥0.0020 | complete | 15782.2 | unknown | `bed00790fb35` | `20261008-111459-00c1f3.json` |
+| glm-5.3-flash | v2.4 | targeted | control | `7f8fc56993bb` | 20261009-123425 (4/4) | 100.0% (4/4) | ¥0.0037 | complete | 9170.0 | complete | `5a2089fc333f` | `20261009-123343-90d1cc.json` |
+| glm-5.3-flash | v2.4 | targeted | treatment | `7f8fc56993bb` | 20261009-123534 (4/4) | 75.0% (3/4) | ¥0.0037 | complete | 10323.3 | complete | `5a2089fc333f` | `20261009-123445-bae27a.json` |
+| glm-5.3-flash | v2.5 | targeted | control | `40c4177bde26` | 20261009-134718 (4/4) | 75.0% (3/4) | ¥0.0037 | complete | 13646.5 | complete | `5a2089fc333f` | `20261009-134617-f7b440.json` |
+| glm-5.3-flash | v2.5 | targeted | treatment | `40c4177bde26` | 20261009-134842 (4/4) | 50.0% (2/4) | ¥0.0040 | complete | 12272.4 | complete | `5a2089fc333f` | `20261009-134746-2277a2.json` |
 
 ## Cohort dimensions
 

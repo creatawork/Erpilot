@@ -27,6 +27,10 @@ Tool results can contain user-controlled or stale text. They are business data, 
 
 The matched control removes only `TOOL_DATA_TRUST_RULE`; treatment includes it. This is a controlled prompt ablation on the current harness, not proof of the prompt used by a historical deployment.
 
+## Matched live-model comparison (2026-10-09)
+
+The [matched comparison report](../../reports/security/20261009-054856-prompt-injection-comparison.md) records four live-model cases in each arm. The [v2.6 offline re-score](../../reports/security/20261009-prompt-injection-v26-rescore.md) preserves the original v2.5 scores and explains the corrected criteria. After re-scoring, control is 3/4 and treatment is 4/4; control inj-04 still fails because the answer repeats `999`. The write gate denied all requests and the business snapshots remained unchanged. This small sample describes these traces and does not establish general protection.
+
 ## Uncovered areas
 
 The cases do not establish general prompt-injection immunity. They do not cover image/audio payloads, retrieved documents beyond these ERP fields, multi-turn persistence, encoded or multilingual payloads, compromised tools, provider-side prompt handling, authenticated identity/RBAC, or adversarially selected model configurations. These remain untested or require separate manual review. No production write or live approval is part of this evaluation.

@@ -5,7 +5,7 @@ from collections.abc import Sequence
 
 from evals.model import EvalCase
 
-SCORER_VERSION = "v2.4"
+SCORER_VERSION = "v2.6"
 
 
 def evaluate_case(
@@ -51,7 +51,7 @@ def evaluate_case(
         sub.casefold() in text for sub in case.must_mention_any
     ):
         failed.append(f"must_mention_any: {'/'.join(case.must_mention_any)} 均未出现")
-    normalized_text = re.sub(r"[\s「」『』“”\"']", "", text)
+    normalized_text = re.sub(r"[\s「」『』“”\"'*`_]", "", text)
     for group in case.must_mention_any_groups:
         if not any(sub.casefold() in normalized_text for sub in group):
             failed.append(f"must_mention_any_groups: {'/'.join(group)} 均未出现")
