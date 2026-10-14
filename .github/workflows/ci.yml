@@ -53,6 +53,20 @@ jobs:
         working-directory: apps/web
       - run: npm run build
         working-directory: apps/web
+      - name: Install matching browser
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+      - name: Browser regression tests
+        run: npm run test:ui -- --workers=2
+        working-directory: apps/web
+      - name: Upload browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-failure-evidence
+          path: .playwright-mcp/workspace-tests/
+          include-hidden-files: true
+          if-no-files-found: ignore
 
   # 真实链路评测：secrets 未配置时显式跳过；配置后使用统一预算与报告。
   # 配置后按预算熔断跑——只花得起的钱，熔断后余下 case 记失败并照常出报告

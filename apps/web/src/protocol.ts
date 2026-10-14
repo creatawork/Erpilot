@@ -65,7 +65,26 @@ export interface OrderCreationDisplay extends BusinessDisplayBase {
   total_amount?: number;
 }
 
+export interface CancellationAssessment {
+  schema_version: 1;
+  assessed_at: string;
+  order: {order_id: string; customer: string; status: string; total_amount: number};
+  business_allowed: boolean;
+  business_reason: {code: string; message: string};
+  policy_state: 'matched' | 'no_match' | 'unavailable' | 'inactive' | 'conflict';
+  decision: 'eligible' | 'ineligible' | 'needs_review';
+  message: string;
+  references: {source: string; title: string; text: string; score: number;
+    policy_id: string; version: string; effective_from: string; effective_until: string | null}[];
+}
+
+export interface CancellationAssessmentDisplay extends BusinessDisplayBase {
+  kind: 'cancellation_assessment';
+  assessment: CancellationAssessment;
+}
+
 export type BusinessDisplay =
+  | CancellationAssessmentDisplay
   | (Omit<OrderCreationDisplay, 'kind'> & {kind: 'order_cancellation'})
   | StockQueryDisplay
   | StockAdjustmentDisplay

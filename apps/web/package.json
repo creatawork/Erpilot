@@ -7,15 +7,19 @@
     "test": "tsc src/protocol.ts src/session.ts --outDir .test-build --target ES2022 --module ESNext --skipLibCheck && node --test tests/*.test.mjs",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:ui": "playwright test"
   },
   "dependencies": {
+    "@ant-design/icons": "^6.3.4",
+    "@ant-design/x": "^2.9.0",
+    "@ant-design/x-markdown": "^2.9.0",
+    "antd": "^6.6.5",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1"
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",

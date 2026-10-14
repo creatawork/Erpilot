@@ -2,11 +2,25 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildSync } from "esbuild";
 import React from "react";
+import { createRequire } from "node:module";
+// Browser styles have no effect on server-rendered semantic assertions.
+createRequire(import.meta.url).extensions[".css"] = () => {};
 import { renderToStaticMarkup } from "react-dom/server";
+
+
+function buttonAttributes(html, label) {
+  const button = [...html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)]
+    .find(match => match[2].replace(/<[^>]*>/g, '').replace(/<!--.*?-->/g, '').replace(/\s+/g, '').startsWith(label.replace(/\s+/g, '')));
+  assert.ok(button, 'Missing button: ' + label);
+  return button[1];
+}
+function assertButtonState(html, label, disabled) {
+  assert.equal(/\bdisabled(?:=|\s|$)/.test(buttonAttributes(html, label)), disabled, label);
+}
 
 buildSync({entryPoints: ["src/components/AssistantMessage.tsx"], bundle: true,
   platform: "node", format: "esm", outfile: ".test-build/assistant-message.mjs",
-  packages: "external", jsx: "automatic"});
+  packages: "external", jsx: "automatic", alias: { "@ant-design/x": "./tests/ant-design-x-node.mjs" }});
 const { AssistantMessage } = await import("../.test-build/assistant-message.mjs");
 buildSync({entryPoints:['src/components/OrderDraftPanel.tsx'],bundle:true,platform:'node',format:'esm',outfile:'.test-build/order-draft-panel.mjs',packages:'external',jsx:'automatic'});
 const { OrderDraftPanel, DraftSummary } = await import('../.test-build/order-draft-panel.mjs');
@@ -16,15 +30,15 @@ const cancellation={operation_id:'op-secret',kind:'cancel_order',status:'open',e
 test('business cancellation approval shows exact original impact including missing stock',()=>{
   const html=renderToStaticMarkup(React.createElement(BusinessApprovalSummary,{pending:{pending_id:'p',tool:'cancel_order',arguments:{operation_id:'op-secret'}},operation:cancellation,verified:true,enabled:true,loading:false,now:0,submitting:false,onRespond(){},onRefresh(){}})).replace(/<!--.*?-->/g,'');
   for(const text of ['原客户','原备注','待付款 → 已取消','原单金额 ¥300.00','20 → 23','无库存记录，无法回补'])assert.ok(html.includes(text),text);
-  assert.match(html,/<button class="approve">批准/);
+  assertButtonState(html, '批准', false);
   assert.match(html,/<details class="business-technical"><summary>技术详情<\/summary>/);
   assert.match(html,/取消订单不执行退款/);
 });
 test('business approval blocks uncertain, invalid and disabled approvals but preserves rejection',()=>{
   for(const overrides of [{verified:false},{enabled:false},{operation:{...cancellation,status:'changed'}},{operation:{...cancellation,status:'expired'}},{operation:{...cancellation,status:'executed'}},{operation:undefined},{error:'核对失败'}]){
     const html=renderToStaticMarkup(React.createElement(BusinessApprovalSummary,{pending:{pending_id:'p',tool:'cancel_order',arguments:{operation_id:'op-secret'}},operation:cancellation,verified:true,enabled:true,loading:false,now:0,submitting:false,onRespond(){},onRefresh(){},...overrides}));
-    assert.match(html,/<button class="approve" disabled="">批准/);
-    assert.match(html,/<button class="deny">拒绝/);
+    assertButtonState(html, '批准', true);
+    assertButtonState(html, '拒绝', false);
   }
 });
 test('custom legacy tool approval stays actionable while fixed-reference or current-provider raw approval fails closed',()=>{
@@ -32,8 +46,8 @@ test('custom legacy tool approval stays actionable while fixed-reference or curr
     const pending={pending_id:'p',call_id:'c',tool:'adjust_stock',risk:'single_confirm',arguments:args};
     const entity={id:'c',name:'adjust_stock',arguments:JSON.stringify(args),status:'waiting_approval',display:null,finished:null,approval:pending,approvalResolved:null};
     const html=renderToStaticMarkup(React.createElement(AssistantMessage,{turn:{role:'assistant',phase:'awaiting_approval',blocks:[{id:'b',type:'tool',callId:'c'}],tools:{c:entity},step:1,phaseAt:0,done:null,error:null},now:0,live:false,stalled:false,submittingApprovals:new Set(),businessApprovalsEnabled:enabled,onRespond(){}}));
-    assert.equal(/<button class="approve" disabled="">批准/.test(html),blocked);
-    assert.match(html,/<button class="deny">拒绝/);
+    assertButtonState(html, '批准', blocked);
+    assertButtonState(html, '拒绝', false);
   }
 });
 test('cancel business results show success and meaningful failed or denied reasons',()=>{
@@ -58,13 +72,13 @@ test('pending approval locks new submission and editor controls have accessible 
 test('a submitted draft still offers an accessible new draft action',()=>{
   const draft={draft_id:'done',revision:1,customer:'已提交客户',note:null,items:[{sku:'A',name:'商品',quantity:1,base_price:100,discount:1,unit_price:100,line_total:100,stock_before:20,stock_after:19}],total_amount:100,expires_at:'2099-01-01T00:00:00Z',status:'submitted',order_id:'order-1'};
   const html=renderToStaticMarkup(React.createElement(OrderDraftPanel,{drafts:[draft],loading:false,error:'',busy:false,canSubmit:true,hasPending:false,onRefresh(){},async onSave(){},onSubmit(){}}));
-  assert.match(html,/<button type="button">新建草稿<\/button>/);
+  assertButtonState(html, '新建草稿', false);
 });
 test('read-only runtime keeps saving available and explains disabled order submission',()=>{
   const draft={draft_id:'open',revision:1,customer:'客户',note:null,items:[{sku:'A',name:'商品',quantity:1,base_price:100,discount:1,unit_price:100,line_total:100,stock_before:20,stock_after:19}],total_amount:100,expires_at:'2099-01-01T00:00:00Z',status:'open',order_id:null};
   const html=renderToStaticMarkup(React.createElement(OrderDraftPanel,{drafts:[draft],loading:false,error:'',busy:false,canSubmit:true,writesEnabled:false,hasPending:false,onRefresh(){},async onSave(){},onSubmit(){}}));
   assert.match(html,/草稿可保存，下单未开放/);
-  assert.match(html,/<button type="button" disabled="">请求提交版本/);
+  assertButtonState(html, '请求提交版本', true);
   assert.doesNotMatch(html,/<input aria-label="草稿客户" disabled/);
 });
 

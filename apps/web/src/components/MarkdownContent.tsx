@@ -1,23 +1,13 @@
-/**
- * 助手正文 Markdown 渲染：react-markdown 默认不渲染任意原始 HTML，
- * 也不使用 innerHTML——模型文本无法注入脚本。链接统一新窗口打开并收紧 rel；
- * 危险协议（javascript: 等）由 react-markdown 的默认 URL 清洗拦截。
- * 流式期间按累积文本重新解析，尾部未闭合语法暂时按普通文本展示。
- */
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { XMarkdown } from '@ant-design/x-markdown';
+import type { ComponentProps } from '@ant-design/x-markdown';
 
-export function MarkdownContent({ text }: { text: string }) {
-  return (
-    <div className="md">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          a: props => <a {...props} target="_blank" rel="noopener noreferrer nofollow" />,
-        }}
-      >
-        {text}
-      </ReactMarkdown>
-    </div>
-  );
+function SafeLink({ href, children }: ComponentProps) {
+  const url = typeof href === 'string' && (/^(https?:|mailto:|#)/i.test(href) || href.startsWith('/')) ? href : undefined;
+  return <a href={url} target="_blank" rel="noopener noreferrer nofollow">{children}</a>;
+}
+
+/** Escape model-authored HTML; DOMPurify also filters unsafe URLs and attributes. */
+export function MarkdownContent({ text, streaming = false }: { text: string; streaming?: boolean }) {
+  return <XMarkdown className="md" content={text} escapeRawHtml openLinksInNewTab
+    components={{ a: SafeLink }} streaming={{ hasNextChunk: streaming, enableAnimation: false }} />;
 }

@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import "./App.css";
+import { Alert, Button, Empty, Input, Tabs, Tag, type GetProps } from "antd";
+import { Bubble, Prompts, Sender } from "@ant-design/x";
+import { ArrowDownOutlined, ArrowUpOutlined, CheckCircleOutlined, InboxOutlined, FileTextOutlined, ShoppingOutlined, ThunderboltOutlined } from "@ant-design/icons";
+import { WorkspaceShell } from "./components/WorkspaceShell";
+import { BusinessResultCard, isUsableDisplay } from "./components/BusinessResultCard";
 import {
   type ApprovalPendingPayload,
   type SSEEvent,
@@ -35,6 +40,11 @@ import { BusinessApprovalSummary } from './components/BusinessApprovalSummary';
 import { SessionRequests } from './history';
 import { SessionHistory } from './components/SessionHistory';
 
+function MessageInput(props: GetProps<typeof Input.TextArea>) {
+  return <Input.TextArea {...props} aria-label="消息" />;
+}
+const SENDER_COMPONENTS = { input: MessageInput };
+
 const SESSION_KEY = "erpilot-session-id";
 const FRESH_SESSION_KEY = "erpilot-fresh-session-id";
 
@@ -66,7 +76,8 @@ export default function App() {
   const sessionIdRef = useRef<string>(sessionKey());
   const sessionRequests = useRef(new SessionRequests(sessionIdRef.current));
   const [historyOpen, setHistoryOpen] = useState(false);
-  const historyButton = useRef<HTMLButtonElement>(null);
+  const [businessOpen, setBusinessOpen] = useState(() => window.matchMedia("(min-width: 1200px)").matches);
+  const [businessTab, setBusinessTab] = useState("drafts");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<string>("");
@@ -132,6 +143,9 @@ export default function App() {
 
   // 等待时长每秒刷新；只更新显示，不写入消息内容
   const hasLiveTurn = turns.some(t => isAssistantTurn(t) && !isTerminalPhase(t.phase));
+  useEffect(() => {
+    if (pendingApprovals.length > 0 || pendingReconciliation) setBusinessTab("approvals");
+  }, [pendingApprovals.length, pendingReconciliation]);
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     if (!hasLiveTurn && !busy && pendingApprovals.length === 0) return;
@@ -285,7 +299,7 @@ export default function App() {
       setStatus(snapshot.status === "reconciliation_required"
         ? "写入结果待核对，可再次安全查询"
         : snapshot.status === "waiting_approval"
-        ? "待审批：请确认下方操作"
+        ? "待审批：请在业务面板确认操作"
         : snapshot.status === "interrupted" ? "任务中断，可继续恢复"
         : snapshot.status === "running" ? "任务仍在执行，正在同步状态…" : "");
       // 活跃连接正在流式更新当前轮次：快照不覆盖 turns，避免正文/工具重复
@@ -430,14 +444,6 @@ export default function App() {
     turns.some(t => isAssistantTurn(t) &&
       Object.values(t.tools).some(tool => tool.approval && !tool.approvalResolved));
   const canSend = canSendMessage(restoreState, sessionStatus, pendingApprovals.length, busy);
-  const renderedPendingIds = new Set(turns.flatMap(t => isAssistantTurn(t)
-    ? Object.values(t.tools)
-      .filter(tool => tool.approval && !tool.approvalResolved)
-      .map(tool => tool.approval!.pending_id)
-    : []));
-  const unmatchedPendingApprovals =
-    pendingApprovals.filter(item => !renderedPendingIds.has(item.pending_id));
-
   const respondApproval = useCallback(
     async (pendingId: string, approved: boolean) => {
       const ticket = sessionRequests.current.capture();
@@ -553,7 +559,7 @@ export default function App() {
     setSessionStatus(null);setInterrupted(false);
     setDrafts([]);setApprovalDrafts({});setApprovalOperations({});
     setDraftsError('');setDraftsLoading(false);setShowJump(false);followRef.current=true;
-    setHistoryOpen(false);historyButton.current?.focus();
+    setHistoryOpen(false);
     void refreshSession().catch(() => {});
   }, [busy, sessionStatus, refreshSession]);
 
@@ -574,6 +580,7 @@ export default function App() {
     followRef.current = true;
     scrollToEnd(true);
 
+    let streamFailure: string | null = null;
     liveConnection.current = true;
     try {
       await consumeEvents(streamChat(message, sessionIdRef.current));
@@ -583,21 +590,22 @@ export default function App() {
         setTurns(prev => prev.slice(0, -2));
         try { await refreshSession(); } catch { /* Keep recovery failure visible and locked. */ }
       }
-      setError(e instanceof Error ? e.message : String(e));
+      streamFailure = e instanceof Error ? e.message : String(e);
+      setError(streamFailure);
       setStatus("");
     } finally {
       if (!sessionRequests.current.isCurrent(ticket)) return;
       liveConnection.current = false;
+      if (streamFailure !== null) {
+        // Verify durable state after a failed stream; never retry business writes.
+        try {
+          await refreshSession();
+          if (sessionRequests.current.isCurrent(ticket)) setError(streamFailure);
+        } catch { /* Recovery failure retains the input lock and retry controls. */ }
+      }
       setBusy(false);
     }
   }, [input, canSend, hasPending, interrupted, consumeEvents, refreshSession]);
-
-  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      void send();
-    }
-  };
 
   const renderDraftApproval = (pending: ApprovalPendingPayload) => {
     const draft = approvalDrafts[pending.pending_id];
@@ -605,8 +613,8 @@ export default function App() {
     const expired = pending.expires_at != null && Date.parse(pending.expires_at)<=now;
     return <div className="approval draft-approval"><span className="approval-label">待审批 · 提交订单 · 原版本 {String(pending.arguments.revision)}</span>
       {draft && <DraftSummary draft={draft}/>}{(issue || expired) && <p role="status">{expired?'审批已过期，请拒绝后重新提交。':issue}</p>}
-      <button className="approve" disabled={!!issue||expired||draftsLoading||submittingApprovals.has(pending.pending_id)} onClick={()=>void respondApproval(pending.pending_id,true)}>批准</button>
-      <button className="deny" disabled={submittingApprovals.has(pending.pending_id)} onClick={()=>void respondApproval(pending.pending_id,false)}>拒绝</button>
+      <Button type="primary" className="approve" disabled={!!issue||expired||draftsLoading||submittingApprovals.has(pending.pending_id)} onClick={()=>void respondApproval(pending.pending_id,true)}>批准</Button>
+      <Button className="deny" disabled={submittingApprovals.has(pending.pending_id)} onClick={()=>void respondApproval(pending.pending_id,false)}>拒绝</Button>
     </div>;
   };
 
@@ -618,26 +626,13 @@ export default function App() {
     }}/>;
   };
 
-  return (
-    <div className="app">
-      <header>
-        <h1>Erpilot 掌柜助手</h1>
-        <span className="runtime-label">{runtimeLabel}</span>
-        <button ref={historyButton} className="new-session" aria-expanded={historyOpen} aria-controls="session-history-panel"
-          onClick={() => setHistoryOpen(value => !value)}>历史会话</button>
-        <button className="new-session" onClick={startNewSession}
-          disabled={busy || hasPending || interrupted || sessionStatus === 'running'}>新会话</button>
-        <span className="status" role="status">
-          {status || (restoreState === "loading" ? "加载会话…" : busy ? "生成中…" : "")}
-        </span>
-      </header>
-
-      {historyOpen && <div id="session-history-panel"><SessionHistory currentId={sessionIdRef.current}
-        locked={busy || sessionStatus === 'running'} onSelect={selectHistorySession}
-        onClose={() => {setHistoryOpen(false);historyButton.current?.focus();}} /></div>}
-
-      <div className="chat" ref={listRef} onScroll={onScroll}>
-        {draftsEnabled && <OrderDraftPanel key={sessionIdRef.current} drafts={drafts} loading={draftsLoading} error={draftsError} busy={busy && !hasPending} canSubmit={writesEnabled&&canSend&&!hasPending&&!interrupted} writesEnabled={writesEnabled} hasPending={hasPending}
+  const results = turns.flatMap(turn => isAssistantTurn(turn)
+    ? Object.values(turn.tools).filter(tool => isUsableDisplay(tool.display)).map(tool => ({ key: tool.id, display: tool.display! }))
+    : []);
+  const sessionLocked = busy || hasPending || interrupted || sessionStatus === 'running';
+  const inputLocked = !canSend || hasPending || interrupted;
+  const inspectApprovals = () => { setBusinessTab('approvals'); setBusinessOpen(true); };
+  const orderPanel = draftsEnabled ? <OrderDraftPanel key={sessionIdRef.current} drafts={drafts} loading={draftsLoading} error={draftsError} busy={busy && !hasPending} canSubmit={writesEnabled&&canSend&&!hasPending&&!interrupted} writesEnabled={writesEnabled} hasPending={hasPending}
           onRefresh={()=>void refreshDrafts()} onSave={async (draft,input)=>{
             const sessionId=sessionIdRef.current;
             const ticket=sessionRequests.current.capture();
@@ -651,96 +646,80 @@ export default function App() {
           }} onSubmit={draft=>{
             if (Date.parse(draft.expires_at)<=Date.now()) {void refreshDrafts();return;}
             void send(`请调用 submit_order_draft 提交草稿 ${draft.draft_id} 的版本 ${draft.revision}，并申请审批。`);
-          }} />}
-        {turns.length === 0 && (
-          <div className="empty">
-            试试问：「订单 123 里买了什么？还有货吗？有货的话报个价」
-          </div>
-        )}
-        {turns.map((turn, i) =>
-          turn.role === "user" ? (
-            <div className="bubble user" key={i}>
-              {turn.text}
-            </div>
-          ) : (
-            <AssistantMessage
-              key={i}
-              turn={turn}
-              now={now}
-              live={busy}
-              stalled={stalled}
-              submittingApprovals={submittingApprovals}
-              onRespond={(pendingId, approved) => void respondApproval(pendingId, approved)}
-              renderDraftApproval={renderDraftApproval}
-              renderBusinessApproval={renderBusinessApproval}
-              businessApprovalsEnabled={businessEnabled}
-            />
-          ),
-        )}
-        {unmatchedPendingApprovals.map(pending => (
-          requiresBusinessSummary(pending,businessEnabled) ? <div key={pending.pending_id}>{renderBusinessApproval(pending)}</div> :
-          pending.tool === 'submit_order_draft' ? <div key={pending.pending_id}>{renderDraftApproval(pending)}</div> :
-          <div className="approval" key={pending.pending_id}>
-            <span className="approval-label">
-              待审批 · {pending.tool} · 风险等级 {pending.risk}
-            </span>
-            <pre className="args">{JSON.stringify(pending.arguments)}</pre>
-            <button className="approve" disabled={submittingApprovals.has(pending.pending_id)}
-              onClick={() => void respondApproval(pending.pending_id, true)}>批准</button>
-            <button className="deny" disabled={submittingApprovals.has(pending.pending_id)}
-              onClick={() => void respondApproval(pending.pending_id, false)}>拒绝</button>
-          </div>
-        ))}
-        {sessionStatus === "waiting_approval" && pendingApprovals.length === 0 && (
-          <div className="error" role="status">任务仍在等待审批；审批详情暂不可用，请刷新会话状态。</div>
-        )}
-        {restoreState === "recovery_failed" && (
-          <div className="error" role="alert">
-            会话恢复失败，当前输入已锁定。请重试恢复，或显式开始新会话。
-          </div>
-        )}
-        {error && <div className="error" role="alert">{error}</div>}
-        {showJump && (busy || hasLiveTurn) && (
-          <button className="jump-latest" onClick={() => {
-            followRef.current = true;
-            scrollToEnd(true);
-            setShowJump(false);
-          }}>
-            回到最新 ↓
-          </button>
-        )}
-      </div>
-
-      <footer>
-        {restoreState === "recovery_failed" && (
-          <>
-            <button onClick={() => void refreshSession().catch(() => {})}>重试恢复</button>
-            <button onClick={startNewSession}>开始新会话</button>
-          </>
-        )}
-        {interrupted && (
-          <button onClick={() => void continueInterrupted()} disabled={busy || restoreState === "loading"}>
-            {sessionStatus === "reconciliation_required" ? "再次核对" : "继续恢复"}
-          </button>
-        )}
-        {(pendingApprovals.length > 0 || pendingReconciliation) && (
-          <button onClick={() => void cancelPending()} disabled={busy}>
-            取消待处理操作
-          </button>
-        )}
-        <textarea
-          aria-label="消息"
-          value={input}
-          placeholder="输入消息，Enter 发送，Shift+Enter 换行"
-          rows={2}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={onKeyDown}
-          disabled={!canSend || hasPending || interrupted}
-        />
-        <button onClick={() => void send()} disabled={!canSend || hasPending || interrupted || !input.trim()}>
-          发送
-        </button>
-      </footer>
+          }} /> :
+    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前环境尚未开放订单草稿" />;
+  const approvalPanel = <div className="approval-list">
+    {pendingApprovals.length === 0 ? <Empty image={<CheckCircleOutlined />} description="暂无待处理审批" /> :
+      pendingApprovals.map(pending => <div key={pending.pending_id}>
+        {requiresBusinessSummary(pending, businessEnabled) ? renderBusinessApproval(pending) :
+          pending.tool === 'submit_order_draft' ? renderDraftApproval(pending) :
+          <section className="approval" aria-label="操作审批">
+            <h3>待审批 · {pending.tool}</h3><Tag>风险等级 {pending.risk}</Tag>
+            <pre className="args">{JSON.stringify(pending.arguments, null, 2)}</pre>
+            {pending.expires_at && Date.parse(pending.expires_at) <= now && <Alert type="warning" title="审批已过期，请拒绝后重新准备。" />}
+            <div className="approval-actions"><Button type="primary" className="approve"
+              disabled={submittingApprovals.has(pending.pending_id) || (pending.expires_at != null && Date.parse(pending.expires_at) <= now)}
+              onClick={() => void respondApproval(pending.pending_id, true)}>批准</Button>
+              <Button className="deny" disabled={submittingApprovals.has(pending.pending_id)}
+                onClick={() => void respondApproval(pending.pending_id, false)}>拒绝</Button></div>
+          </section>}
+      </div>)}
+    {pendingReconciliation && <Alert type="warning" showIcon title="操作结果待核对" description="请再次核对后继续处理，避免重复写入。" />}
+  </div>;
+  const business = <Tabs className="business-tabs" activeKey={businessTab} onChange={setBusinessTab} items={[
+    { key: 'drafts', label: '订单草稿', children: orderPanel },
+    { key: 'approvals', label: <span>审批 {pendingApprovals.length > 0 && <span className="tab-count">{pendingApprovals.length}</span>}</span>, children: approvalPanel },
+    { key: 'results', label: '业务结果', children: <div className="business-results">
+      {results.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="查询或操作完成后，结果会显示在这里" /> :
+        results.map((result, index) => <BusinessResultCard key={result.key + '-' + index} display={result.display} />)}
+    </div> },
+  ]} />;
+  const composer = <>
+    <div className="recovery-actions">
+      {restoreState === 'recovery_failed' && <><Button onClick={() => void refreshSession().catch(() => {})}>重试恢复</Button><Button onClick={startNewSession}>开始新会话</Button></>}
+      {interrupted && <Button onClick={() => void continueInterrupted()} disabled={busy || restoreState === 'loading'}>
+        {sessionStatus === 'reconciliation_required' ? '再次核对' : '继续恢复'}</Button>}
+      {(pendingApprovals.length > 0 || pendingReconciliation) && <Button onClick={() => void cancelPending()} disabled={busy}>取消待处理操作</Button>}
     </div>
-  );
+    <Sender value={input} onChange={setInput} onSubmit={message => void send(message)} disabled={inputLocked}
+      autoSize={{ minRows: 2, maxRows: 6 }} placeholder={hasPending ? '请先处理待审批操作' : interrupted ? '请先恢复或核对当前任务' : '描述你要处理的业务…'}
+      components={SENDER_COMPONENTS}
+      suffix={(_, { components: { SendButton } }) => <SendButton type="primary" shape="circle" icon={<ArrowUpOutlined />} aria-label="发送"
+        disabled={inputLocked || !input.trim()} />}
+      footer={<div className="composer-footer"><span>{hasPending ? '操作等待你的确认' : busy ? '正在处理，请稍候' : 'Enter 发送 · Shift + Enter 换行'}</span>
+        <span><CheckCircleOutlined /> 写入操作需审批</span></div>} />
+  </>;
+  return <WorkspaceShell sidebar={<SessionHistory currentId={sessionIdRef.current} locked={busy || sessionStatus === 'running'} onSelect={selectHistorySession} />}
+    composer={composer} business={business} runtimeLabel={runtimeLabel}
+    status={status || (restoreState === 'loading' ? '正在恢复会话…' : busy ? '正在处理…' : '')}
+    historyOpen={historyOpen} businessOpen={businessOpen} sessionLocked={sessionLocked}
+    onHistoryOpen={setHistoryOpen} onBusinessOpen={setBusinessOpen} onNewSession={startNewSession}>
+    <div className="chat" ref={listRef} onScroll={onScroll}>
+      <div className="conversation-content">
+        {turns.length === 0 && restoreState !== 'recovery_failed' && <div className="welcome">
+          <div className="welcome-symbol"><ThunderboltOutlined /></div>
+          <h2>今天，想处理什么业务？</h2><p>查询订单、核对库存、整理报价。<br />把需求告诉我，我们一步步完成。</p>
+          <Prompts className="welcome-prompts" items={[
+            { key: 'order', icon: <ShoppingOutlined />, label: '查询订单', description: '查看商品与订单明细' },
+            { key: 'stock', icon: <InboxOutlined />, label: '核对库存', description: '确认可售数量' },
+            { key: 'quote', icon: <FileTextOutlined />, label: '整理报价', description: '核对价格与商品数量' },
+          ]} onItemClick={({ data }) => setInput(data.key === 'order' ? '帮我查询订单：' : data.key === 'stock' ? '帮我查询商品库存，SKU：' : '帮我整理商品报价，商品与数量：')} />
+        </div>}
+        {turns.map((turn, i) => turn.role === 'user' ? <Bubble key={i} className="user-message" placement="end" content={turn.text} /> :
+          <AssistantMessage key={i} turn={turn} now={now} live={busy} stalled={stalled}
+            submittingApprovals={submittingApprovals} onRespond={(id, approved) => void respondApproval(id, approved)}
+            renderDraftApproval={renderDraftApproval} renderBusinessApproval={renderBusinessApproval}
+            businessApprovalsEnabled={businessEnabled} onInspectApproval={inspectApprovals} />)}
+        {hasPending && <Alert className="pending-notice" type="warning" showIcon title={pendingReconciliation ? '有操作结果需要核对' : '有操作等待你确认'}
+          description="请查看业务面板中的明细，再继续处理。" action={<Button size="small" onClick={inspectApprovals}>查看审批</Button>} />}
+        {sessionStatus === 'waiting_approval' && pendingApprovals.length === 0 && <Alert type="warning" showIcon
+          title="审批详情暂不可用" description="任务仍在等待审批，请刷新会话状态。" action={<Button onClick={() => void refreshSession().catch(() => {})}>刷新状态</Button>} />}
+        {restoreState === 'recovery_failed' && <Alert type="error" showIcon title="会话恢复失败" description="当前输入已锁定。请重试恢复，或开始新会话。" />}
+        {error && <Alert type="error" showIcon title={error} />}
+      </div>
+    </div>
+    {showJump && (busy || hasLiveTurn) && <Button className="jump-latest" icon={<ArrowDownOutlined />} onClick={() => {
+      followRef.current = true; scrollToEnd(true); setShowJump(false);
+    }}>回到最新</Button>}
+  </WorkspaceShell>;
 }

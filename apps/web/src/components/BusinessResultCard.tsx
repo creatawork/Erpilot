@@ -3,6 +3,9 @@
  * 数据取自后端展示适配器的 versioned display 字段——不通过模型正文提取，
  * 不重新计算金额。未知 kind/version 或字段校验失败返回 null，调用方回退通用详情。
  */
+import { Card, Tag } from "antd";
+import { CancellationAssessmentCard, isUsableAssessmentDisplay } from './CancellationAssessmentCard';
+import type { ReactNode } from "react";
 import type {
   BusinessDisplay,
   OrderCreationDisplay,
@@ -11,6 +14,7 @@ import type {
 } from "../protocol";
 
 export function isUsableDisplay(display: BusinessDisplay | null | undefined): boolean {
+  if (display?.kind === 'cancellation_assessment') return isUsableAssessmentDisplay(display);
   if (!display || display.version !== 1) return false;
   for (const field of ["sku", "message", "hint", "error_code", "order_id", "customer", "status"]) {
     const value = (display as unknown as Record<string, unknown>)[field];
@@ -33,82 +37,45 @@ export function isUsableDisplay(display: BusinessDisplay | null | undefined): bo
   }
 }
 
-const OUTCOME_LABEL: Record<string, string> = {
-  succeeded: "成功",
-  failed: "失败",
-  denied: "未执行",
-  unknown: "结果未知",
-};
+const OUTCOME_LABEL: Record<string, string> = { succeeded: '成功', failed: '失败', denied: '未执行', unknown: '结果未知' };
 
 export function BusinessResultCard({ display }: { display: BusinessDisplay }) {
+  if (isUsableAssessmentDisplay(display)) return <CancellationAssessmentCard display={display}/>;
   if (!isUsableDisplay(display)) return null;
-  if(display.outcome==='failed'||display.outcome==='denied')return <div className={`card ${display.outcome}`}><div className="card-head"><span className="card-title">{display.kind==='order_cancellation'?'取消订单':'库存调整'}</span><Outcome outcome={display.outcome}/></div><div className="card-body">{display.message}{display.hint&&<p>{display.hint}</p>}</div></div>;
-  switch (display.kind) {
-    case "stock_query": {
-      const { sku, quantity, available } = display as StockQueryDisplay;
-      if (typeof quantity !== "number") return null;
-      return (
-        <div className={`card ${display.outcome}`}>
-          <div className="card-head">
-            <span className="card-title">库存查询{sku ? ` · ${sku}` : ""}</span>
-            <Outcome outcome={display.outcome} />
-          </div>
-          <div className="card-body">
-            当前库存 <strong>{quantity}</strong> 件
-            {typeof available === "boolean" ? (available ? " · 有货" : " · 无货") : ""}
-            {display.error_code ? ` · ${display.error_code}` : ""}
-            {display.message ? ` · ${display.message}` : ""}
-          </div>
-        </div>
-      );
+  let title = ''; let content: ReactNode;
+  if (display.outcome === 'failed' || display.outcome === 'denied') {
+    title = display.kind === 'order_cancellation' ? '取消订单' : '库存调整';
+    content = <>{display.message}{display.hint && <p>{display.hint}</p>}</>;
+  } else {
+    switch (display.kind) {
+      case 'stock_query': {
+        const { sku, quantity, available } = display as StockQueryDisplay;
+        title = '库存查询' + (sku ? ' · ' + sku : '');
+        content = <>当前库存 <strong>{quantity}</strong> 件{typeof available === 'boolean' ? (available ? ' · 有货' : ' · 无货') : ''}
+          {display.error_code ? ' · ' + display.error_code : ''}{display.message ? ' · ' + display.message : ''}</>;
+        break;
+      }
+      case 'stock_adjustment': {
+        const { sku, delta, quantity_after } = display as StockAdjustmentDisplay;
+        title = '库存调整' + (sku ? ' · ' + sku : '');
+        content = <>{delta > 0 ? '入库 ' + delta : '出库 ' + -delta} 件 · 调整后 <strong>{quantity_after}</strong> 件
+          {display.message ? ' · ' + display.message : ''}</>;
+        break;
+      }
+      case 'order_creation':
+      case 'order_cancellation': {
+        const { order_id, customer, status, total_amount } = display as unknown as OrderCreationDisplay;
+        title = display.kind === 'order_creation' ? '订单创建' : '取消订单';
+        content = <>订单 <strong>{order_id}</strong>{customer ? ' · ' + customer : ''}{status ? ' · ' + status : ''}
+          {typeof total_amount === 'number' ? (display.kind === 'order_cancellation' ? ' · 原单金额 ¥' : ' · ¥') + total_amount.toFixed(2) : ''}
+          {display.error_code ? ' · ' + display.error_code : ''}{display.message ? ' · ' + display.message : ''}</>;
+        break;
+      }
+      default: return null;
     }
-    case "stock_adjustment": {
-      const { sku, delta, quantity_after } = display as StockAdjustmentDisplay;
-      if (typeof delta !== "number" || typeof quantity_after !== "number") return null;
-      return (
-        <div className={`card ${display.outcome}`}>
-          <div className="card-head">
-            <span className="card-title">库存调整{sku ? ` · ${sku}` : ""}</span>
-            <Outcome outcome={display.outcome} />
-          </div>
-          <div className="card-body">
-            {delta > 0 ? `入库 ${delta}` : `出库 ${-delta}`} 件 ·
-            调整后 <strong>{quantity_after}</strong> 件
-            {display.message ? ` · ${display.message}` : ""}
-          </div>
-        </div>
-      );
-    }
-    case "order_creation": {
-      const { order_id, customer, status, total_amount } =
-        display as OrderCreationDisplay;
-      if (!order_id) return null;
-      return (
-        <div className={`card ${display.outcome}`}>
-          <div className="card-head">
-            <span className="card-title">订单创建</span>
-            <Outcome outcome={display.outcome} />
-          </div>
-          <div className="card-body">
-            订单 <strong>{order_id}</strong>
-            {customer ? ` · ${customer}` : ""}
-            {status ? ` · ${status}` : ""}
-            {typeof total_amount === "number" ? ` · ¥${total_amount.toFixed(2)}` : ""}
-            {display.error_code ? ` · ${display.error_code}` : ""}
-            {display.message ? ` · ${display.message}` : ""}
-          </div>
-        </div>
-      );
-    }
-    case "order_cancellation": {
-      const {order_id,customer,status,total_amount}=display as unknown as OrderCreationDisplay;
-      return <div className={`card ${display.outcome}`}><div className="card-head"><span className="card-title">取消订单</span><Outcome outcome={display.outcome}/></div><div className="card-body">订单 <strong>{order_id}</strong>{customer?` · ${customer}`:''}{status?` · ${status}`:''}{typeof total_amount==='number'?` · 原单金额 ¥${total_amount.toFixed(2)}`:''}{display.message?` · ${display.message}`:''}</div></div>;
-    }
-    default:
-      return null; // 未知 kind：回退通用结果详情
   }
-}
-
-function Outcome({ outcome }: { outcome: string }) {
-  return <span className={`card-outcome ${outcome}`}>{OUTCOME_LABEL[outcome] ?? outcome}</span>;
+  return <Card size="small" className={'card ' + display.outcome} title={<span className="card-title">{title}</span>}
+    extra={<Tag color={display.outcome === 'succeeded' ? 'success' : display.outcome === 'failed' ? 'error' : undefined}>{OUTCOME_LABEL[display.outcome] ?? display.outcome}</Tag>}>
+    <div className="card-body">{content}</div>
+  </Card>;
 }

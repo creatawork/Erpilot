@@ -7,22 +7,20 @@ import type { ApprovalPendingPayload } from "../protocol";
 import type { AssistantTurn, ToolEntity } from "../session";
 import { toolStatusLabel, toolSummary, toolTitle } from "../session";
 import { BusinessResultCard, isUsableDisplay } from "./BusinessResultCard";
+import { isUsableAssessmentDisplay } from './CancellationAssessmentCard';
 import { MarkdownContent } from "./MarkdownContent";
 import { ReasoningPanel } from "./ReasoningPanel";
 import { WorkTimeline } from "./WorkTimeline";
 import type { ReactNode } from 'react';
+import { Bubble } from '@ant-design/x';
+import { Button, Tag } from 'antd';
+import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, LoadingOutlined, PauseCircleOutlined, QuestionCircleOutlined, StopOutlined, UndoOutlined } from '@ant-design/icons';
 import { isBusinessApproval, requiresBusinessSummary } from '../operations';
 
-const STATUS_ICON: Record<ToolEntity["status"], string> = {
-  prepared: "⋯",
-  waiting_approval: "⏸",
-  running: "⋯",
-  succeeded: "✓",
-  failed: "✗",
-  denied: "⊘",
-  expired: "⌛",
-  cancelled: "↩",
-  unknown: "?",
+const STATUS_ICON: Record<ToolEntity['status'], ReactNode> = {
+  prepared: <ClockCircleOutlined />, waiting_approval: <PauseCircleOutlined />, running: <LoadingOutlined />,
+  succeeded: <CheckCircleOutlined />, failed: <CloseCircleOutlined />, denied: <StopOutlined />,
+  expired: <ClockCircleOutlined />, cancelled: <UndoOutlined />, unknown: <QuestionCircleOutlined />,
 };
 
 function ToolCard({
@@ -33,6 +31,7 @@ function ToolCard({
   renderDraftApproval,
   renderBusinessApproval,
   businessApprovalsEnabled = false,
+  onInspectApproval,
 }: {
   entity: ToolEntity;
   now: number;
@@ -41,18 +40,20 @@ function ToolCard({
   renderDraftApproval?: (pending: ApprovalPendingPayload) => ReactNode;
   renderBusinessApproval?: (pending: ApprovalPendingPayload) => ReactNode;
   businessApprovalsEnabled?: boolean;
+  onInspectApproval?: () => void;
 }) {
   const summary = toolSummary(entity);
   return (
-    <details className="tool" open={!isSettled(entity)}>
+    <details className="tool" open={!isSettled(entity) || isUsableAssessmentDisplay(entity.display)}>
       <summary>
         <span className={`tool-icon ${entity.status}`}>{STATUS_ICON[entity.status]}</span>
         <span className="tool-name">{toolTitle(entity.name)}</span>
         {summary && <span className="tool-summary">{summary}</span>}
-        <span className="tool-status">{toolStatusLabel(entity)}</span>
+        <Tag className="tool-status" color={entity.status === "succeeded" ? "success" : entity.status === "failed" ? "error" : entity.status === "waiting_approval" ? "warning" : undefined}>{toolStatusLabel(entity)}</Tag>
       </summary>
-      {isBusinessApproval(entity.name)?<details><summary>技术详情</summary><pre className="args">{entity.arguments}</pre></details>:<pre className="args">{entity.arguments}</pre>}
+      <details className="tool-technical"><summary>{isBusinessApproval(entity.name) ? "技术详情" : "调用参数"}</summary><pre className="args">{entity.arguments}</pre></details>
       {entity.approval && !entity.approvalResolved && (
+        onInspectApproval ? <div className="tool-approval-link"><span>操作需要你确认</span><Button size="small" onClick={onInspectApproval}>查看审批</Button></div> :
         requiresBusinessSummary(entity.approval,businessApprovalsEnabled) && renderBusinessApproval ? renderBusinessApproval(entity.approval) : entity.approval.tool === 'submit_order_draft' && renderDraftApproval ? renderDraftApproval(entity.approval) : <ApprovalActions
           pending={entity.approval}
           businessApprovalsEnabled={businessApprovalsEnabled}
@@ -101,22 +102,22 @@ function ApprovalActions({
         {expired ? "审批已过期" : "待审批"} · 风险等级 {pending.risk}
       </span>
       {expired ? (
-        <button className="deny" disabled={submittingApprovals.has(pending.pending_id)}
+        <Button className="deny" disabled={submittingApprovals.has(pending.pending_id)}
           onClick={() => onRespond(pending.pending_id, false)}>
           收口过期审批
-        </button>
+        </Button>
       ) : (
         <>
-          <button
-            className="approve"
+          <Button
+            type="primary" className="approve"
             disabled={submittingApprovals.has(pending.pending_id)||requiresBusinessSummary(pending,businessApprovalsEnabled)}
             onClick={() => onRespond(pending.pending_id, true)}
-          >批准</button>
-          <button
+          >批准</Button>
+          <Button
             className="deny"
             disabled={submittingApprovals.has(pending.pending_id)}
             onClick={() => onRespond(pending.pending_id, false)}
-          >拒绝</button>
+          >拒绝</Button>
         </>
       )}
     </div>
@@ -133,6 +134,7 @@ export function AssistantMessage({
   renderDraftApproval,
   renderBusinessApproval,
   businessApprovalsEnabled = false,
+  onInspectApproval,
 }: {
   turn: AssistantTurn;
   now: number;
@@ -143,10 +145,12 @@ export function AssistantMessage({
   renderDraftApproval?: (pending: ApprovalPendingPayload) => ReactNode;
   renderBusinessApproval?: (pending: ApprovalPendingPayload) => ReactNode;
   businessApprovalsEnabled?: boolean;
+  onInspectApproval?: () => void;
 }) {
   const showCursor = live && turn.phase === "generating";
   return (
-    <div className="bubble assistant">
+    <Bubble className="assistant-message" variant="borderless" header={<span className="assistant-name">掌柜助手</span>}
+      avatar={<span className="assistant-avatar">e</span>} content={<div className="assistant-body">
       <WorkTimeline turn={turn} now={now} stalled={stalled} />
       {turn.blocks.map(block => {
         if (block.type === "reasoning") {
@@ -158,9 +162,9 @@ export function AssistantMessage({
           if (!block.text) return null;
           return (
             <div className="text" key={block.id}>
-              <MarkdownContent text={block.text} />
+              <MarkdownContent text={block.text} streaming={showCursor && block === turn.blocks[turn.blocks.length - 1]} />
               {showCursor && block === turn.blocks[turn.blocks.length - 1] && (
-                <span className="cursor">▍</span>
+                <span className="cursor" />
               )}
             </div>
           );
@@ -175,11 +179,12 @@ export function AssistantMessage({
             renderDraftApproval={renderDraftApproval}
             renderBusinessApproval={renderBusinessApproval}
             businessApprovalsEnabled={businessApprovalsEnabled}
+            onInspectApproval={onInspectApproval}
           />
         );
       })}
-      {showCursor && turn.blocks.length === 0 && <span className="cursor">▍</span>}
-    </div>
+      {showCursor && turn.blocks.length === 0 && <span className="cursor" />}
+    </div>} />
   );
 }
 
