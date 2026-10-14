@@ -4,11 +4,10 @@ from decimal import Decimal
 
 import pytest
 from agent_core.llm import LLMClient, LLMConfig, StreamEnd, TextDelta, Usage
-
 from evals.billing import (
     BillingEstimate,
-    BudgetExhausted,
     BudgetedClient,
+    BudgetExhausted,
     CurrencyBudget,
     EndpointRate,
     endpoint_rate,
@@ -189,7 +188,10 @@ def test_budget_validates_construction() -> None:
 
 def test_budgeted_client_rejects_currency_mismatch() -> None:
     with pytest.raises(ValueError, match="币种"):
-        BudgetedClient(_StubStreamClient(), _rate(currency="USD"), CurrencyBudget(Decimal("1"), "CNY", max_requests=10))
+        BudgetedClient(
+            _StubStreamClient(), _rate(currency="USD"),
+            CurrencyBudget(Decimal("1"), "CNY", max_requests=10),
+        )
 
 
 async def test_wrapper_quotes_streams_and_blocks_exhausted_next_request():

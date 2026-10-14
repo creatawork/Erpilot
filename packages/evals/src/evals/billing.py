@@ -210,7 +210,10 @@ class CurrencyBudget:
             return "存在计量未知的请求（缺失 usage 已按可能计费处理），已停止后续请求"
         if self.requests >= self.max_requests:
             return f"请求次数达到熔断上限（{self.requests} ≥ {self.max_requests}）"
-        return f"已花 {self.spent.quantize(_AMOUNT_QUANTUM)} {self.currency} ≥ 上限 {self.limit} {self.currency}"
+        return (
+            f"已花 {self.spent.quantize(_AMOUNT_QUANTUM)} {self.currency}"
+            f" ≥ 上限 {self.limit} {self.currency}"
+        )
 
     def before_request(self) -> None:
         """每次真实请求前调用：预算已尽抛 BudgetExhausted，占用一个请求名额。"""
