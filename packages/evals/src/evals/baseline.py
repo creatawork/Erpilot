@@ -22,6 +22,7 @@ from evals.cases import ALL_CASES
 from evals.checks import SCORER_VERSION
 from evals.context import resolve
 from evals.model import CaseResult, EvalCase
+from evals.policy_cases import B5_SCORER_VERSION
 from evals.report import source_provenance, write_report
 from evals.runner import Budget, run_case
 from evals.write_cases import WRITE_CASES
@@ -51,6 +52,10 @@ async def run_baseline(
     started = time.monotonic()
     approval_ids = {c.id for c in APPROVAL_CASES}
     write_ids = {c.id for c in WRITE_CASES} | approval_ids
+    # B5 用例集要求完整写工具可见且 AutoDeny 兜底，不能靠削断写面宣称零写入。
+    case_ids = {c.id for c in cases}
+    b5_ids = case_ids & {c.id for c in cases if c.id.startswith("b5-")}
+    write_ids |= b5_ids
     provenance = source_provenance()
     metadata = {
         "kind": "full" if [c.id for c in cases] == [c.id for c in BASELINE_CASES] else "targeted",
@@ -70,6 +75,8 @@ async def run_baseline(
         "state_checks": sum(c.state is not None for c in cases),
         "complete": False,
     }
+    if b5_ids:
+        metadata["b5_scorer_version"] = B5_SCORER_VERSION
 
     def checkpoint(path=None):
         pending = [CaseResult(

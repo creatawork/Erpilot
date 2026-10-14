@@ -26,6 +26,7 @@ from sqlalchemy.engine import Engine
 from evals.billing import BillingEstimate, BudgetedClient
 from evals.checks import evaluate_case
 from evals.model import CaseResult, EvalCase, ToolResult
+from evals.policy_cases import check_policy_result
 from evals.state import check_state, snapshot
 
 
@@ -267,6 +268,10 @@ async def run_case(
             cost_complete=cost_complete and _cost_of(client, measured) is not None,
             billing=_billing_of(client),
         )
+        if case.id.startswith("b5-") and before is not None and state_engine is not None:
+            result.failed_checks.extend(
+                check_policy_result(case.id, result, before, snapshot(state_engine))
+            )
         return result, trace_path
 
     raise AssertionError("unreachable：重试循环必须 return 或 continue")

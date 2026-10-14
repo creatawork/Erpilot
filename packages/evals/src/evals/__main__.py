@@ -10,6 +10,7 @@ from openai import AsyncOpenAI
 
 from evals.baseline import BASELINE_CASES, run_baseline
 from evals.billing import BudgetedClient, CurrencyBudget, endpoint_rate
+from evals.policy_cases import POLICY_CASES
 from evals.runner import Budget
 
 
@@ -22,9 +23,12 @@ def main() -> None:
     parser.add_argument("--budget-currency", default=None, choices=["CNY", "USD"],
                         help="按原币种计费预算运行（缺省保留旧 CNY cost 预算路径）")
     parser.add_argument("--case", action="append", default=[], help="case id，可重复；缺省完整集")
+    parser.add_argument("--suite", default="baseline", choices=["baseline", "b5"],
+                        help="case 集：缺省既有完整基线；b5 为 B5 政策联合判断 7 条")
     parser.add_argument("--timeout", type=float, default=30, help="单次模型请求超时秒数")
     args = parser.parse_args()
-    cases = [c for c in BASELINE_CASES if not args.case or c.id in args.case]
+    suite_cases = POLICY_CASES if args.suite == "b5" else BASELINE_CASES
+    cases = [c for c in suite_cases if not args.case or c.id in args.case]
     unknown = set(args.case) - {c.id for c in cases}
     if unknown or args.budget <= 0 or args.timeout <= 0:
         parser.error(f"未知 case {sorted(unknown)} 或预算/超时非正数")
