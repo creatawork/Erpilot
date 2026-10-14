@@ -23,6 +23,7 @@ from agent_core.trace import JsonlTraceRecorder, new_trace_path
 from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy.engine import Engine
 
+from evals.billing import BillingEstimate, BudgetedClient
 from evals.checks import evaluate_case
 from evals.model import CaseResult, EvalCase, ToolResult
 from evals.state import check_state, snapshot
@@ -81,6 +82,7 @@ def _run_error_result(
     usage: Usage | None = None,
     cost: float | None = None,
     tool_results: Sequence[ToolResult] = (),
+    billing: BillingEstimate | None = None,
 ) -> CaseResult:
     return CaseResult(
         case_id=case.id,
@@ -97,6 +99,7 @@ def _run_error_result(
         cost=cost,
         cost_complete=False,
         tool_results=list(tool_results),
+        billing=billing,
     )
 
 
@@ -129,6 +132,11 @@ async def run_case(
     # 整轮重跑可能重复模型已发起的写操作；写工具面仅重试工具执行，不重跑任务。
     if any(t.risk for t in tools):
         retries = 0
+    # 计费包装模式禁用整轮重试：预算 / 计量 / 重试策略由包装层把关，
+    # 重试语义差异在报告里注明，不与旧重试策略的报告混比。
+    if isinstance(client, BudgetedClient):
+        retries = 0
+        client.begin_case()
     measured = Usage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
     cost_complete = True
     all_tool_results: list[ToolResult] = []
@@ -205,6 +213,7 @@ async def run_case(
                 usage=measured,
                 cost=_cost_of(client, measured),
                 tool_results=all_tool_results,
+                billing=_billing_of(client),
             )
             if case.state and before is not None and state_engine is not None:
                 result.failed_checks.extend(check_state(case.state, before, snapshot(state_engine)))
@@ -256,10 +265,16 @@ async def run_case(
             attempts=attempt,
             tool_results=all_tool_results,
             cost_complete=cost_complete and _cost_of(client, measured) is not None,
+            billing=_billing_of(client),
         )
         return result, trace_path
 
     raise AssertionError("unreachable：重试循环必须 return 或 continue")
+
+
+def _billing_of(client: LLMClient) -> BillingEstimate | None:
+    """wrapper 模式下取本 case 的计费增量；原路径返回 None 不改变旧契约。"""
+    return client.case_billing() if isinstance(client, BudgetedClient) else None
 
 
 def _cost_of(client: LLMClient, usage: Usage | None) -> float | None:

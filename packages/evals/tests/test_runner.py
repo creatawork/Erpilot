@@ -374,3 +374,99 @@ async def test_write_run_error_does_not_replay_run_and_keeps_partial_metering(tm
     assert result.total_tokens > 0 and result.cost > 0
     assert not result.cost_complete
     assert result.tool_results[0].succeeded
+
+
+# ---- M06-02：BudgetedClient 集成（预算熔断不改旧 CNY cost 契约） ----
+
+
+def _billing_rate():
+    from decimal import Decimal
+
+    from evals.billing import EndpointRate
+
+    return EndpointRate(
+        model="glm-5.3-flash",
+        endpoint_host="llm.test",
+        currency="USD",
+        input_per_m=Decimal("0.045"),
+        output_per_m=Decimal("0.18"),
+        price_source="test-fixture",
+    )
+
+
+async def test_run_case_records_wrapper_billing_and_keeps_cny_cost(resolved, tools, tmp_path):
+    from decimal import Decimal
+
+    from evals.billing import BudgetedClient, CurrencyBudget
+
+    client = BudgetedClient(_mock_client(resolved["order_id"]), _billing_rate(),
+                            CurrencyBudget(Decimal("1"), "USD", max_requests=5))
+    result, _ = await run_case(_case(), client=client, tools=tools, resolved=resolved,
+                               trace_dir=tmp_path)
+    assert result.passed, result.failed_checks
+    # agent 循环这条 case 有两次模型请求：工具轮 usage(13,7) + 文本轮 usage(10,5)。
+    assert result.billing is not None
+    assert result.billing.currency == "USD"
+    assert result.billing.cache_assumption == "uncached_upper_bound"
+    assert Decimal(result.billing.estimated_amount) == Decimal("0.000003")
+    assert client.budget.spent == Decimal("0.000003")
+    # GLM 的旧 CNY cost 契约保持原样，没有混入 USD 数值。
+    assert result.cost is not None and result.cost > 0 and result.cost_complete
+
+
+async def test_wrapper_budget_exhaustion_blocks_next_case_before_http(resolved, tools, tmp_path):
+    from decimal import Decimal
+
+    from evals.billing import BudgetedClient, CurrencyBudget
+
+    calls: list[bool] = []
+
+    def counting_client():
+        base = _mock_client(resolved["order_id"])
+        original = base.stream_chat
+
+        async def counted(*args, **kwargs):
+            calls.append(True)
+            async for event in original(*args, **kwargs):
+                yield event
+
+        base.stream_chat = counted
+        return base
+
+    client = BudgetedClient(counting_client(), _billing_rate(),
+                            CurrencyBudget(Decimal("1"), "USD", max_requests=2))
+    result, _ = await run_case(_case(), client=client, tools=tools, resolved=resolved,
+                               trace_dir=tmp_path)
+    assert result.passed  # 首条 case 正好用满 2 次请求（工具轮 + 文本轮）
+    blocked, _ = await run_case(_case(), client=client, tools=tools, resolved=resolved,
+                                trace_dir=tmp_path)
+    assert len(calls) == 2  # 第二条 case 的请求未到 HTTP 层
+    assert not blocked.passed and not blocked.completed
+    assert "BudgetExhausted" in blocked.error
+
+
+async def test_missing_usage_marks_billing_unknown_and_blocks_following_case(
+    resolved, tools, tmp_path
+):
+    from decimal import Decimal
+
+    from evals.billing import BudgetedClient, CurrencyBudget
+
+    calls: list[bool] = []
+
+    def handler(request):
+        calls.append(True)
+        return sse_response([chunk(delta={"content": "完成，但没有回 usage 包"})])
+
+    client = BudgetedClient(make_client(handler), _billing_rate(),
+                            CurrencyBudget(Decimal("1"), "USD", max_requests=10))
+    first, _ = await run_case(_case(), client=client, tools=tools, resolved=resolved,
+                              trace_dir=tmp_path)
+    assert first.billing is not None
+    assert first.billing.estimated_amount is None
+    assert first.billing.cache_assumption == "unknown_usage"
+    assert first.billing.complete is False and not first.cost_complete
+    second, _ = await run_case(_case(), client=client, tools=tools, resolved=resolved,
+                               trace_dir=tmp_path)
+    assert len(calls) == 1  # 不知道费用 ≠ 没有费用：后续请求全部停止
+    assert "BudgetExhausted" in (second.error or "")

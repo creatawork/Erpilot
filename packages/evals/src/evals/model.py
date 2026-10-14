@@ -2,8 +2,9 @@
 
 from enum import StrEnum
 from typing import Any, Literal
-
 from pydantic import BaseModel, Field
+
+from evals.billing import BillingEstimate
 
 
 class CaseCategory(StrEnum):
@@ -103,6 +104,10 @@ class CaseResult(BaseModel):
     )
     tool_results: list["ToolResult"] = Field(default_factory=list)
     cost_complete: bool = True
+    billing: BillingEstimate | None = Field(
+        default=None,
+        description="M06 支线：本 case 增量的原币种计费估算；None = 未启用计费包装",
+    )
 
 
 class ToolResult(BaseModel):
