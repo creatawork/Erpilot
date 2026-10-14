@@ -17,6 +17,7 @@ from mcp_erp import build_agent_tools_async
 
 from evals.approval_cases import APPROVAL_CASES
 from evals.approval_policy import ScriptedPolicyGate
+from evals.billing import BudgetedClient, CurrencyBudget, format_amount
 from evals.cases import ALL_CASES
 from evals.checks import SCORER_VERSION
 from evals.context import resolve
@@ -30,9 +31,22 @@ BASELINE_SEED_NOW = datetime(2026, 10, 7, 12, tzinfo=timezone(timedelta(hours=8)
 
 
 async def run_baseline(
-    cases: Sequence[EvalCase], *, client: LLMClient, budget: Budget,
+    cases: Sequence[EvalCase], *, client: LLMClient,
+    budget: Budget | None = None, currency_budget: CurrencyBudget | None = None,
     report_dir: Path, trace_dir: Path,
 ) -> tuple[list[CaseResult], Path]:
+    """跑基线。旧路径传 CNY `Budget`；计费包装路径传 `currency_budget`，二者只选其一。
+
+    新路径下预算记账在 BudgetedClient 内完成（每次请求前熔断、流结束按原币种
+    估算），这里只读取汇总字段写进 reporting；不再按 case 调 budget.record。
+    """
+    if currency_budget is not None:
+        if not isinstance(client, BudgetedClient):
+            raise ValueError("currency_budget 路径必须使用 BudgetedClient 客户端")
+        if budget is not None:
+            raise ValueError("budget 与 currency_budget 只能二选一，避免双重熔断口径")
+    active = currency_budget if currency_budget is not None else budget
+    wrapper_retry = currency_budget is not None
     results = []
     started = time.monotonic()
     approval_ids = {c.id for c in APPROVAL_CASES}
@@ -43,6 +57,7 @@ async def run_baseline(
         "planned": len(cases), "executed": 0,
         "case_ids": [c.id for c in cases],
         "scorer_version": SCORER_VERSION,
+        "retry_policy": "wrapper-no-rerun" if wrapper_retry else "runner-retry",
         "case_sha256": hashlib.sha256(
             "\n".join(c.model_dump_json() for c in cases).encode()
         ).hexdigest(),
@@ -65,19 +80,33 @@ async def run_baseline(
             not any(f.startswith("budget:") for f in r.failed_checks) for r in results
         )
         metadata["complete"] = len(results) == len(cases)
+        if wrapper_retry:
+            metadata["budget_limit_cny"] = None
+            metadata["billing_budget"] = {
+                "currency": currency_budget.currency,
+                "limit": str(currency_budget.limit),
+                "spent": format_amount(currency_budget.spent),
+                "requests": currency_budget.requests,
+                "unknown_usage": currency_budget.unknown_usage,
+            }
         return write_report(
             report_dir, [*results, *pending], model=client.config.model,
-            budget_limit_cny=budget.limit_cny, elapsed_s=time.monotonic() - started,
+            budget_limit_cny=budget.limit_cny if budget is not None else None,
+            elapsed_s=time.monotonic() - started,
             metadata=metadata, provenance=provenance, report_path=path,
         )
 
     path = checkpoint()
     with tempfile.TemporaryDirectory(prefix="erpilot-baseline-") as directory:
         for case in cases:
-            if budget.exhausted:
+            if active is not None and active.exhausted:
+                reason = (
+                    f"计费预算熔断（{active.reason()}），本条未执行"
+                    if wrapper_retry else "预算熔断，本条未执行"
+                )
                 results.append(CaseResult(
                     case_id=case.id, category=case.category, passed=False,
-                    failed_checks=["budget: 预算熔断，本条未执行"],
+                    failed_checks=[f"budget: {reason}"],
                 ))
                 checkpoint(path)
                 continue
@@ -99,7 +128,8 @@ async def run_baseline(
                     trace_ref = trace_path.resolve().as_posix()
                 metadata["case_traces"][case.id] = trace_ref
                 results.append(result)
-                budget.record(result.cost)
+                if not wrapper_retry:
+                    budget.record(result.cost)
                 print(f"{case.id}: {'PASS' if result.passed else 'FAIL'} "
                       f"({result.steps} steps, {result.attempts} attempts)", flush=True)
                 if not result.passed:

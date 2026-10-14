@@ -99,6 +99,11 @@ def endpoint_rate(model: str, base_url: str) -> EndpointRate:
     return rate
 
 
+def format_amount(value: Decimal) -> str:
+    """统一金额序列化：六位小数定点字符串，避免科学计数法与浮点。"""
+    return str(value.quantize(_AMOUNT_QUANTUM))
+
+
 def quote_usage(
     rate: EndpointRate,
     usage: Usage | None,
