@@ -1,10 +1,13 @@
 """跨模型对照聚合单测：汇总指标、按模型去重、markdown 渲染（纯数据，不烧 token）。"""
 
 import json
+from copy import deepcopy
 
+import pytest
 from evals.compare import (
     ModelRun,
     compare_markdown,
+    compatibility_key,
     load_report,
     pick_latest_per_model,
     summarize,
@@ -95,7 +98,7 @@ def test_compare_markdown_renders_rows_and_footnote() -> None:
     assert "| deepseek-chat |" in md
     assert "≈¥0.0010 " in md  # glm 成本完整，无 *
     assert "≈¥0.0000*" in md  # deepseek 缺成本，标 *
-    assert "缺价目表估算" in md  # 脚注出现
+    assert "估价不完整" in md  # 脚注出现（M06-05 起覆盖缺计量与估价两种原因）
 
 
 def test_compare_markdown_no_footnote_when_complete() -> None:
@@ -114,3 +117,161 @@ def test_load_report_reads_file(tmp_path) -> None:
     assert isinstance(run, ModelRun)
     assert run.model == "glm-5.3-flash"
     assert run.report == path.name
+
+
+# ---- M06-05：严格兼容对照（compatibility_key + --strict + 币种列） ----
+
+_B5_ATTRS = (("suite", "b5_scorer_version"), ("suite", "policy_corpus_sha256"),
+             ("suite", "policy_index_sha256"))
+
+
+def _full_report(model="deepseek-v4.1-flash", *, billing=True, scenario="baseline") -> dict:
+    suite = {
+        "kind": "targeted", "planned": 2, "executed": 2,
+        "case_ids": ["b5-eligible", "b5-ineligible"]
+        if scenario == "b5" else ["c1", "c2"],
+        "scorer_version": "v2.6",
+        "retry_policy": "wrapper-no-rerun",
+        "case_sha256": "f" * 64,
+        "seed": {"value": 20260930, "now": "2026-10-07T12:00:00+08:00",
+                 "fresh_database_per_case": True},
+        "complete": True,
+        "billing_budget": None if not billing else {
+            "currency": "USD", "limit": "0.10", "spent": "0.02",
+            "requests": 4, "unknown_usage": False,
+        },
+        "state_checks": 0, "case_traces": {},
+    }
+    if scenario == "b5":
+        suite["b5_scorer_version"] = "b5-1"
+        suite["policy_corpus_sha256"] = "c" * 64
+        suite["policy_index_sha256"] = "d" * 64
+    results = []
+    for cid in suite["case_ids"]:
+        results.append({
+            "case_id": cid, "category": "multi", "passed": True, "failed_checks": [],
+            "total_tokens": 100, "cost": None if billing else 0.002,
+            "cost_complete": not billing,
+            "duration_ms": 500.0, "attempts": 1,
+            "billing": {
+                "currency": "USD", "estimated_amount": "0.0100",
+                "pricing_source": "t", "cache_assumption": "uncached_upper_bound",
+                "complete": True,
+            } if billing else None,
+        })
+    return {
+        "model": model, "ts": "20261014-110000",
+        "provenance": {"revision": "abc1234567890", "source_sha256": "e" * 64,
+                       "working_tree_dirty": False},
+        "suite": suite, "results": results,
+    }
+
+
+def test_compatibility_key_equal_for_compatible_pair() -> None:
+    a = _full_report("glm-5.3-flash")
+    b = _full_report("deepseek-v4.1-flash")
+    assert compatibility_key(a) == compatibility_key(b)
+
+
+@pytest.mark.parametrize("mutation", [
+    "source_sha256", "case_sha256", "scorer_version", "seed", "retry_policy",
+    "retry_policy_missing", "billing_budget_missing", "billing_currency",
+])
+def test_compatibility_key_changes_with_each_dimension(mutation: str) -> None:
+    a = _full_report("glm-5.3-flash")
+    b = deepcopy(a)
+    if mutation == "source_sha256":
+        b["provenance"]["source_sha256"] = "9" * 64
+    elif mutation == "case_sha256":
+        b["suite"]["case_sha256"] = "9" * 64
+    elif mutation == "scorer_version":
+        b["suite"]["scorer_version"] = "v2.5"
+    elif mutation == "seed":
+        b["suite"]["seed"] = {"value": 1, "now": "x", "fresh_database_per_case": True}
+    elif mutation == "retry_policy":
+        b["suite"]["retry_policy"] = "runner-retry"
+    elif mutation == "retry_policy_missing":
+        del b["suite"]["retry_policy"]
+        with pytest.raises(ValueError):
+            compatibility_key(b)
+        return
+    elif mutation == "billing_budget_missing":
+        del b["suite"]["billing_budget"]
+    elif mutation == "billing_currency":
+        b["suite"]["billing_budget"]["currency"] = "CNY"
+    assert compatibility_key(a) != compatibility_key(b), mutation
+
+
+def test_compatibility_key_b5_scope_requires_policy_fingerprints() -> None:
+    a = _full_report("glm-5.3-flash", scenario="b5")
+    b = _full_report("deepseek-v4.1-flash", scenario="b5")
+    assert compatibility_key(a) == compatibility_key(b)
+    missing = deepcopy(a)
+    del missing["suite"]["policy_index_sha256"]
+    with pytest.raises(ValueError, match="policy_index_sha256"):
+        compatibility_key(missing)
+    # 用例集里有 b5- 前缀却没有 b5 判据版本：同样拒绝
+    hybrid = _full_report("glm-5.3-flash")
+    hybrid["suite"]["case_ids"] = ["b5-eligible"]
+    with pytest.raises(ValueError, match="b5_scorer_version"):
+        compatibility_key(hybrid)
+
+
+def test_compatibility_key_rejects_reports_without_provenance() -> None:
+    legacy = _report("glm-5.3-flash", "t", [_case(True)])
+    with pytest.raises(ValueError, match="provenance"):
+        compatibility_key(legacy)
+
+
+def test_strict_cli_requires_pair_and_completeness(tmp_path, capsys) -> None:
+    from evals.compare import main as compare_main
+
+    a = tmp_path / "a.json"
+    b = tmp_path / "b.json"
+    a.write_text(json.dumps(_full_report("glm-5.3-flash")), encoding="utf-8")
+    b.write_text(json.dumps(_full_report("deepseek-v4.1-flash")), encoding="utf-8")
+    compare_main([str(a), str(b), "--strict"])
+    out = capsys.readouterr().out
+    assert "$0.0200 USD" in out
+
+    changed = _full_report("deepseek-v4.1-flash")
+    changed["suite"]["case_sha256"] = "9" * 64
+    b.write_text(json.dumps(changed), encoding="utf-8")
+    with pytest.raises(SystemExit) as ctx:
+        compare_main([str(a), str(b), "--strict"])
+    assert ctx.value.code == 1
+
+    partial = _full_report("deepseek-v4.1-flash")
+    partial["suite"]["complete"] = False
+    partial["suite"]["executed"] = 1
+    b.write_text(json.dumps(partial), encoding="utf-8")
+    with pytest.raises(SystemExit) as ctx:
+        compare_main([str(a), str(b), "--strict"])
+    assert ctx.value.code == 1
+
+
+def test_strict_cli_rejects_single_report_and_reports_value_errors(tmp_path) -> None:
+    from evals.compare import main as compare_main
+
+    only = tmp_path / "only.json"
+    only.write_text(json.dumps(_full_report("glm-5.3-flash")), encoding="utf-8")
+    with pytest.raises(SystemExit):
+        compare_main([str(only), "--strict"])
+
+
+def test_compare_rows_show_currency_and_unmeasured() -> None:
+    runs = [
+        summarize(_full_report("glm-5.3-flash"), report_name="g.json"),
+    ]
+    md = compare_markdown(runs, strict=True)
+    assert "≈$0.0200 USD" in md
+    assert "≈¥" not in md.replace("≈¥0.0000", "")
+
+    unmeasured_report = _full_report("x")
+    unmeasured_report["results"][0]["billing"] = {
+        "currency": "USD", "estimated_amount": None,
+        "pricing_source": "t", "cache_assumption": "unknown_usage", "complete": False,
+    }
+    md2 = compare_markdown([summarize(unmeasured_report, report_name="x.json")], strict=True)
+    assert "未计量" in md2
+    assert "$0.0100 USD" in md2  # 已知部分单独显示，不虚报 0
