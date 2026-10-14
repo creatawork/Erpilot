@@ -1,0 +1,135 @@
+{
+  "model": "glm-5.3-flash",
+  "chat_endpoint": "https://flashcoding.ai/v1/",
+  "embedding_model": "text-embedding-v4",
+  "embedding_endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "threshold": 0.66,
+  "index_chunks": 18,
+  "index_build_embedding_usage": {
+    "requests": 2,
+    "tokens": 702
+  },
+  "calibration_embedding_usage": {
+    "requests": 4,
+    "tokens": 820
+  },
+  "calibration_separated": true,
+  "calibration": [
+    {
+      "kind": "positive",
+      "query": "签收后几天内可以无理由退货？",
+      "expected_source": "return-policy.md",
+      "top_score": 0.8245,
+      "top_source": "return-policy.md",
+      "top_title": "七天无理由退货",
+      "expectation_met": true
+    },
+    {
+      "kind": "positive",
+      "query": "商品有质量问题，签收后多久能申请换货？",
+      "expected_source": "return-policy.md",
+      "top_score": 0.765,
+      "top_source": "return-policy.md",
+      "top_title": "质量问题退换",
+      "expectation_met": true
+    },
+    {
+      "kind": "positive",
+      "query": "买50件商品能打几折？",
+      "expected_source": "pricing-policy.md",
+      "top_score": 0.7218,
+      "top_source": "pricing-policy.md",
+      "top_title": "数量梯度折扣",
+      "expectation_met": true
+    },
+    {
+      "kind": "positive",
+      "query": "买200件的报价是几折？",
+      "expected_source": "pricing-policy.md",
+      "top_score": 0.7706,
+      "top_source": "pricing-policy.md",
+      "top_title": "数量梯度折扣",
+      "expectation_met": true
+    },
+    {
+      "kind": "positive",
+      "query": "已经发货的订单可以直接取消吗？",
+      "expected_source": "order-policy.md",
+      "top_score": 0.7946,
+      "top_source": "order-policy.md",
+      "top_title": "可取消的订单",
+      "expectation_met": true
+    },
+    {
+      "kind": "positive",
+      "query": "订单取消后商品库存会怎么处理？",
+      "expected_source": "order-policy.md",
+      "top_score": 0.7966,
+      "top_source": "order-policy.md",
+      "top_title": "可取消的订单",
+      "expectation_met": true
+    },
+    {
+      "kind": "negative",
+      "query": "店铺每天几点营业？",
+      "expected_source": null,
+      "top_score": 0.4445,
+      "top_source": "return-policy.md",
+      "top_title": "退换货政策",
+      "expectation_met": true
+    },
+    {
+      "kind": "negative",
+      "query": "可以用哪些支付方式付款？",
+      "expected_source": null,
+      "top_score": 0.5126,
+      "top_source": "order-policy.md",
+      "top_title": "订单状态",
+      "expectation_met": true
+    },
+    {
+      "kind": "negative",
+      "query": "买家如何开发票，发票税率是多少？",
+      "expected_source": null,
+      "top_score": 0.561,
+      "top_source": "pricing-policy.md",
+      "top_title": "数量梯度折扣",
+      "expectation_met": true
+    },
+    {
+      "kind": "negative",
+      "query": "商品配送需要几天，支持哪些快递？",
+      "expected_source": null,
+      "top_score": 0.6103,
+      "top_source": "return-policy.md",
+      "top_title": "七天无理由退货",
+      "expectation_met": true
+    },
+    {
+      "kind": "negative",
+      "query": "客服电话和人工客服工作时间是什么？",
+      "expected_source": null,
+      "top_score": 0.4303,
+      "top_source": "return-policy.md",
+      "top_title": "退换货政策",
+      "expectation_met": true
+    },
+    {
+      "kind": "negative",
+      "query": "会员积分怎么累计和兑换？",
+      "expected_source": null,
+      "top_score": 0.4711,
+      "top_source": "order-policy.md",
+      "top_title": "建单规则",
+      "expectation_met": true
+    }
+  ],
+  "cases": [],
+  "elapsed_seconds": 2.1,
+  "provenance": {
+    "revision": "5a2089fc333fd0f85a9099a67833c6624a2e9bf3",
+    "working_tree_dirty": true,
+    "source_sha256": "2eb196627b4399f20dde101f8e465559cdc2d5dcc5cedb90cad23b08ab541270"
+  },
+  "acceptance_passed": false
+}

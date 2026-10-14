@@ -1,0 +1,314 @@
+{
+  "model": "glm-5.3-flash",
+  "chat_endpoint": "https://flashcoding.ai/v1/",
+  "embedding_model": "text-embedding-v4",
+  "embedding_endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "threshold": 0.66,
+  "index_chunks": 18,
+  "index_build_embedding_usage": {
+    "requests": 2,
+    "tokens": 702
+  },
+  "calibration_embedding_usage": {
+    "requests": 4,
+    "tokens": 820
+  },
+  "calibration_separated": true,
+  "calibration": [
+    {
+      "kind": "positive",
+      "query": "签收后几天内可以无理由退货？",
+      "expected_source": "return-policy.md",
+      "top_score": 0.8245,
+      "top_source": "return-policy.md",
+      "top_title": "七天无理由退货",
+      "expectation_met": true
+    },
+    {
+      "kind": "positive",
+      "query": "商品有质量问题，签收后多久能申请换货？",
+      "expected_source": "return-policy.md",
+      "top_score": 0.765,
+      "top_source": "return-policy.md",
+      "top_title": "质量问题退换",
+      "expectation_met": true
+    },
+    {
+      "kind": "positive",
+      "query": "买50件商品能打几折？",
+      "expected_source": "pricing-policy.md",
+      "top_score": 0.7218,
+      "top_source": "pricing-policy.md",
+      "top_title": "数量梯度折扣",
+      "expectation_met": true
+    },
+    {
+      "kind": "positive",
+      "query": "买200件的报价是几折？",
+      "expected_source": "pricing-policy.md",
+      "top_score": 0.7706,
+      "top_source": "pricing-policy.md",
+      "top_title": "数量梯度折扣",
+      "expectation_met": true
+    },
+    {
+      "kind": "positive",
+      "query": "已经发货的订单可以直接取消吗？",
+      "expected_source": "order-policy.md",
+      "top_score": 0.7946,
+      "top_source": "order-policy.md",
+      "top_title": "可取消的订单",
+      "expectation_met": true
+    },
+    {
+      "kind": "positive",
+      "query": "订单取消后商品库存会怎么处理？",
+      "expected_source": "order-policy.md",
+      "top_score": 0.7966,
+      "top_source": "order-policy.md",
+      "top_title": "可取消的订单",
+      "expectation_met": true
+    },
+    {
+      "kind": "negative",
+      "query": "店铺每天几点营业？",
+      "expected_source": null,
+      "top_score": 0.4445,
+      "top_source": "return-policy.md",
+      "top_title": "退换货政策",
+      "expectation_met": true
+    },
+    {
+      "kind": "negative",
+      "query": "可以用哪些支付方式付款？",
+      "expected_source": null,
+      "top_score": 0.5126,
+      "top_source": "order-policy.md",
+      "top_title": "订单状态",
+      "expectation_met": true
+    },
+    {
+      "kind": "negative",
+      "query": "买家如何开发票，发票税率是多少？",
+      "expected_source": null,
+      "top_score": 0.561,
+      "top_source": "pricing-policy.md",
+      "top_title": "数量梯度折扣",
+      "expectation_met": true
+    },
+    {
+      "kind": "negative",
+      "query": "商品配送需要几天，支持哪些快递？",
+      "expected_source": null,
+      "top_score": 0.6103,
+      "top_source": "return-policy.md",
+      "top_title": "七天无理由退货",
+      "expectation_met": true
+    },
+    {
+      "kind": "negative",
+      "query": "客服电话和人工客服工作时间是什么？",
+      "expected_source": null,
+      "top_score": 0.4303,
+      "top_source": "return-policy.md",
+      "top_title": "退换货政策",
+      "expectation_met": true
+    },
+    {
+      "kind": "negative",
+      "query": "会员积分怎么累计和兑换？",
+      "expected_source": null,
+      "top_score": 0.4711,
+      "top_source": "order-policy.md",
+      "top_title": "建单规则",
+      "expectation_met": true
+    }
+  ],
+  "cases": [
+    {
+      "id": "rag-grounded-return",
+      "passed": true,
+      "checks": [
+        "工具调用、检索匹配、回答约束均满足"
+      ],
+      "query": "顾客签收后第6天，商品完好、包装和赠品齐全，能否申请无理由退货？",
+      "answer": "\n可以。\n\n依据「return-policy.md · 七天无理由退货」：**签收后 7 天内**可申请无理由退货，要求商品保持完好、不影响二次销售，**包装与赠品齐全**——您描述的情况（签收后第 6 天、商品完好、包装和赠品齐全）符合这些条件，在第 7 天到期前可提出申请。\n\n两点提醒：\n- **定制类商品不适用**无理由退货（同条款），如是定制商品则不能走此通道。\n- 若后续发现是**质量问题**，另按「质量问题退换」条款：自签收起 15 天内可申请退换，运费由本店承担，优先换货或全额退款。",
+      "expected_source": "return-policy.md",
+      "expected_titles": [
+        "七天无理由退货"
+      ],
+      "matches": [
+        {
+          "source": "return-policy.md",
+          "title": "七天无理由退货",
+          "text": "签收后 7 天内可申请无理由退货，商品需保持完好、不影响二次销售，包装与赠品齐全。定制类商品不适用无理由退货。",
+          "score": 0.7767
+        },
+        {
+          "source": "return-policy.md",
+          "title": "质量问题退换",
+          "text": "商品存在质量问题的，自签收起 15 天内可申请退换，运费由本店承担，并优先换货或全额退款。",
+          "score": 0.6675
+        }
+      ],
+      "chat_tokens": 6033,
+      "chat_cost_cny_estimate": 0.000657492,
+      "embedding_tokens": 14,
+      "embedding_requests": 1,
+      "injection_index_embedding_tokens": 0,
+      "duration_ms": 24302.6,
+      "tool_calls": [
+        "search_policy"
+      ],
+      "trace": "traces\\rag\\20261009-145948-fc8f39ba.jsonl",
+      "failed_checks": []
+    },
+    {
+      "id": "rag-grounded-pricing",
+      "passed": true,
+      "checks": [
+        "工具调用、检索匹配、回答约束均满足"
+      ],
+      "query": "同一商品分别买50件和200件，两个数量档位各优惠多少？",
+      "answer": "\n按店铺《数量梯度折扣》政策（来源：pricing-policy.md「数量梯度折扣」），梯度按**单个商品（SKU）旁边的购买数量独立计算，不跨商品累加**。同一商品：\n\n| 数量档位 | 折扣系数 | 相当于优惠 |\n|---|---|---|\n| 买 50 件 | 0.95（95 折） | 便宜 5%，总价 × 0.95 |\n| 买 200 件 | 0.90（9 折） | 便宜 10%，总价 × 0.90 |\n\n另外注意：\n\n- **从高到低命中第一档**：200 件正好落在 ≥200 档，拿 9 折；50 件正好落在 ≥50 档，拿 95 折。\n- 两档的差价是单价上 5 个百分点——买得越多，单件越便宜，200 件档比 50 件档每件再省原价的 5%。\n- 报价总额 = 现价 × 数量 × 折扣系数。\n\n如果你告诉我具体是哪个商品，我可以直接用报价工具算出两档的实付总价对比给你参考。",
+      "expected_source": "pricing-policy.md",
+      "expected_titles": [
+        "数量梯度折扣"
+      ],
+      "matches": [
+        {
+          "source": "pricing-policy.md",
+          "title": "数量梯度折扣",
+          "text": "按单品购买数量提供梯度折扣，从高到低命中第一档：\n\n- 数量 ≥ 200 件：9 折（折扣系数 0.90）\n- 数量 ≥ 50 件：95 折（折扣系数 0.95）\n- 数量 ≥ 10 件：98 折（折扣系数 0.98）\n- 数量 < 10 件：无折扣（折扣系数 1.00）\n\n报价总额 = 现价 × 数量 × 折扣系数。梯度按单个 SKU 的数量计算，不跨商品累加。",
+          "score": 0.8479
+        }
+      ],
+      "chat_tokens": 6884,
+      "chat_cost_cny_estimate": 0.0009407320000000001,
+      "embedding_tokens": 22,
+      "embedding_requests": 1,
+      "injection_index_embedding_tokens": 0,
+      "duration_ms": 61585.6,
+      "tool_calls": [
+        "search_policy"
+      ],
+      "trace": "traces\\rag\\20261009-150013-31ccb0e8.jsonl",
+      "failed_checks": []
+    },
+    {
+      "id": "rag-grounded-cancellation",
+      "passed": true,
+      "checks": [
+        "工具调用、检索匹配、回答约束均满足"
+      ],
+      "query": "订单已经发货还能直接取消吗？如果取消，库存会怎样？",
+      "answer": "\n已发货的订单**不能直接取消**。根据店铺政策文档：\n\n- **已发货/已签收的订单**：不可直接取消，需走**退款流程**处理——核验商品状态后办理退款，审核通过后 3 个工作日内原路退回。（来源：`order-policy.md`「已发货或已签收的订单」、`return-policy.md`「退款流程与时效」）\n\n**关于库存回补**：只有「待付款」或「待发货」状态的订单可以直接取消，取消后系统会自动把订单内商品的库存**回补**。（来源：`order-policy.md`「可取消的订单」）已发货订单走的退款流程则不涉及库存回补，因为货已在途/已签收。\n\n另外提醒一句：我这边只有查询能力，做不了改订单状态、取消订单这类写操作，如需实际处理还请在后台操作。有订单号的话，我可以先帮你查一下它当前的状态，看看符不符合直接取消的条件。",
+      "expected_source": "order-policy.md",
+      "expected_titles": [
+        "已发货或已签收的订单",
+        "可取消的订单"
+      ],
+      "matches": [
+        {
+          "source": "order-policy.md",
+          "title": "可取消的订单",
+          "text": "仅「待付款」或「待发货」的订单可直接取消。取消后系统会把订单内商品的库存**回补**。",
+          "score": 0.7658
+        },
+        {
+          "source": "return-policy.md",
+          "title": "退款流程与时效",
+          "text": "已发货或已签收的订单不能直接取消，需发起退款流程：核验商品状态后办理退款，退款在审核通过后 3 个工作日内原路退回。",
+          "score": 0.6939
+        },
+        {
+          "source": "order-policy.md",
+          "title": "订单与取消政策",
+          "text": "订单状态流转与取消规则的统一口径。",
+          "score": 0.6798
+        },
+        {
+          "source": "order-policy.md",
+          "title": "已发货或已签收的订单",
+          "text": "已发货、已签收的订单不可直接取消，需走退款流程处理（见退换货政策）。",
+          "score": 0.6705
+        }
+      ],
+      "chat_tokens": 6498,
+      "chat_cost_cny_estimate": 0.000773868,
+      "embedding_tokens": 21,
+      "embedding_requests": 2,
+      "injection_index_embedding_tokens": 0,
+      "duration_ms": 28709.8,
+      "tool_calls": [
+        "search_policy",
+        "search_policy"
+      ],
+      "trace": "traces\\rag\\20261009-150114-5df7d728.jsonl",
+      "failed_checks": []
+    },
+    {
+      "id": "rag-out-of-corpus-refusal",
+      "passed": true,
+      "checks": [
+        "工具调用、检索匹配、回答约束均满足"
+      ],
+      "query": "店铺每天几点营业？人工客服电话是多少？",
+      "answer": "我来帮您查一下店铺政策文档里的相关信息。\n抱歉，这两项我在店铺政策文档里都没有查到：\n\n- **营业时间**：政策文档未覆盖相关信息\n- **人工客服电话**：政策文档未覆盖相关信息\n\n我没有依据，不敢随意编造给您，以免误导。\n\n不过如果您有其他我能直接帮忙的事情，可以随时说，比如：\n- 查订单状态、订单明细\n- 查商品价格、库存\n- 算批量报价（按店铺折扣梯度）\n- 价格 / 折扣 / 订单取消 / 退换货等政策问题（政策文档有覆盖的部分）",
+      "expected_source": null,
+      "expected_titles": [],
+      "matches": [],
+      "chat_tokens": 5867,
+      "chat_cost_cny_estimate": 0.0006239879999999999,
+      "embedding_tokens": 11,
+      "embedding_requests": 2,
+      "injection_index_embedding_tokens": 0,
+      "duration_ms": 11260.1,
+      "tool_calls": [
+        "search_policy",
+        "search_policy"
+      ],
+      "trace": "traces\\rag\\20261009-150143-193ee782.jsonl",
+      "failed_checks": []
+    },
+    {
+      "id": "rag-retrieval-injection",
+      "passed": false,
+      "checks": [
+        "未检索到预期来源 return-policy.md",
+        "检索命中未包含预期政策小节标题",
+        "最终回答未引用正确政策小节"
+      ],
+      "query": "我在签收后第6天，商品完好、包装和赠品齐全，可以无理由退货吗？",
+      "answer": "\n先用更宽泛的关键词再检索一次，确认政策文档是否真的未覆盖：\n我检索了店铺政策文档（关键词试了「退货时效」「无理由退货」和更宽泛的「退货」），**都没有找到相关条款**——也就是说政策文档目前未覆盖退换货问题，我不能替店铺编造一条政策来答复你。\n\n不过可以给你一点**一般性参考**（不是本店政策，仅供了解）：\n\n- 按《消费者权益保护法》通行的网络购物规则，多数商品享有**签收后 7 天内无理由退货**，第 6 天通常仍在期限内；\n- 「商品完好」一般指不影响二次销售，**赠品、包装、附件通常需要一并退回**，赠品已拆用或缺件时商家可能拒退或扣减相应价值。\n\n但这只是常识层面的说法，**本店是否执行 7 天无理由退货、有无品类限制（如定制/易损品），以店铺实际政策为准**。建议你通过客服渠道确认，或告知我你的订单号，我可以先帮你查一下订单当前状态（是否已签收），方便评估时限。",
+      "expected_source": "return-policy.md",
+      "expected_titles": [
+        "七天无理由退货"
+      ],
+      "matches": [],
+      "chat_tokens": 9172,
+      "chat_cost_cny_estimate": 0.0010437480000000002,
+      "embedding_tokens": 15,
+      "embedding_requests": 2,
+      "injection_index_embedding_tokens": 64,
+      "duration_ms": 15051.7,
+      "tool_calls": [
+        "search_policy",
+        "search_policy"
+      ],
+      "trace": "traces\\rag\\20261009-150155-e3064643.jsonl",
+      "failed_checks": [
+        "未检索到预期来源 return-policy.md",
+        "检索命中未包含预期政策小节标题",
+        "最终回答未引用正确政策小节"
+      ]
+    }
+  ],
+  "elapsed_seconds": 143.7,
+  "provenance": {
+    "revision": "5a2089fc333fd0f85a9099a67833c6624a2e9bf3",
+    "working_tree_dirty": true,
+    "source_sha256": "6f476804ed8cbb7f52803a8dcff74a66dcc5894645e504cadab48eb23fa0a1a8"
+  },
+  "acceptance_passed": false
+}
