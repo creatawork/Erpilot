@@ -1,6 +1,6 @@
 # 当前阶段：功能深化 B5 · 政策与订单事实联合判断（工程收口完成；M06 离线计费已实施，真实模型待测）
 
-2026-10-14：B5 主线与工作台改版已整体审阅并分组提交（注入复判证据 175041d、工作台+CI 920b535、B5/M06 文档 9702fc9）；远端 Linux CI 首次验证通过——PR #1（run 38541418391，head 9702fc9）lint-test / frontend（含 Chromium 安装与 12 项浏览器回归）/ evals（真实评测按既定规则跳过）三个 job 全绿。M06 支线离线部分（M06-01～05）已 TDD 实施并全仓回归通过；真实模型运行（M06-06、B4 多轮指代）仍待执行，不勾选任何真实基线。工作台改版记录见[工作台验证](../reports/acceptance/2026-10-12-workspace-verification.md)。
+2026-10-15：B5 与工作台改版收口、M06 离线支线（M06-01～05+密度 harness）完成后，用户授权真实模型验收已执行：GLM / DeepSeek 的 B5 七用例各四次成对（含探针与三次校准，原始报告全保留）及完整 baseline 35 条各一跑——GLM 35/35（≈¥0.033）、DeepSeek 34/35（≈$0.021，multi-06 步数超限），`--strict` 对照通过（M04 达成）；B5 模型门槛未达成（两模型失败均为可见文本措辞义务不稳定，结构化证据零失败），如实保留失败。总花费：GLM ≈¥0.065、DeepSeek ≈$0.037、嵌入 text-embedding-v4 全程 1 次/4 tokens。详见[模型对照验收](../reports/acceptance/2026-10-12-model-comparison.md)。B4 真实多轮指代评测仍是独立待办。工作台改版记录见[工作台验证](../reports/acceptance/2026-10-12-workspace-verification.md)。
 
 - [x] 核对当前工作台协议 / 组件测试、生产构建及浏览器回归；保留首轮浏览器缺失与指定本机 Chromium 后通过的记录。
 - [x] CI 增加匹配版本 Chromium 安装、浏览器测试及失败证据上传入口。
@@ -9,7 +9,7 @@
 - [x] 形成独立计划与下列小任务；不将规划完成标为功能完成。
 - [x] 用户授权按 B5 主线计划在当前会话逐项实施；M06 支线独立待办。
 - [ ] 补 B4 真实模型多轮指代与澄清评测；确定性与模型结果分开统计。
-- [x] 补当前端点 DeepSeek 美元计量与预算契约（M06-01～05 离线实施完成）；GLM / DeepSeek 真实对照执行仍待运行（见 M06-06）。
+- [x] 补当前端点 DeepSeek 美元计量与预算契约（M06-01～05 离线实施完成）；GLM / DeepSeek 真实对照已执行（见 M06-06 与[验收记录](../reports/acceptance/2026-10-12-model-comparison.md)）。
 
 ## B5 工程主线
 
@@ -39,7 +39,7 @@
 - [x] C-M1：价目、币种、预算、失败计量与重试策略离线通过，普通 pytest 不调用真实模型（全仓 pytest 复跑通过；预算/未知计量/流中断均有 mock 证据；`.env` 与默认模型未改动）。随 ba0f67b 等记录。
 - [x] M06-04：7 项 B5 模型用例与结构化证据 / 全表状态检查，单列 b5-1 检查，不修改旧 scorer（`evals/policy_cases.py` + run_case 接线 + `--suite b5`；写面黑名单含全量 prepare/revise 工具，AutoDeny 兜底）。提交 d6de69e。
 - [x] M06-05：strict 对照校验源码、案例、scorer、seed、重试及政策指纹；不同币种不混算（`evals.compare --strict`：恰好两份原始报告，缺指纹/部分报告/币种差异 / 旧报告无 billing 全部拒绝并置非零退出；对照表币种各自列示）。提交 9e79d6b。
-- [ ] M06-06：GLM / DeepSeek 各留 B5 试跑与现有完整 baseline 报告，失败如实保留；完整基线未完成时不勾选 M04。（命令就绪：`uv run python -m evals --suite b5 --budget 0.10 --budget-currency CNY|USD --timeout 30`；真实运行消耗 token，须先确认预算与 key。）
+- [x] M06-06：GLM / DeepSeek 各留 B5 成对试跑与完整 baseline 原始报告，失败如实保留。最终成对（source 8b2a5860…）：GLM B5 5/7（¥0.0081）、DeepSeek B5 6/7（$0.0041），失败均为可见文本措辞义务不稳定、b5-1 结构化判分零失败；B5 模型门槛（7/7+零写入）**未达成**、不勾选。见[模型对照验收](../reports/acceptance/2026-10-12-model-comparison.md)。
 
 ## 已完成阶段：B4 · 多轮草稿任务与历史会话
 
@@ -68,8 +68,8 @@
 
 ## 批次 1 剩余（当前 key 支持 DeepSeek；真实运行消耗 token）
 
-- [ ] M04 / P0：优先使用当前中转端点与 key，对照 GLM-5.3 Flash / `deepseek-v4.1-flash`；Qwen 可用配置另行核验。使用相同基线并保留独立报告，`python -m evals.compare` 产出对照表；不能拼接不同 scorer 或用例集。
-- [ ] M05 / P1：对比结论写入报告 + README 多模型对照入口；标注端点差异为真实观察。
+- [x] M04 / P0：GLM-5.3-flash 与 `deepseek-v4.1-flash` 已用同一完整基线（35 条）在同源码/seed/scorer 下各留独立报告并 `--strict` 对照通过：GLM 35/35（≈¥0.0333）、DeepSeek 34/35（≈$0.0208，multi-06 步数超限）。Qwen 价目 / 配置仍未核验，保留未完成，未进对照表。
+- [x] M05 / P1：结论已写入[模型对照验收](../reports/acceptance/2026-10-12-model-comparison.md)；README 已加对照入口（`evals.compare --strict`，币种各自列示）；端点差异（GLM 中转 CNY 与 deepseek-v4.1-flash 同 key 切换）为真实观察记录。
 - 遗留：当前端点 DeepSeek 价目已由用户确认（USD / 百万 token：输入 0.045、输出 0.18、缓存读取 0.024、缓存写入 0）；现有 `prices.py` 和预算为人民币，M04 前须补齐币种 / 换算契约，不能把美元直接写为人民币。Qwen 价目仍待核验。
 
 已交付（批次 1）：M02 provider profile 层（zhipu/deepseek/qwen，默认兼容，7 单测）；M03 runner 已原生记录模型维度 + `evals/compare.py` 对照聚合器（7 单测）。

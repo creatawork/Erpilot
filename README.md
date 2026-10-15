@@ -109,7 +109,7 @@ B3 取消订单与库存调整先保存业务预览再审批：确认页展示�
 
 B4 支持从持久化草稿继续多轮任务：单份未提交草稿可找回客户、商品、数量与备注，多份先澄清；按指定版本的商品行修改数量，不依赖旧聊天文本。网页“历史会话”可分页找回旧任务，切换不会执行或取消待审批操作，恢复失败时保持输入锁定。见 [B4 验收](reports/acceptance/2026-10-11-task-history.md)与[实施计划](docs/superpowers/plans/2026-10-11-task-history.md)。
 
-B5 已接通只读取消资格查询：`assess_order_cancellation` 返回订单事实、有效政策版本和证据缺口，网页可展开引用；查询不取消订单、不申请审批。明确取消仍使用原预览与审批流程。见 [B5 工程验收](reports/acceptance/2026-10-12-policy-business-decision.md)；真实模型评测未运行。仅补元数据且片段完全一致时可运行 `uv run --package rag python -m rag refresh` 复用原向量；正文变化须重新 build。
+B5 已接通只读取消资格查询：`assess_order_cancellation` 返回订单事实、有效政策版本和证据缺口，网页可展开引用；查询不取消订单、不申请审批。明确取消仍使用原预览与审批流程。见 B5 工程验收；真实模型运行见[模型对照验收](reports/acceptance/2026-10-12-model-comparison.md)：GLM 完整基线 35/35（≈¥0.033）、DeepSeek 34/35（≈$0.021，multi-06 步数超限），B5 七用例 GLM 5/7、DeepSeek 6/7，均为可见文本措辞义务失败、结构化证据零失败——B5 模型门槛未达成、如实保留；对照入口 `uv run python -m evals.compare --strict <报告A> <报告B>`（币种各自列示）。仅补元数据且片段完全一致时可运行 `uv run --package rag python -m rag refresh` 复用原向量；正文变化须重新 build。
 
 新订单和报价共用数量折扣与十进制舍入口径：同 SKU 合并数量后计算折扣单价，四舍五入到两位再乘数量；历史成交价和幂等重放结果保持原值。报价不锁价或预留库存。政策源文件更新后默认检索会拒绝旧索引，须运行 `uv run --env-file .env --package rag python -m rag build` 重新生成索引（消耗嵌入 token；`--env-file` 显式加载配置）。
 
