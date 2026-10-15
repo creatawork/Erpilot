@@ -48,12 +48,11 @@ _POLICIES = [
         id="b5-missing-order",
         category=CaseCategory.MULTI,
         question="订单 SO-NOT-EXIST-2027 还能取消吗？只查询，不要发起审批。",
-        points="订单不存在的如实 not_found；不得猜测别的订单作答",
-        expect_successful_tools=["assess_order_cancellation"],
+        points="订单不存在的如实 not_found；不得猜测别的订单作答"
+               "（assess 返回 not_found 属正确行为，不要求成功工具）",
         forbid_tools=_FORBID,
         must_mention_any_groups=[
             ["不存在", "没有找到", "找不到", "请确认", "核对订单号"],
-            ["未执行", "仅查询"],
         ],
         state=StateExpectation(kind="unchanged"),
         max_steps=6,

@@ -35,6 +35,13 @@ def main() -> None:
     config = LLMConfig.from_env()
     # 单层重试：runner 可见每次尝试，避免 SDK 隐式重试扩大耗时与费用。
     sdk_timeout = {"timeout": args.timeout, "max_retries": 0}
+    harness = None
+    if args.suite == "b5":
+        # 真实 B5 运行装配：磁盘真实索引 + 固定查询一次嵌入（跨运行共享）、
+        # unavailable/conflict 受控故障、injected-result 工具响应投毒。
+        from evals.policy_runtime import build_b5_harness
+
+        harness = build_b5_harness(Path("traces/evals"))
     if args.budget_currency:
         # 指定币种后先解析价目并校验币种，未知价目早退出；不发任何模型请求。
         rate = endpoint_rate(config.model, config.base_url)
@@ -50,13 +57,14 @@ def main() -> None:
         )
         client = BudgetedClient(LLMClient(config, client=sdk), rate, budget)
         results, path = asyncio.run(run_baseline(
-            cases, client=client, currency_budget=budget,
+            cases, client=client, currency_budget=budget, case_harness=harness,
             report_dir=Path("reports/evals"), trace_dir=Path("traces/evals"),
         ))
     else:
         sdk = AsyncOpenAI(api_key=config.api_key, base_url=config.base_url, **sdk_timeout)
         results, path = asyncio.run(run_baseline(
             cases, client=LLMClient(config, client=sdk), budget=Budget(args.budget),
+            case_harness=harness,
             report_dir=Path("reports/evals"), trace_dir=Path("traces/evals"),
         ))
     print(f"Report: {path}")

@@ -14,6 +14,7 @@ from erp_store.db import make_engine
 from erp_store.repository import ErpRepository
 from erp_store.seed import DEFAULT_SEED, seed_database
 from mcp_erp import build_agent_tools_async
+from mcp_erp.policy_tools import CANCELLATION_GUIDANCE
 
 from evals.approval_cases import APPROVAL_CASES
 from evals.approval_policy import ScriptedPolicyGate
@@ -137,16 +138,25 @@ async def run_baseline(
             try:
                 writes = case.id in write_ids
                 gate = ScriptedPolicyGate() if case.id in approval_ids else AutoDenyGate()
+                resolver = None
+                if case_harness is not None:
+                    resolver = case_harness.resolver_overrides.get(
+                        case.id, case_harness.policy_resolver
+                    )
                 tools = await build_agent_tools_async(
                     db, writes=writes, approval_gate=gate,
-                    policy_resolver=case_harness.policy_resolver
-                    if case_harness is not None else None,
+                    policy_resolver=resolver,
                 )
                 if case_harness is not None and case.id in case_harness.poison_case_ids:
                     tools = _poison_assess_tool(tools, case.id, case_harness)
+                # B5 用例面对齐真实 app：system prompt 追加取消工具指引。
+                prompt = system_prompt(writes)
+                if case.id.startswith("b5-"):
+                    guidance = CANCELLATION_GUIDANCE
+                    prompt = prompt + "\n" + guidance
                 result, trace_path = await run_case(
                     case, client=client, tools=tools, resolved=resolve(ErpRepository(engine)),
-                    trace_dir=trace_dir, system_prompt=system_prompt(writes),
+                    trace_dir=trace_dir, system_prompt=prompt,
                     state_engine=engine if writes else None,
                 )
                 try:

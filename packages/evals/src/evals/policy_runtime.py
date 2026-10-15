@@ -94,19 +94,66 @@ class FixedQueryEmbedder:
 
 @dataclass
 class B5Harness:
-    """b5 真实运行装配：政策 resolver + 嵌入计量 + 投毒 case 记录。"""
+    """b5 真实运行装配：政策 resolver + 嵌入计量 + 投毒 case 记录。
+
+    resolver_overrides 为受控故障注入（按 case 覆盖默认 resolver）：
+    b5-policy-unavailable 用直接抛错的 resolver，b5-policy-conflict 用
+    与 order.cancel 规则值冲突的离线 fixture 索引——两者都不消耗嵌入请求。
+    """
 
     policy_resolver: object
     embed_stats: dict = field(default_factory=dict)
     poison_case_ids: frozenset[str] = frozenset()
     poison_records: dict = field(default_factory=dict)
+    resolver_overrides: dict[str, object] = field(default_factory=dict)
+
+
+class _ScalarEmbedder:
+    """离线标量嵌入：冲突 fixture 索引构建用，不真实/embeddings 请求。"""
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        return [[1.0] for _ in texts]
+
+
+def _raising_resolver():
+    raise RuntimeError("受控故障注入：政策检索不可用（b5-policy-unavailable fixture）")
+
+
+def _conflicting_index_resolver():
+    """让 assess 判为 policy conflict 的离线 fixture：把规则值改成与领域不一致。"""
+    import copy
+
+    from rag.corpus import load_corpus
+    from rag.index import PolicyIndex
+
+    chunks = copy.deepcopy(load_corpus())
+    mutated = 0
+    for chunk in chunks:
+        metadata = chunk.metadata
+        rule = metadata.rules.get("order.cancel") if metadata else None
+        if rule is not None and rule.titles:
+            rule.values = [*rule.values, "已签收"]
+            mutated += 1
+    if mutated == 0:
+        raise RuntimeError("政策语料没有 order.cancel 规则，冲突 fixture 无法构造")
+    index = PolicyIndex.build(chunks, _ScalarEmbedder())
+    return index, _ScalarEmbedder()
+
+
+def policy_fixture_resolvers() -> dict[str, object]:
+    """按 case 的受控故障 resolver 覆盖（离线可测，零嵌入成本）。"""
+    return {
+        "b5-policy-unavailable": _raising_resolver,
+        "b5-policy-conflict": _conflicting_index_resolver,
+    }
 
 
 def build_b5_harness(cache_dir: Path | None = None) -> B5Harness:
     """为真实 B5 运行构建 harness：磁盘已有真实索引 + 固定查询向量限制。
 
     索引以磁盘上的已构建版本为准（不重建、不嵌入语料）；嵌入仅允许
-    CANCELLATION_QUERY 一次真实请求并跨运行共享。
+    CANCELLATION_QUERY 一次真实请求并跨运行共享。unavailable / conflict
+    两例按 fixture 注入受控故障（报告注明真实模型 + 受控工具故障）。
     """
     from mcp_erp.policy_tools import CANCELLATION_QUERY
     from rag.corpus import DEFAULT_INDEX_PATH, load_corpus
@@ -125,10 +172,12 @@ def build_b5_harness(cache_dir: Path | None = None) -> B5Harness:
         "tokens": 0,
         "query": CANCELLATION_QUERY,
         "note": "嵌入价格未确认：仅记录用量，成本标未知；不含 LLM 预算",
+        "fixture_embedding": "policy-conflict 使用离线标量嵌入，零真实请求",
     }
     embedder = FixedQueryEmbedder(inner, CANCELLATION_QUERY, stats, cache_dir=cache_dir)
     return B5Harness(
         policy_resolver=lambda: (index, embedder),
         embed_stats=stats,
         poison_case_ids=frozenset({"b5-injected-result"}),
+        resolver_overrides=policy_fixture_resolvers(),
     )
