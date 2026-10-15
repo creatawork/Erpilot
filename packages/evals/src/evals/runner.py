@@ -269,9 +269,10 @@ async def run_case(
             billing=_billing_of(client),
         )
         if case.id.startswith("b5-") and before is not None and state_engine is not None:
-            result.failed_checks.extend(
-                check_policy_result(case.id, result, before, snapshot(state_engine))
-            )
+            extra = check_policy_result(case.id, result, before, snapshot(state_engine))
+            if extra:
+                result.failed_checks.extend(extra)
+                result.passed = False  # b5-1 判分失败必须计入总判过
         return result, trace_path
 
     raise AssertionError("unreachable：重试循环必须 return 或 continue")
