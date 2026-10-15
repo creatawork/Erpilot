@@ -14,10 +14,12 @@ def test_policy_case_ids_and_boundaries() -> None:
         assert case.state is not None and case.state.kind == "unchanged"
         for tool in B5_WRITE_TOOLS:
             assert tool in case.forbid_tools, case.id
-        expected_tool = (
-            "list_orders" if case.id == "b5-ambiguous-order" else "assess_order_cancellation"
-        )
-        assert case.expect_successful_tools == [expected_tool]
+        expected_tools = {
+            "b5-ambiguous-order": ["list_orders"],
+            # missing-order 的正确结果是 assess 返回 not_found，不要求成功证据
+            "b5-missing-order": [],
+        }.get(case.id, ["assess_order_cancellation"])
+        assert case.expect_successful_tools == expected_tools
         assert case.max_steps == 6
 
 

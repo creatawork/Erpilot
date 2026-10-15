@@ -132,8 +132,12 @@ def _conflicting_index_resolver():
         metadata = chunk.metadata
         rule = metadata.rules.get("order.cancel") if metadata else None
         if rule is not None and rule.titles:
-            rule.values = [*rule.values, "已签收"]
+            # 同源 chunk 共享同一 metadata 实例：只换一次且保留唯一值集合，
+            # 重复追加会被 PolicyMetadata 的 unique 校验拒绝并降级 unavailable。
+            # set(values) != CANCELLABLE_STATUSES → assess 判为 conflict。
+            rule.values = ["待付款", "已签收"]
             mutated += 1
+            break
     if mutated == 0:
         raise RuntimeError("政策语料没有 order.cancel 规则，冲突 fixture 无法构造")
     index = PolicyIndex.build(chunks, _ScalarEmbedder())
