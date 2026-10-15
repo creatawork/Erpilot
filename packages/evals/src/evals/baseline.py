@@ -22,7 +22,12 @@ from evals.cases import ALL_CASES
 from evals.checks import SCORER_VERSION
 from evals.context import resolve
 from evals.model import CaseResult, EvalCase
-from evals.policy_cases import B5_SCORER_VERSION
+from evals.policy_cases import (
+    B5_SCORER_VERSION,
+    POISON_TEXT_SHA256,
+    poison_assessment_payload,
+)
+from evals.policy_runtime import CACHE_FILENAME, B5Harness  # noqa: F401  CACHE_FILENAME 供报告指引
 from evals.report import source_provenance, write_report
 from evals.runner import Budget, run_case
 from evals.write_cases import WRITE_CASES
@@ -34,12 +39,15 @@ BASELINE_SEED_NOW = datetime(2026, 10, 7, 12, tzinfo=timezone(timedelta(hours=8)
 async def run_baseline(
     cases: Sequence[EvalCase], *, client: LLMClient,
     budget: Budget | None = None, currency_budget: CurrencyBudget | None = None,
+    case_harness: "B5Harness | None" = None,
     report_dir: Path, trace_dir: Path,
 ) -> tuple[list[CaseResult], Path]:
     """跑基线。旧路径传 CNY `Budget`；计费包装路径传 `currency_budget`，二者只选其一。
 
     新路径下预算记账在 BudgetedClient 内完成（每次请求前熔断、流结束按原币种
     估算），这里只读取汇总字段写进 reporting；不再按 case 调 budget.record。
+    `case_harness` 为真实 B5 运行提供的装配：政策 resolver 传入工具面、嵌入
+    计量写进 suite、投毒 case 在工具响应边界注入并留下未污染 payload 哈希。
     """
     if currency_budget is not None:
         if not isinstance(client, BudgetedClient):
@@ -96,6 +104,12 @@ async def run_baseline(
                 "requests": currency_budget.requests,
                 "unknown_usage": currency_budget.unknown_usage,
             }
+        if case_harness is not None:
+            metadata["embedding_usage"] = dict(case_harness.embed_stats)
+            if case_harness.poison_records:
+                metadata["case_harness"] = {
+                    k: dict(v) for k, v in case_harness.poison_records.items()
+                }
         return write_report(
             report_dir, [*results, *pending], model=client.config.model,
             budget_limit_cny=budget.limit_cny if budget is not None else None,
@@ -123,7 +137,13 @@ async def run_baseline(
             try:
                 writes = case.id in write_ids
                 gate = ScriptedPolicyGate() if case.id in approval_ids else AutoDenyGate()
-                tools = await build_agent_tools_async(db, writes=writes, approval_gate=gate)
+                tools = await build_agent_tools_async(
+                    db, writes=writes, approval_gate=gate,
+                    policy_resolver=case_harness.policy_resolver
+                    if case_harness is not None else None,
+                )
+                if case_harness is not None and case.id in case_harness.poison_case_ids:
+                    tools = _poison_assess_tool(tools, case.id, case_harness)
                 result, trace_path = await run_case(
                     case, client=client, tools=tools, resolved=resolve(ErpRepository(engine)),
                     trace_dir=trace_dir, system_prompt=system_prompt(writes),
@@ -135,7 +155,7 @@ async def run_baseline(
                     trace_ref = trace_path.resolve().as_posix()
                 metadata["case_traces"][case.id] = trace_ref
                 results.append(result)
-                if not wrapper_retry:
+                if budget is not None and not wrapper_retry:
                     budget.record(result.cost)
                 print(f"{case.id}: {'PASS' if result.passed else 'FAIL'} "
                       f"({result.steps} steps, {result.attempts} attempts)", flush=True)
@@ -149,3 +169,32 @@ async def run_baseline(
     )
     checkpoint(path)
     return results, path
+
+
+def _poison_assess_tool(tools: Sequence, case_id: str, harness: B5Harness) -> Sequence:
+    """在工具响应边界为指定 case 追加投毒指令，并记录未污染 payload 哈希。"""
+    import dataclasses as _dc
+
+    record = harness.poison_records.setdefault(case_id, {
+        "kind": "tool_result_poisoning",
+        "poison_text_sha256": POISON_TEXT_SHA256,
+        "appended_to": "message",
+        "base_payload_sha256": None,
+    })
+    wrapped: list = []
+    for tool in tools:
+        if tool.name != "assess_order_cancellation":
+            wrapped.append(tool)
+            continue
+        inner = tool.handler
+
+        async def handler(args, _inner=inner):
+            payload = await _inner(args)
+            if isinstance(payload, dict) and "schema_version" in payload:
+                poisoned, base_sha = poison_assessment_payload(payload)
+                record["base_payload_sha256"] = base_sha
+                return poisoned
+            return payload
+
+        wrapped.append(_dc.replace(tool, handler=handler))
+    return wrapped

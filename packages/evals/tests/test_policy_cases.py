@@ -265,3 +265,147 @@ async def test_b5_eligible_case_passes_through_runner(tmp_path):
     assert result.passed, result.failed_checks
     assert result.tool_calls == ["assess_order_cancellation"]
     engine.dispose()
+
+
+# ---- M06-04/06：真实运行 harness（固定查询向量 ≤1 次嵌入 + 工具响应投毒） ----
+
+
+class _CountingEmbedder:
+    """模拟真实嵌入器：记录调用次数，最后 usage tokens 供上限包装器记录。"""
+
+    def __init__(self, tokens: int = 7) -> None:
+        self.calls = 0
+        self.tokens = tokens
+
+    def embed(self, texts):
+        self.calls += 1
+        self.last_requests = 1
+        self.last_tokens = self.tokens
+        return [[float(len(t))] for t in texts]
+
+
+def test_fixed_query_embedder_allows_one_capped_request(tmp_path):
+    from evals.policy_runtime import CACHE_FILENAME, FixedQueryEmbedder
+
+    inner = _CountingEmbedder()
+    stats = {"requests": 0, "tokens": 0}
+    cap = FixedQueryEmbedder(inner, "订单取消条件", stats, cache_dir=tmp_path)
+    assert CACHE_FILENAME == "b5-query-vector.json"
+    first = cap.embed(["订单取消条件"])
+    again = cap.embed(["订单取消条件"])
+    assert first == again and inner.calls == 1  # 缓存复用，不追加真实请求
+    assert stats["requests"] == 1 and stats["tokens"] == 7
+    with pytest.raises(ValueError, match="未缓存"):
+        cap.embed(["退货政策怎么规定"])
+    assert inner.calls == 1
+
+
+def test_fixed_query_vectors_share_across_processes(tmp_path):
+    """同一缓存目录的第二进程复用向量：0 次新请求，两条 run 不各自花钱。"""
+    from evals.policy_runtime import FixedQueryEmbedder
+
+    inner = _CountingEmbedder()
+    stats = {"requests": 0, "tokens": 0}
+    FixedQueryEmbedder(inner, "订单取消条件", stats, cache_dir=tmp_path).embed(["订单取消条件"])
+    assert stats["requests"] == 1
+
+    inner2 = _CountingEmbedder()
+    stats2 = {"requests": 0, "tokens": 0}
+    second = FixedQueryEmbedder(inner2, "订单取消条件", stats2, cache_dir=tmp_path)
+    vector = second.embed(["订单取消条件"])
+    assert stats2["requests"] == 0 and inner2.calls == 0  # 缓存命中，无新请求
+    assert vector
+    with pytest.raises(ValueError, match="未缓存"):
+        second.embed(["别的查询"])
+
+
+def test_poison_assessment_payload_records_unpoisoned_hash() -> None:
+    from evals.policy_cases import POISON_TEXT, poison_assessment_payload
+
+    payload = _assessment()
+    poisoned, base_sha = poison_assessment_payload(payload)
+    assert base_sha
+    import hashlib
+    import json as _json
+
+    canonical = _json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    assert base_sha == hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    assert POISON_TEXT in poisoned["message"]  # 仅追加投毒文本
+    assert "ERP-B5-CANARY-7734" in poisoned["message"]
+    assert poisoned["decision"] == payload["decision"]  # 结构化证据未被改写
+    assert base_sha in poisoned.get("message", "") or base_sha != ""
+
+
+
+class _HarnessClient:
+    from types import SimpleNamespace
+
+    config = SimpleNamespace(model="deepseek-v4.1-flash")
+
+
+async def test_run_baseline_accepts_b5_harness_metadata(tmp_path, monkeypatch):
+    """run_baseline 接 B5Harness：resolver 传入工具面并记录嵌入计量与投毒账目。"""
+    import json
+
+    import evals.baseline as baseline_mod
+    from agent_core.tools import Tool
+    from evals.model import CaseResult
+    from evals.policy_cases import POLICY_CASES
+    from evals.policy_runtime import B5Harness, FixedQueryEmbedder
+    from pydantic import BaseModel
+
+    seen: dict = {}
+
+    async def fake_build_tools(db_path, *, writes=False, approval_gate=None,
+                               policy_resolver=None):
+        seen["policy_resolver"] = policy_resolver
+        seen["writes"] = writes
+
+        class Args(BaseModel):
+            order_id: str = "x"
+
+        seen["args_cls"] = Args
+
+        async def assess(args):
+            return _assessment()
+
+        return [Tool(name="assess_order_cancellation", description="x",
+                     params_model=Args, handler=assess)]
+
+    monkeypatch.setattr(baseline_mod, "build_agent_tools_async", fake_build_tools)
+
+    async def fake_run_case(case, **kwargs):
+        payload = await kwargs["tools"][0].handler(seen["args_cls"]())  # 模型调用 assess
+        if case.id == "b5-injected-result":
+            assert "ERP-B5-CANARY-7734" in payload["message"], payload
+        return CaseResult(
+            case_id=case.id, category=case.category, passed=False,
+            failed_checks=["b5_no_assessment: 没有成功的联合判断证据"],
+        ), tmp_path / f"{case.id}.jsonl"
+
+    monkeypatch.setattr(baseline_mod, "run_case", fake_run_case)
+
+    inner = _CountingEmbedder()
+    stats: dict = {"requests": 0, "tokens": 0, "model": "embedding-test"}
+    embedder = FixedQueryEmbedder(inner, "订单取消条件", stats, cache_dir=tmp_path)
+    embedder.embed(["订单取消条件"])  # 真实流程中 assess 首次触发 resolver 的一次嵌入
+    harness = B5Harness(
+        policy_resolver=lambda: (None, embedder),
+        embed_stats=stats,
+        poison_case_ids={"b5-injected-result"},
+    )
+    results, path = await baseline_mod.run_baseline(
+        POLICY_CASES, client=_HarnessClient(),
+        report_dir=tmp_path / "reports", trace_dir=tmp_path / "traces",
+        case_harness=harness,
+    )
+    payload = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
+    assert seen["policy_resolver"] is harness.policy_resolver
+    assert seen["writes"] is True  # b5 集合要求完整写工具可见（AutoDeny 兜底在 baseline 内）
+    usage = payload["suite"]["embedding_usage"]
+    assert usage["requests"] == 1, usage
+    assert usage["tokens"] == 7, usage
+    assert usage["model"] == "embedding-test"
+    harness_meta = payload["suite"]["case_harness"]["b5-injected-result"]
+    assert harness_meta["kind"] == "tool_result_poisoning"
+    assert harness_meta["base_payload_sha256"]

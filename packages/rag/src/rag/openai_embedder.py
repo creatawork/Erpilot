@@ -48,12 +48,25 @@ class OpenAIEmbedder:
         return self._config
 
     def embed(self, texts: list[str]) -> list[list[float]]:
+        """把文本批量转向量；本次调用的请求数与 usage tokens 记到 last_* 属性。
+
+        嵌入价格未在仓库价目表确认：tokens 如实记录，成本留给调用方标注未知。
+        """
+        self.last_requests = 0
+        self.last_tokens: int | None = 0
         if not texts:
             return []
         vectors: list[list[float]] = []
         for start in range(0, len(texts), EMBED_BATCH_SIZE):
             batch = texts[start : start + EMBED_BATCH_SIZE]
             response = self._client.embeddings.create(model=self._config.model, input=batch)
+            self.last_requests += 1
+            usage = getattr(response, "usage", None)
+            total = getattr(usage, "total_tokens", None) if usage is not None else None
+            if total is None:
+                self.last_tokens = None
+            elif self.last_tokens is not None:
+                self.last_tokens += int(total)
             # 每个响应的 index 从 0 开始；先在批次内排序再按批次拼接。
             items = sorted(response.data, key=lambda d: d.index)
             vectors.extend(list(item.embedding) for item in items)
