@@ -107,6 +107,9 @@ async def run_baseline(
             }
         if case_harness is not None:
             metadata["embedding_usage"] = dict(case_harness.embed_stats)
+            if case_harness.policy_corpus_sha256:
+                metadata["policy_corpus_sha256"] = case_harness.policy_corpus_sha256
+                metadata["policy_index_sha256"] = case_harness.policy_index_sha256
             if case_harness.poison_records:
                 metadata["case_harness"] = {
                     k: dict(v) for k, v in case_harness.poison_records.items()

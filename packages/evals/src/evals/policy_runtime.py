@@ -106,6 +106,8 @@ class B5Harness:
     poison_case_ids: frozenset[str] = frozenset()
     poison_records: dict = field(default_factory=dict)
     resolver_overrides: dict[str, object] = field(default_factory=dict)
+    policy_corpus_sha256: str = ""
+    policy_index_sha256: str = ""
 
 
 class _ScalarEmbedder:
@@ -179,9 +181,17 @@ def build_b5_harness(cache_dir: Path | None = None) -> B5Harness:
         "fixture_embedding": "policy-conflict 使用离线标量嵌入，零真实请求",
     }
     embedder = FixedQueryEmbedder(inner, CANCELLATION_QUERY, stats, cache_dir=cache_dir)
+    corpus_sha = hashlib.sha256(
+        "\n".join(c.model_dump_json() for c in load_corpus()).encode("utf-8")
+    ).hexdigest()
+    index_sha = hashlib.sha256(DEFAULT_INDEX_PATH.read_bytes()).hexdigest()
+    stats["policy_corpus_sha256"] = corpus_sha
+    stats["policy_index_sha256"] = index_sha
     return B5Harness(
         policy_resolver=lambda: (index, embedder),
         embed_stats=stats,
         poison_case_ids=frozenset({"b5-injected-result"}),
         resolver_overrides=policy_fixture_resolvers(),
+        policy_corpus_sha256=corpus_sha,
+        policy_index_sha256=index_sha,
     )
