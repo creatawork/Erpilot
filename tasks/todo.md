@@ -1,15 +1,15 @@
-# 当前阶段：功能深化 B5 · 政策与订单事实联合判断（工程验收完成，真实模型待测）
+# 当前阶段：功能深化 B5 · 政策与订单事实联合判断（工程收口完成；M06 离线计费已实施，真实模型待测）
 
-2026-10-12：用户授权当前会话实现 B5。政策元数据、有效检索、只读联合判断、展示卡和恢复链路已实现；Python 636 项、前端 77 项、浏览器 12 项及构建通过，见 [B5 工程验收](../reports/acceptance/2026-10-12-policy-business-decision.md)。独立审阅正在收口；真实模型与 M06 计费 / 对照支线未运行。工作台整体改版仍有既有未提交文件，远端 CI 未验证。
+2026-10-14：B5 主线与工作台改版已整体审阅并分组提交（注入复判证据 175041d、工作台+CI 920b535、B5/M06 文档 9702fc9）；远端 Linux CI 首次验证通过——PR #1（run 38541418391，head 9702fc9）lint-test / frontend（含 Chromium 安装与 12 项浏览器回归）/ evals（真实评测按既定规则跳过）三个 job 全绿。M06 支线离线部分（M06-01～05）已 TDD 实施并全仓回归通过；真实模型运行（M06-06、B4 多轮指代）仍待执行，不勾选任何真实基线。工作台改版记录见[工作台验证](../reports/acceptance/2026-10-12-workspace-verification.md)。
 
 - [x] 核对当前工作台协议 / 组件测试、生产构建及浏览器回归；保留首轮浏览器缺失与指定本机 Chromium 后通过的记录。
 - [x] CI 增加匹配版本 Chromium 安装、浏览器测试及失败证据上传入口。
-- [ ] 验证远端 CI，并完成当前工作台改版的整体审阅与独立提交。
+- [x] 验证远端 CI，并完成当前工作台改版的整体审阅与独立提交（PR #1 run 38541418391 全绿；本地全量 pytest / ruff / npm test / build / test:ui 复核通过；仓库根目录的误造空文件 `console.log(Object.keys(m)))` 已删除）。
 - [x] 用户确认按 B5 书面规格继续制定实施计划。
 - [x] 形成独立计划与下列小任务；不将规划完成标为功能完成。
 - [x] 用户授权按 B5 主线计划在当前会话逐项实施；M06 支线独立待办。
 - [ ] 补 B4 真实模型多轮指代与澄清评测；确定性与模型结果分开统计。
-- [ ] 补当前端点 DeepSeek 美元计量与预算契约，再执行 GLM / DeepSeek 对照。
+- [x] 补当前端点 DeepSeek 美元计量与预算契约（M06-01～05 离线实施完成）；GLM / DeepSeek 真实对照执行仍待运行（见 M06-06）。
 
 ## B5 工程主线
 
@@ -33,13 +33,13 @@
 
 详见[支线计划](../docs/superpowers/plans/2026-10-12-model-comparison.md)。B4 真实多轮指代仍是独立待办，不用 B5 单轮试跑替代。
 
-- [ ] M06-01：按当前端点以 Decimal 保存原币种价目；USD 不冒充 CNY，缓存计量未知时保守估算。验证 billing / prices 单测。
-- [ ] M06-02：每次模型请求前的预算检查、usage 缺失熔断与 CaseResult.billing 增量。验证 billing / runner HTTP mock。
-- [ ] M06-03：CLI、基线与报告明确预算币种；保留旧 cost 的人民币契约。验证 baseline / report 回归。
-- [ ] C-M1：价目、币种、预算、失败计量与重试策略离线通过，普通 pytest 不调用真实模型。
-- [ ] M06-04：7 项 B5 模型用例与结构化证据 / 全表状态检查，单列 b5-1 检查，不修改旧 scorer。
-- [ ] M06-05：strict 对照校验源码、案例、scorer、seed、重试及政策指纹；不同币种不混算。
-- [ ] M06-06：GLM / DeepSeek 各留 B5 试跑与现有完整 baseline 报告，失败如实保留；完整基线未完成时不勾选 M04。
+- [x] M06-01：按当前端点以 Decimal 保存原币种价目；USD 不冒充 CNY，缓存计量未知时保守估算（`evals/billing.py`：EndpointRate / BillingEstimate / quote_usage，未知端点拒绝计费路径）。提交 8ce0800。
+- [x] M06-02：每次模型请求前的预算检查、usage 缺失熔断与 CaseResult.billing 增量（CurrencyBudget + BudgetedClient；请求计数含失败，unknown_usage 让下次请求不发 HTTP）。提交 8ce0800。
+- [x] M06-03：CLI、基线与报告明确预算币种；保留旧 cost 的人民币契约（`--budget-currency CNY|USD`、suite.billing_budget / retry_policy、报告 ¥/$ 分列与"未计量"口径）。提交 ba0f67b。
+- [x] C-M1：价目、币种、预算、失败计量与重试策略离线通过，普通 pytest 不调用真实模型（全仓 pytest 复跑通过；预算/未知计量/流中断均有 mock 证据；`.env` 与默认模型未改动）。随 ba0f67b 等记录。
+- [x] M06-04：7 项 B5 模型用例与结构化证据 / 全表状态检查，单列 b5-1 检查，不修改旧 scorer（`evals/policy_cases.py` + run_case 接线 + `--suite b5`；写面黑名单含全量 prepare/revise 工具，AutoDeny 兜底）。提交 d6de69e。
+- [x] M06-05：strict 对照校验源码、案例、scorer、seed、重试及政策指纹；不同币种不混算（`evals.compare --strict`：恰好两份原始报告，缺指纹/部分报告/币种差异 / 旧报告无 billing 全部拒绝并置非零退出；对照表币种各自列示）。提交 9e79d6b。
+- [ ] M06-06：GLM / DeepSeek 各留 B5 试跑与现有完整 baseline 报告，失败如实保留；完整基线未完成时不勾选 M04。（命令就绪：`uv run python -m evals --suite b5 --budget 0.10 --budget-currency CNY|USD --timeout 30`；真实运行消耗 token，须先确认预算与 key。）
 
 ## 已完成阶段：B4 · 多轮草稿任务与历史会话
 
