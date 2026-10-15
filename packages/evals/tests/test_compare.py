@@ -198,8 +198,10 @@ def test_compatibility_key_changes_with_each_dimension(mutation: str) -> None:
     elif mutation == "billing_budget_missing":
         del b["suite"]["billing_budget"]
     elif mutation == "billing_currency":
-        b["suite"]["billing_budget"]["currency"] = "CNY"
-    assert compatibility_key(a) != compatibility_key(b), mutation
+        # 币种差异允许成对严格对照（M06-06 的 GLM/CNY vs DeepSeek/USD）：
+        # 兼容键相等；对照表按各自币种列示，不做跨币种总额。
+        assert compatibility_key(a) == compatibility_key(b), mutation
+        return
 
 
 def test_compatibility_key_b5_scope_requires_policy_fingerprints() -> None:

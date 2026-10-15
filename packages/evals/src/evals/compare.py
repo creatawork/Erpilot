@@ -144,11 +144,10 @@ def compatibility_key(report: dict) -> str:
                 raise ValueError(f"严格对照需要 B5 指纹 {name}，报告缺失该字段")
             parts.append(f"{section}.{name}={suite[name]}")
     budget = report.get("suite", {}).get("billing_budget")
-    parts.append(
-        f"billing.currency={budget['currency']}"
-        if isinstance(budget, dict) and budget.get("currency")
-        else "billing.currency=none"
-    )
+    if isinstance(budget, dict) and budget.get("currency"):
+        parts.append("billing_recorded")
+    else:
+        parts.append("billing_recorded=none")
     return " | ".join(parts)
 
 
